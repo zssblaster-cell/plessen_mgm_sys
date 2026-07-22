@@ -525,7 +525,7 @@ async function removeUserFromSystem(systemKey, userEmail) {
 // ═══════════════════════════════════════════════════════════════════════════
 onAuthStateChanged(auth, async (fbUser) => {
   if (!fbUser) { showLogin(); return; }
-
+  sessionEmail = fbUser.email;
   // Load user profile from Firestore
   const snap = await getDoc(doc(db, "users", fbUser.uid));
 
@@ -890,6 +890,11 @@ async function saveUser() {
     await setDoc(doc(db, "users", fbUid), profile, { merge:true });
 
     // Sync to sub-projects
+    if (!sessionPass) {
+      const entered = window.prompt("Enter your admin password to sync this user to other systems:");
+      if (!entered) { btn.textContent=uid?"Save Changes":"Create User"; btn.disabled=false; return; }
+      sessionPass = entered;
+    }
     const syncResults = {};
     const syncDiv = document.getElementById("syncStatusDiv");
     syncDiv.innerHTML = "<span style='color:#64748b;font-size:12px'>Syncing to systems...</span>";
