@@ -1,1 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Equipment Management · Plessen</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Syne',sans-serif;background:#0d0d1a;color:#e2e8f0;min-height:100vh}
+    :root{
+      --ind:#6366f1;--ind-lt:#6366f133;--ind-pale:#2e2060;
+      --bg:#0d0d1a;--surface:#13132a;--border:#1e2035;
+      --navy:#0f172a;--slate:#475569;--slate-lt:#94a3b8;
+      --green:#22c55e;--amber:#eab308;--red:#ef4444;
+      --shadow:0 1px 3px rgba(0,0,0,.3);
+      --shadow-lg:0 8px 32px rgba(0,0,0,.5);
+    }
+    .hidden{display:none!important}
+    /* ── Login ── */
+    #loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:radial-gradient(ellipse 70% 60% at 50% 0%,rgba(99,102,241,.15) 0%,transparent 65%),#0d0d1a}
+    .login-box{margin:auto;background:#13132a;border:1px solid #1e2035;border-radius:16px;
+      padding:40px 44px;width:100%;max-width:400px;box-shadow:0 20px 60px #00000088}
+    .login-brand{display:flex;align-items:center;gap:10px;margin-bottom:32px}
+    .login-mark{width:36px;height:36px;background:#6366f1;border-radius:9px;
+      display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px #6366f155}
+    .login-title{font-size:18px;font-weight:800;color:#e2e8f0}
+    .login-title span{color:#6366f1}
+    .login-sub{font-size:14px;color:#4a4a7a;margin-bottom:28px}
+    .l-label{display:block;font-size:11px;font-weight:700;color:#4a4a7a;margin-bottom:5px;
+      text-transform:uppercase;letter-spacing:.5px}
+    .l-input{width:100%;padding:11px 14px;background:#0a0a1a;border:1.5px solid #1e2035;
+      border-radius:9px;font-family:'Syne',sans-serif;font-size:14px;color:#e2e8f0;
+      outline:none;transition:border .15s;margin-bottom:14px}
+    .l-input:focus{border-color:#6366f1;box-shadow:0 0 0 3px #6366f122}
+    .l-btn{width:100%;padding:12px;background:#6366f1;color:#fff;border:none;
+      border-radius:9px;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;
+      cursor:pointer;transition:background .15s;margin-top:4px}
+    .l-btn:hover{background:#4f46e5}.l-btn:disabled{opacity:.6;cursor:not-allowed}
+    .l-err{background:#7f1d1d22;border:1px solid #7f1d1d55;border-radius:8px;
+      padding:10px 14px;font-size:13px;font-weight:600;color:#fca5a5;margin-bottom:14px}
+    .l-back{display:block;text-align:center;margin-top:18px;font-size:12px;color:#4a4a7a;
+      text-decoration:none}
+    .l-back:hover{color:#a5b4fc}
+    /* ── App shell ── */
+    #appScreen{background:#0d0d1a;min-height:100vh}
+    .topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;
+      justify-content:space-between;padding:0 24px;height:60px;background:#13132a;
+      border-bottom:1px solid #1e2035}
+    .brand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;
+      color:#e2e8f0;cursor:pointer;text-decoration:none}
+    .brand-mark{width:30px;height:30px;background:#6366f1;border-radius:8px;
+      display:flex;align-items:center;justify-content:center}
+    .brand span{color:#6366f1}
+    .topbar-center{display:flex;gap:3px;background:#0d0d1a;border-radius:9px;padding:3px}
+    .nav-btn{padding:6px 14px;border-radius:7px;border:none;background:transparent;
+      color:#64748b;font-family:'Syne',sans-serif;font-size:13px;font-weight:600;
+      cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px}
+    .nav-btn.on{background:#13132a;color:#e2e8f0;box-shadow:var(--shadow)}
+    .nav-btn .badge{min-width:17px;height:17px;padding:0 4px;border-radius:9px;
+      font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+    .topbar-right{display:flex;gap:8px;align-items:center}
+    /* ── Buttons ── */
+    .btn{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;
+      border-radius:8px;border:none;cursor:pointer;font-family:'Syne',sans-serif;
+      font-weight:700;font-size:13px;transition:all .15s}
+    .btn-primary{background:#6366f1;color:#fff}.btn-primary:hover{background:#4f46e5}
+    .btn-ghost{background:transparent;color:#94a3b8;border:1px solid #1e2035}.btn-ghost:hover{background:#1e2035;color:#e2e8f0}
+    .btn-warn{background:#78350f;color:#fcd34d;border:none}.btn-warn:hover{background:#92400e}
+    .btn-danger{background:#7f1d1d22;color:#fca5a5;border:1px solid #7f1d1d44}.btn-danger:hover{background:#7f1d1d55}
+    .btn-success{background:#14532d22;color:#86efac;border:1px solid #14532d55}.btn-success:hover{background:#14532d55}
+    .btn-sm{padding:5px 10px;font-size:12px}.btn-xs{padding:3px 7px;font-size:11px;border-radius:6px}
+    /* ── Gear ── */
+    .gear-wrap{position:relative}
+    .gear-btn{width:34px;height:34px;border-radius:8px;border:1px solid #1e2035;
+      background:transparent;color:#94a3b8;cursor:pointer;display:flex;
+      align-items:center;justify-content:center;transition:all .15s}
+    .gear-btn:hover,.gear-btn.open{background:#1e2035;color:#e2e8f0}
+    .gear-menu{position:absolute;top:calc(100% + 8px);right:0;background:#13132a;
+      border:1px solid #1e2035;border-radius:10px;padding:8px;min-width:210px;
+      box-shadow:var(--shadow-lg);z-index:300;animation:menuIn .15s ease}
+    @keyframes menuIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+    .gear-section-lbl{font-size:10px;font-weight:700;text-transform:uppercase;
+      letter-spacing:.8px;color:#4a4a7a;padding:4px 8px 5px}
+    .gear-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;
+      border-radius:6px;border:none;background:transparent;font-family:'Syne',sans-serif;
+      font-size:13px;font-weight:600;color:#94a3b8;cursor:pointer;transition:all .12s;text-align:left}
+    .gear-item:hover{background:#1e2035;color:#e2e8f0}
+    .gear-div{height:1px;background:#1e2035;margin:5px 0}
+    /* ── Content ── */
+    .page{padding:24px;max-width:1200px;margin:0 auto}
+    .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+    .search-inp{flex:1;min-width:180px;padding:9px 14px;background:#13132a;
+      border:1px solid #1e2035;border-radius:8px;color:#e2e8f0;font-family:'Syne',sans-serif;
+      font-size:13px;outline:none}
+    .search-inp:focus{border-color:#6366f1}
+    .filter-btn{padding:6px 11px;border-radius:7px;border:1px solid #1e2035;
+      background:transparent;color:#64748b;font-family:'Syne',sans-serif;font-size:12px;
+      font-weight:600;cursor:pointer;transition:all .15s}
+    .filter-btn.on{background:#2e2060;color:#a5b4fc;border-color:#6366f144}
+    /* ── Equipment cards ── */
+    .type-header{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
+      color:#a5b4fc;padding:8px 0 6px;margin-top:14px;border-bottom:1px solid #2e2060;
+      margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+    .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:8px}
+    .eq-card{background:#13132a;border:1px solid #1e2035;border-radius:12px;
+      overflow:hidden;transition:all .2s;cursor:pointer}
+    .eq-card:hover{border-color:#6366f155;transform:translateY(-2px);box-shadow:0 8px 24px #00000066}
+    .card-head{display:flex;align-items:center;justify-content:space-between;
+      padding:8px 12px 0}
+    .card-img{height:100px;display:flex;align-items:center;justify-content:center;
+      background:linear-gradient(135deg,#0a0a1a,#080c14);border-bottom:1px solid #1e2035;
+      color:#6366f1;position:relative}
+    .card-body{padding:12px}
+    .card-name{font-size:13px;font-weight:700;margin-bottom:1px}
+    .card-sub{font-size:10px;color:#4a4a7a;font-family:'DM Mono',monospace;margin-bottom:6px}
+    /* ── Status ── */
+    .status-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+      border-radius:20px;font-size:11px;font-weight:700}
+    .s-active{background:#22c55e22;color:#22c55e}
+    .s-needs_service{background:#eab30822;color:#eab308}
+    .s-not_working{background:#ef444422;color:#ef4444}
+    .ind-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+    /* ── Section (detail) ── */
+    .sec{background:#13132a;border:1px solid #1e2035;border-radius:12px;
+      padding:20px;margin-bottom:16px}
+    .sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
+      color:#4a4a7a;margin-bottom:14px}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .info-label{font-size:11px;color:#4a4a7a;font-weight:600;margin-bottom:3px}
+    .info-val{font-size:13px;color:#e2e8f0;font-family:'DM Mono',monospace}
+    /* ── Forms ── */
+    .fi{width:100%;background:#0a0a1a;border:1px solid #1e2035;border-radius:7px;
+      padding:8px 11px;color:#e2e8f0;font-family:'Syne',sans-serif;font-size:13px;outline:none}
+    .fi:focus{border-color:#6366f1}
+    .fs{width:100%;background:#0a0a1a;border:1px solid #1e2035;border-radius:7px;
+      padding:8px 11px;color:#e2e8f0;font-family:'Syne',sans-serif;font-size:13px;outline:none}
+    .fta{width:100%;background:#0a0a1a;border:1px solid #1e2035;border-radius:7px;
+      padding:8px 11px;color:#e2e8f0;font-family:'Syne',sans-serif;font-size:13px;
+      outline:none;resize:vertical;min-height:70px}
+    .ei{width:100%;background:#0d0d22;border:1px solid #6366f155;border-radius:6px;
+      padding:7px 10px;color:#e2e8f0;font-family:'DM Mono',monospace;font-size:13px;outline:none}
+    .ei:focus{border-color:#6366f1;box-shadow:0 0 0 2px #6366f122}
+    .es{width:100%;background:#0d0d22;border:1px solid #6366f155;border-radius:6px;
+      padding:7px 10px;color:#e2e8f0;font-family:'Syne',sans-serif;font-size:13px;outline:none}
+    .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .fl{font-size:11px;color:#a5b4fc;font-weight:600;display:block;margin-bottom:4px}
+    .edit-banner{background:#2e2060;border:1px solid #6366f144;border-radius:9px;
+      padding:9px 14px;display:flex;align-items:center;justify-content:space-between;
+      margin-bottom:16px;font-size:13px;color:#a5b4fc;font-weight:600}
+    /* ── Modals ── */
+    .mo{position:fixed;inset:0;background:#00000099;z-index:200;display:flex;
+      align-items:center;justify-content:center;padding:20px;animation:fadeIn .15s}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .md{background:#13132a;border:1px solid #1e2035;border-radius:14px;padding:24px;
+      width:100%;max-width:500px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);
+      animation:slideUp .18s cubic-bezier(.22,1,.36,1)}
+    @keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    .md-title{font-size:15px;font-weight:700;color:#e2e8f0;margin-bottom:4px}
+    .md-sub{font-size:13px;color:#64748b;margin-bottom:18px}
+    .md-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;
+      padding-top:14px;border-top:1px solid #1e2035}
+    .err-txt{color:#fca5a5;font-size:12px;font-weight:600;margin-top:5px}
+    /* ── Report card ── */
+    .rpt-card{background:#0a0a1a;border:1px solid #1e2035;border-radius:10px;
+      padding:14px;margin-bottom:10px;transition:border .2s}
+    .rpt-card:hover{border-color:#6366f133}
+    .rpt-card.active{border-color:#6366f133}
+    .pbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;
+      text-transform:uppercase;letter-spacing:.5px}
+    .p-high{background:#ef444422;color:#ef4444}
+    .p-medium{background:#eab30822;color:#eab308}
+    .p-low{background:#22c55e22;color:#22c55e}
+    /* ── Toggle ── */
+    .toggle-wrap{position:relative;width:38px;height:21px;display:inline-block;flex-shrink:0}
+    .toggle-wrap input{opacity:0;width:0;height:0}
+    .toggle-track{position:absolute;cursor:pointer;inset:0;background:#1e2035;border-radius:21px;transition:.3s}
+    .toggle-track::before{content:'';position:absolute;height:15px;width:15px;left:3px;bottom:3px;
+      background:#4a4a7a;border-radius:50%;transition:.3s}
+    input:checked+.toggle-track{background:#6366f1}
+    input:checked+.toggle-track::before{transform:translateX(17px);background:#fff}
+    /* ── Repair tracking ── */
+    .repair-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+    .repair-field label{font-size:10px;color:#4a4a7a;font-weight:600;display:block;margin-bottom:3px}
+    .ri{background:#13132a;border:1px solid #1e2035;border-radius:6px;
+      padding:6px 10px;color:#e2e8f0;font-size:12px;font-family:'Syne',sans-serif;
+      width:100%;outline:none}
+    .ri:focus{border-color:#6366f1}
+    /* ── Log ── */
+    .log-entry{font-size:11px;color:#64748b;padding:5px 10px;
+      border-left:2px solid #2e2060;margin-bottom:4px;background:#0a0a1a;
+      border-radius:0 5px 5px 0}
+    select option{background:#13132a}
+    .pulsing{animation:pulse 1s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+    .divider{height:1px;background:#1e2035;margin:14px 0}
+    .chip{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700}
+  </style>
+</head>
+<body>
 
+<!-- ══ LOGIN ══════════════════════════════════════════════════════════ -->
+<div id="loginScreen">
+  <div class="login-box">
+      <div class="login-brand">
+        <div class="login-mark">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="login-title">Plessen <span>Equipment</span></div>
+      </div>
+      <div class="login-sub">Sign in to access Equipment Management</div>
+      <div id="loginErr" class="l-err hidden"></div>
+      <label class="l-label">Email</label>
+      <input type="email" id="loginEmail" class="l-input" placeholder="Enter email">
+      <label class="l-label">Password</label>
+      <input type="password" id="loginPass" class="l-input" placeholder="Enter password">
+      <button class="l-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
+      <a href="../portal/index.html" class="l-back">← Return to Portal</a>
+  </div>
+</div>
+
+<!-- ══ APP ════════════════════════════════════════════════════════════ -->
+<div id="appScreen" class="hidden">
+  <header class="topbar">
+    <a href="../portal/index.html" class="brand" style="text-decoration:none">
+      <div class="brand-mark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </div>
+      Plessen <span>Equipment</span>
+    </a>
+    <div class="topbar-center" id="topbarNav">
+      <button class="nav-btn on" id="navDash" onclick="setView('dashboard')">Dashboard</button>
+      <button class="nav-btn" id="navReports" onclick="setView('reports')">
+        Service Reports <span class="badge hidden" id="reportsBadge" style="background:#6366f1;color:#fff"></span>
+      </button>
+    </div>
+    <div class="topbar-right" id="topbarRight">
+      <div id="detailActions" class="hidden" style="display:flex;gap:6px"></div>
+      <button id="addEqBtn" class="btn btn-primary btn-sm" onclick="setView('addEquipment')">+ Add Equipment</button>
+      <div class="gear-wrap" id="gearWrap">
+        <button class="gear-btn" id="gearBtn" onclick="toggleGear()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <div class="gear-menu hidden" id="gearMenu">
+          <div class="gear-section-lbl">Networking</div>
+          <button class="gear-item" id="pingAllBtn" onclick="pingAll()">
+            <span id="pingDot" style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>
+            Ping All Devices
+          </button>
+          <div class="gear-div"></div>
+          <div class="gear-section-lbl">Data Management</div>
+          <button class="gear-item" onclick="openExportModal()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export Data
+          </button>
+          <div class="gear-div"></div>
+          <button class="gear-item" onclick="doSignOut()" style="color:#fca5a5">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+  <div id="mainContent"></div>
+</div>
+
+<!-- ══ MODAL: ADD REPORT ═══════════════════════════════════════════════ -->
+<div class="mo hidden" id="addReportModal" onclick="if(event.target===this)closeAddReport()">
+  <div class="md">
+    <div class="md-title">New Service Report</div>
+    <div class="md-sub" id="addReportSubtitle">Equipment</div>
+    <div id="addReportErr" class="err-txt hidden"></div>
+    <div style="margin-bottom:12px"><label class="fl">Opened By *</label><input type="text" id="rOpenedBy" class="fi" placeholder="Your name"></div>
+    <div style="margin-bottom:12px"><label class="fl">Report Title *</label><input type="text" id="rTitle" class="fi" placeholder="Brief title of the issue"></div>
+    <div style="margin-bottom:12px"><label class="fl">Description *</label><textarea id="rDesc" class="fta" placeholder="Describe the issue in detail..."></textarea></div>
+    <div class="fgrid" style="margin-bottom:12px">
+      <div><label class="fl">Equipment Usable?</label>
+        <select id="rUsable" class="fs" onchange="onUsableChange()">
+          <option value="yes">Yes — can still be used</option>
+          <option value="no">No — out of service</option>
+        </select>
+      </div>
+      <div><label class="fl">Priority <span id="autoPriorityBadge" class="chip hidden" style="background:#7f1d1d22;color:#fca5a5">AUTO</span></label>
+        <select id="rPriority" class="fs">
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+    </div>
+    <div style="font-size:11px;color:#4a4a7a;margin-bottom:4px">Date: today (auto)</div>
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="closeAddReport()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitReport()">Submit Report</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: CLOSE REPORT ════════════════════════════════════════════ -->
+<div class="mo hidden" id="closeReportModal" onclick="if(event.target===this)closeCloseReport()">
+  <div class="md">
+    <div class="md-title">Close Service Report</div>
+    <div class="md-sub">Both fields are required to close a report.</div>
+    <div id="closeReportErr" class="err-txt hidden"></div>
+    <div style="margin-bottom:12px"><label class="fl">Closed By *</label><input type="text" id="cClosedBy" class="fi" placeholder="Your name"></div>
+    <div style="margin-bottom:12px"><label class="fl">Closure Reason *</label><textarea id="cReason" class="fta" placeholder="How was the issue resolved?"></textarea></div>
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="closeCloseReport()">Cancel</button>
+      <button class="btn btn-danger" onclick="submitCloseReport()">Close Report</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: COMPLETE CONFIRM ════════════════════════════════════════ -->
+<div class="mo hidden" id="completeModal" onclick="if(event.target===this)closeCompleteModal()">
+  <div class="md" style="max-width:380px">
+    <div class="md-title">Mark as Completed</div>
+    <div class="md-sub" style="margin-bottom:20px">Repair is done. Would you also like to close the service report?</div>
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="confirmComplete(false)">No, keep open</button>
+      <button class="btn btn-primary" onclick="confirmComplete(true)">Yes, close report</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: EXPORT ══════════════════════════════════════════════════ -->
+<div class="mo hidden" id="exportModal" onclick="if(event.target===this)closeExportModal()">
+  <div class="md">
+    <div class="md-title">Export Equipment Data</div>
+    <div class="md-sub">Exports to Excel with separate sheets for each section.</div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;color:#4a4a7a;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Select Equipment (blank = all)</div>
+      <div id="exportEqList" style="max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:3px"></div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#4a4a7a;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Sections to Include</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;color:#94a3b8;cursor:pointer"><input type="checkbox" id="expInfo" checked style="accent-color:#6366f1"> Equipment Info</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;color:#94a3b8;cursor:pointer"><input type="checkbox" id="expRepairFac" checked style="accent-color:#6366f1"> Repair Facility</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;color:#94a3b8;cursor:pointer"><input type="checkbox" id="expActiveRpts" checked style="accent-color:#6366f1"> Active Service Reports</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#94a3b8;cursor:pointer"><input type="checkbox" id="expRepairsDone" checked style="accent-color:#6366f1"> Repairs Done</label>
+    </div>
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="closeExportModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="runExport()">Export Excel (.xlsx)</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+// ════════════════════════════════════════════════════════════════════════
+// FIREBASE IMPORTS
+// ════════════════════════════════════════════════════════════════════════
+import { initializeApp }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
+         getDoc, onSnapshot, query, orderBy, serverTimestamp }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+// ════════════════════════════════════════════════════════════════════════
+// CONFIG
+// ════════════════════════════════════════════════════════════════════════
+const FB_CFG = {
+  apiKey:            "AIzaSyBUZg65JYsT5BtZMhG9CClJQZJCpsdGK-E",
+  authDomain:        "plessen-repair.firebaseapp.com",
+  projectId:         "plessen-repair",
+  storageBucket:     "plessen-repair.firebasestorage.app",
+  messagingSenderId: "110845803408",
+  appId:             "1:110845803408:web:41e3789f02f335ff361115"
+};
+
+// ════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ════════════════════════════════════════════════════════════════════════
+const EQ_TYPES        = ["Diagnostic","Imaging","Surgical","Monitoring","IT / Network","Office Equipment","Other"];
+const DEFAULT_LOCS    = ["Front Desk","Exam Room 1","Exam Room 2","Office","Storage","Lab"];
+const STATUS_LABELS   = { active:"Active", needs_service:"Needs Service", not_working:"Not Working" };
+const STATUS_COLORS   = { active:"#22c55e", needs_service:"#eab308", not_working:"#ef4444" };
+const PRIORITY_COLORS = { high:"#ef4444", medium:"#eab308", low:"#22c55e" };
+const REPAIR_STATUSES = ["pending","repair_scheduled","sent_for_repair","received","completed"];
+const REPAIR_LABELS   = { pending:"Pending", repair_scheduled:"Repair Scheduled", sent_for_repair:"Sent for Repair", received:"Received Back", completed:"Completed" };
+const today           = () => new Date().toISOString().split("T")[0];
+const ts              = () => new Date().toLocaleString();
+const uid             = () => Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+
+// ════════════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════════════
+let equipment     = [];
+let reports       = [];
+let currentView   = 'dashboard';
+let selectedEqId  = null;
+let editMode      = false;
+let editForm      = {};
+let filterStatus  = 'all';
+let filterType    = 'all';
+let searchQ       = '';
+let reportsTab    = 'active';
+let gearOpen      = false;
+let globalPinging = false;
+let addReportEqId = null;
+let closeRptId    = null;
+let completeRptId = null;
+let userRole      = 'viewer';
+let unsubEq       = null;
+let unsubRpts     = null;
+const pingCache   = {};  // id -> { online, time }
+
+const app  = initializeApp(FB_CFG);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+// ════════════════════════════════════════════════════════════════════════
+// EXPOSE GLOBALS
+// ════════════════════════════════════════════════════════════════════════
+const W = window;
+W.doLogin=doLogin; W.doSignOut=doSignOut; W.toggleGear=toggleGear;
+W.setView=setView; W.openAddReportModal=openAddReportModal; W.closeAddReport=closeAddReport;
+W.submitReport=submitReport; W.onUsableChange=onUsableChange;
+W.openCloseReport=openCloseReport; W.closeCloseReport=closeCloseReport; W.submitCloseReport=submitCloseReport;
+W.reopenReport=reopenReport;
+W.closeCompleteModal=closeCompleteModal; W.confirmComplete=confirmComplete;
+W.openExportModal=openExportModal; W.closeExportModal=closeExportModal; W.runExport=runExport;
+W.pingAll=pingAll; W.pingOne=pingOne;
+W.selectEquipment=selectEquipment; W.startEdit=startEdit; W.cancelEdit=cancelEdit; W.saveEdit=saveEdit;
+W.setEditField=setEditField; W.saveNewEquipment=saveNewEquipment;
+W.updateRepairField=updateRepairField; W.handleRepairStatusChange=handleRepairStatusChange;
+W.setFilter=setFilter; W.setSearch=setSearch; W.setReportsTab=setReportsTab;
+
+// ════════════════════════════════════════════════════════════════════════
+// AUTH
+// ════════════════════════════════════════════════════════════════════════
+onAuthStateChanged(auth, async fbUser => {
+  if (!fbUser) { showLogin(); return; }
+  // Check allowedUsers
+  try {
+    const snap = await getDoc(doc(db, 'allowedUsers', fbUser.email));
+    if (!snap.exists() || snap.data().active === false) {
+      await signOut(auth);
+      showLoginErr("Your account does not have access to this system.");
+      return;
+    }
+    userRole = snap.data().role || 'viewer';
+  } catch(e) {
+    // If allowedUsers doesn't exist yet (fresh project), allow if admin
+    userRole = 'admin';
+  }
+  showApp();
+  startListeners();
+});
+
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass  = document.getElementById('loginPass').value;
+  if (!email||!pass) { showLoginErr("Both fields are required."); return; }
+  const btn = document.getElementById('loginBtn');
+  btn.disabled=true; btn.textContent="Signing in...";
+  hideEl('loginErr');
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+  } catch(e) {
+    const msgs={"auth/wrong-password":"Incorrect password.","auth/user-not-found":"No account found.","auth/invalid-credential":"Invalid email or password."};
+    showLoginErr(msgs[e.code]||e.message);
+    btn.disabled=false; btn.textContent="Sign In";
+  }
+}
+document.getElementById('loginPass').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
+
+async function doSignOut() { if(unsubEq) unsubEq(); if(unsubRpts) unsubRpts(); await signOut(auth); }
+
+// ════════════════════════════════════════════════════════════════════════
+// REAL-TIME LISTENERS
+// ════════════════════════════════════════════════════════════════════════
+function startListeners() {
+  unsubEq = onSnapshot(collection(db,'equipment'), snap => {
+    equipment = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    render();
+  }, err => console.error('Equipment listener error:', err));
+
+  unsubRpts = onSnapshot(collection(db,'reports'), snap => {
+    reports = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    updateReportsBadge();
+    if (currentView==='reports'||currentView==='detail') render();
+  }, err => console.error('Reports listener error:', err));
+}
+
+function updateReportsBadge() {
+  const active = reports.filter(r=>r.status==='active').length;
+  const badge  = document.getElementById('reportsBadge');
+  if (badge) { badge.textContent=active; if(active>0) badge.classList.remove('hidden'); else badge.classList.add('hidden'); }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ════════════════════════════════════════════════════════════════════════
+function setView(v, eqId) {
+  currentView = v;
+  if (eqId !== undefined) selectedEqId = eqId;
+  editMode = false; editForm = {};
+  // Update nav buttons
+  ['Dash','Reports'].forEach(n => document.getElementById('nav'+n)?.classList.remove('on'));
+  if (v==='dashboard') document.getElementById('navDash')?.classList.add('on');
+  if (v==='reports')   document.getElementById('navReports')?.classList.add('on');
+  // Topbar buttons
+  const addBtn    = document.getElementById('addEqBtn');
+  const detailAct = document.getElementById('detailActions');
+  if (addBtn)    addBtn.classList.toggle('hidden', v!=='dashboard');
+  if (detailAct) { detailAct.classList.add('hidden'); detailAct.innerHTML=''; }
+  render();
+}
+
+function selectEquipment(id) { setView('detail', id); }
+
+// ════════════════════════════════════════════════════════════════════════
+// RENDER
+// ════════════════════════════════════════════════════════════════════════
+function render() {
+  const mc = document.getElementById('mainContent');
+  if (!mc) return;
+  if      (currentView==='dashboard')     mc.innerHTML = renderDashboard();
+  else if (currentView==='detail')        mc.innerHTML = renderDetail();
+  else if (currentView==='addEquipment')  mc.innerHTML = renderAddEquipment();
+  else if (currentView==='reports')       mc.innerHTML = renderReports();
+  updateDetailActions();
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────
+function renderDashboard() {
+  const filtered = equipment.filter(eq => {
+    const ms = filterStatus==='all' || eq.status===filterStatus;
+    const mt = filterType==='all'   || eq.equipType===filterType;
+    const mq = !searchQ || (eq.name||'').toLowerCase().includes(searchQ.toLowerCase()) || (eq.brand||'').toLowerCase().includes(searchQ.toLowerCase());
+    return ms && mt && mq;
+  });
+  const grouped = {};
+  filtered.forEach(eq => { const t=eq.equipType||'Other'; if(!grouped[t]) grouped[t]=[]; grouped[t].push(eq); });
+  const typeFilters = ['all',...EQ_TYPES].map(t =>
+    `<button class="filter-btn${filterType===t?' on':''}" onclick="setFilter('type','${t}')">${t==='all'?'All Types':t}</button>`
+  ).join('');
+  const statusFilters = ['all','active','needs_service','not_working'].map(s =>
+    `<button class="filter-btn${filterStatus===s?' on':''}" onclick="setFilter('status','${s}')">${s==='all'?'All Statuses':STATUS_LABELS[s]}</button>`
+  ).join('');
+  let cards = '';
+  if (filtered.length===0) {
+    cards = '<div style="color:#4a4a7a;padding:40px;text-align:center">No equipment found.</div>';
+  } else {
+    Object.entries(grouped).sort(([a],[b])=>a.localeCompare(b)).forEach(([type, items]) => {
+      cards += `<div class="type-header">${type} <span style="color:#4a4a7a;font-weight:400">(${items.length})</span></div>`;
+      cards += '<div class="cards-grid">';
+      items.forEach(eq => {
+        const eqReports  = reports.filter(r=>r.status==='active'&&r.equipId===eq.id);
+        const sc         = STATUS_COLORS[eq.status]||'#94a3b8';
+        const ping       = pingCache[eq.id];
+        const pingColor  = !eq.ip?'#1e2035': ping===undefined?'#475569': ping.online?'#6366f1':'#ef4444';
+        const rptBadge   = eqReports.length ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #1e2035">${eqReports.slice(0,2).map(r=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 6px;border-radius:4px;background:#0a0a1a;margin-bottom:2px"><span style="font-size:10px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${r.title}</span><span class="pbadge p-${r.priority}" style="margin-left:5px;flex-shrink:0">${r.priority}</span></div>`).join('')}${eqReports.length>2?`<div style="font-size:10px;color:#4a4a7a;text-align:center">+${eqReports.length-2} more</div>`:''}</div>` : '';
+        cards += `<div class="eq-card" onclick="selectEquipment('${eq.id}')">
+          <div class="card-head" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;gap:5px">
+              <span class="ind-dot" style="background:${sc};box-shadow:0 0 5px ${sc}88" title="${STATUS_LABELS[eq.status]}"></span>
+              <span class="ind-dot" style="background:${pingColor};box-shadow:0 0 5px ${pingColor}66;opacity:${!eq.ip?.6:1}" title="${!eq.ip?'No IP':ping===undefined?'Not pinged':ping.online?'Online':'Offline'}"></span>
+            </div>
+            <button class="btn-xs btn-ghost" style="border:none;background:transparent;color:#4a4a7a;font-size:14px;cursor:pointer;padding:2px 6px" onclick="openAddReportModal('${eq.id}')" title="Add service report">+</button>
+          </div>
+          <div class="card-img">${eqIconSVG(eq.image||'monitor',60)}</div>
+          <div class="card-body">
+            <div class="card-name">${eq.name}</div>
+            <div class="card-sub">${eq.brand||''}${eq.model?' · '+eq.model:''}</div>
+            <span class="status-pill s-${eq.status}">${STATUS_LABELS[eq.status]||eq.status}</span>
+            ${rptBadge}
+          </div>
+        </div>`;
+      });
+      cards += '</div>';
+    });
+  }
+  return `<div class="page">
+    <div class="toolbar">
+      <input class="search-inp" placeholder="Search by name, brand..." value="${searchQ}" oninput="setSearch(this.value)">
+      ${statusFilters}
+      <div style="width:1px;height:20px;background:#1e2035"></div>
+      ${typeFilters}
+    </div>
+    ${cards}
+  </div>`;
+}
+
+// ── Detail view ────────────────────────────────────────────────────────
+function renderDetail() {
+  const eq = equipment.find(e=>e.id===selectedEqId);
+  if (!eq) return '<div class="page" style="color:#4a4a7a;padding:40px">Equipment not found. <button class="btn btn-ghost btn-sm" onclick="setView(\'dashboard\')">← Back</button></div>';
+  const eqRpts = reports.filter(r=>r.equipId===eq.id);
+  const activeR = eqRpts.filter(r=>r.status==='active');
+  const sc = STATUS_COLORS[eq.status]||'#94a3b8';
+  const ping = pingCache[eq.id];
+  const pingTxt = !eq.ip?'No IP':ping===undefined?'Not checked':ping.online?`Online (${ping.time}ms)`:'Offline';
+  const pingCol = !eq.ip?'#475569':ping===undefined?'#475569':ping.online?'#6366f1':'#ef4444';
+  if (editMode) {
+    return `<div class="page">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+        <button class="btn btn-ghost btn-sm" onclick="setView('dashboard')">← Back</button>
+        <div style="font-size:18px;font-weight:800">${eq.name}</div>
+      </div>
+      <div class="edit-banner"><span>Edit Mode — save or cancel when done</span></div>
+      <div class="sec">
+        <div class="sec-title">Equipment Info</div>
+        <div class="fgrid" style="gap:12px;margin-bottom:12px">
+          <div><label class="fl">Name</label><input class="ei" value="${editForm.name||''}" onchange="setEditField('name',this.value)"></div>
+          <div><label class="fl">Equipment Type</label><select class="es" onchange="setEditField('equipType',this.value)">${EQ_TYPES.map(t=>`<option${(editForm.equipType||eq.equipType)===t?' selected':''}>${t}</option>`).join('')}</select></div>
+          <div><label class="fl">Brand</label><input class="ei" value="${editForm.brand||''}" onchange="setEditField('brand',this.value)"></div>
+          <div><label class="fl">Model</label><input class="ei" value="${editForm.model||''}" onchange="setEditField('model',this.value)"></div>
+          <div><label class="fl">Serial Number</label><input class="ei" value="${editForm.sn||''}" onchange="setEditField('sn',this.value)"></div>
+          <div><label class="fl">Start Date</label><input type="date" class="ei" value="${editForm.startDate||''}" onchange="setEditField('startDate',this.value)"></div>
+          <div><label class="fl">Initial Price ($)</label><input class="ei" value="${editForm.price||''}" onchange="setEditField('price',this.value)"></div>
+          <div><label class="fl">Location</label><select class="es" onchange="setEditField('location',this.value)">${DEFAULT_LOCS.map(l=>`<option${(editForm.location||eq.location)===l?' selected':''}>${l}</option>`).join('')}</select></div>
+          <div><label class="fl">IP Address</label><div style="display:flex;gap:6px"><input class="ei" style="flex:1" value="${editForm.ip||''}" onchange="setEditField('ip',this.value)" placeholder="192.168.1.x"><button class="btn btn-ghost btn-xs" onclick="pingOne('${eq.id}',document.querySelector('.ei[onchange*=ip]').value||'${eq.ip||''}')">Test</button></div></div>
+        </div>
+        <div class="divider"></div>
+        <div style="font-size:11px;font-weight:700;color:#4a4a7a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Repair Facility</div>
+        <div class="fgrid" style="gap:10px;margin-bottom:10px">
+          <div><label class="fl">Facility Name</label><input class="ei" value="${editForm.repairFacility||''}" onchange="setEditField('repairFacility',this.value)"></div>
+          <div><label class="fl">Address</label><input class="ei" value="${editForm.repairAddress||''}" onchange="setEditField('repairAddress',this.value)"></div>
+        </div>
+        <div class="divider"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;font-weight:600">Active / Inactive</span>
+          <label class="toggle-wrap"><input type="checkbox" ${editForm.active!==false?'checked':''} onchange="setEditField('active',this.checked)"><span class="toggle-track"></span></label>
+        </div>
+      </div>
+    </div>`;
+  }
+  // View mode
+  const rptRows = eqRpts.map(r => {
+    const isActive = r.status==='active';
+    return `<div class="rpt-card${isActive?' active':''}">
+      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:${isActive?'12px':'0'}">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px">
+            <span style="font-size:13px;font-weight:700">${r.title}</span>
+            <span class="pbadge p-${r.priority}">${r.priority}</span>
+            <span class="chip" style="background:${r.usable?'#16a34a22':'#7f1d1d22'};color:${r.usable?'#86efac':'#fca5a5'}">${r.usable?'Usable':'Out of Service'}</span>
+            ${!isActive?`<span class="chip" style="background:#37415122;color:#9ca3af">Closed</span>`:''}
+          </div>
+          <div style="font-size:11px;color:#4a4a7a;font-family:'DM Mono',monospace;margin-bottom:5px">${r.date||''}${r.openedBy?' · '+r.openedBy:''}</div>
+          <div style="font-size:13px;color:#94a3b8;line-height:1.5">${r.description||''}</div>
+          ${!isActive&&r.closeReason?`<div style="margin-top:6px;font-size:12px;color:#64748b;font-style:italic">Closed ${r.closeDate||''}${r.closedBy?' by '+r.closedBy:''}: ${r.closeReason}</div>`:''}
+        </div>
+        ${isActive?`<div style="display:flex;gap:5px;flex-shrink:0">
+          <button class="btn btn-danger btn-xs" onclick="openCloseReport('${r.id}')">Close</button>
+        </div>`:`<button class="btn btn-success btn-xs" onclick="reopenReport('${r.id}')">Reopen</button>`}
+      </div>
+      ${isActive?`<div style="background:#080c14;border:1px solid #1e2035;border-radius:8px;padding:12px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#4a4a7a;margin-bottom:10px">Repair Tracking</div>
+        <div class="repair-grid">
+          <div style="grid-column:1/-1" class="repair-field"><label>Repair Status</label>
+            <select class="ri" onchange="handleRepairStatusChange('${r.id}',this.value)">
+              ${REPAIR_STATUSES.map(s=>`<option value="${s}"${r.repairStatus===s?' selected':''}>${REPAIR_LABELS[s]}</option>`).join('')}
+            </select>
+          </div>
+          <div class="repair-field"><label>Date Sent</label><input type="date" class="ri" value="${r.sentDate||''}" onchange="updateRepairField('${r.id}','sentDate',this.value)"></div>
+          <div class="repair-field"><label>Date Received</label><input type="date" class="ri" value="${r.receivedDate||''}" ${!r.sentDate?'disabled style="opacity:.4"':''} onchange="updateRepairField('${r.id}','receivedDate',this.value)"></div>
+          <div class="repair-field"><label>Cost ($)</label><input class="ri" placeholder="0.00" value="${r.cost||''}" onchange="updateRepairField('${r.id}','cost',this.value)"></div>
+          <div class="repair-field"><label>Invoice #</label><input class="ri" placeholder="INV-001" value="${r.invoice||''}" onchange="updateRepairField('${r.id}','invoice',this.value)"></div>
+        </div>
+      </div>`:''}
+    </div>`;
+  }).join('');
+  return `<div class="page">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:22px">
+      <button class="btn btn-ghost btn-sm" onclick="setView('dashboard')">← Back</button>
+      <div style="flex:1">
+        <div style="font-size:20px;font-weight:800">${eq.name}</div>
+        <div style="font-size:11px;color:#4a4a7a;font-family:'DM Mono',monospace;margin-top:2px">${eq.brand||''}${eq.model?' / '+eq.model:''}${eq.equipType?` · ${eq.equipType}`:''}</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+          <span class="status-pill s-${eq.status}">${STATUS_LABELS[eq.status]||eq.status}</span>
+          ${eq.ip?`<span style="font-size:11px;color:${pingCol};font-family:'DM Mono',monospace">${pingTxt}</span>`:''}
+        </div>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">Equipment Info</div>
+      <div class="info-grid">
+        ${[['Serial Number',eq.sn],['Location',eq.location],['Start Date',eq.startDate],['Price',eq.price?`$${Number(eq.price).toLocaleString()}`:'—'],['IP Address',eq.ip||'Not configured'],['Status',eq.active!==false?'Active':'Inactive']].map(([k,v])=>`<div><div class="info-label">${k}</div><div class="info-val">${v||'—'}</div></div>`).join('')}
+      </div>
+      ${eq.repairFacility||eq.repairAddress?`<div class="divider"></div><div style="background:#080c14;border:1px solid #1e2035;border-radius:8px;padding:12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#4a4a7a;margin-bottom:6px">Repair Facility</div>${eq.repairFacility?`<div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:3px">${eq.repairFacility}</div>`:''}${eq.repairAddress?`<div style="font-size:12px;color:#94a3b8;font-family:'DM Mono',monospace;white-space:pre-line">${eq.repairAddress}</div>`:''}</div>`:''}
+      <div class="divider"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:13px;font-weight:600">Active / Inactive</span>
+        <label class="toggle-wrap"><input type="checkbox" ${eq.active!==false?'checked':''} onchange="toggleActive('${eq.id}',this.checked)"><span class="toggle-track"></span></label>
+      </div>
+    </div>
+    <div class="sec">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="sec-title" style="margin-bottom:0">Service Reports</div>
+        <button class="btn btn-primary btn-sm" onclick="openAddReportModal('${eq.id}')">+ New Report</button>
+      </div>
+      ${eqRpts.length===0?'<div style="color:#4a4a7a;font-size:13px">No service reports filed.</div>':rptRows}
+    </div>
+    <div class="sec">
+      <div class="sec-title">Status Log</div>
+      ${(eq.statusLog||[]).length===0?'<div style="color:#4a4a7a;font-size:13px">No status changes recorded.</div>':(eq.statusLog||[]).map(l=>`<div class="log-entry">${l.ts} — ${l.text}${l.actor?' ('+l.actor+')':''}</div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ── Add Equipment ──────────────────────────────────────────────────────
+function renderAddEquipment() {
+  return `<div class="page" style="max-width:700px">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:22px">
+      <button class="btn btn-ghost btn-sm" onclick="setView('dashboard')">← Back</button>
+      <div style="font-size:18px;font-weight:800">Add New Equipment</div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">Basic Info</div>
+      <div class="fgrid" style="gap:12px;margin-bottom:12px">
+        <div><label class="fl">Equipment Name *</label><input class="fi" id="nName" placeholder="e.g. IOL Argos"></div>
+        <div><label class="fl">Equipment Type</label><select class="fs" id="nType">${EQ_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+        <div><label class="fl">Brand</label><input class="fi" id="nBrand"></div>
+        <div><label class="fl">Model</label><input class="fi" id="nModel"></div>
+        <div><label class="fl">Serial Number</label><input class="fi" id="nSN"></div>
+        <div><label class="fl">Start Date</label><input type="date" class="fi" id="nDate" value="${today()}"></div>
+        <div><label class="fl">Initial Price ($)</label><input class="fi" id="nPrice"></div>
+        <div><label class="fl">Location</label><select class="fs" id="nLoc">${DEFAULT_LOCS.map(l=>`<option>${l}</option>`).join('')}</select></div>
+        <div><label class="fl">IP Address</label><input class="fi" id="nIP" placeholder="192.168.1.x (optional)"></div>
+      </div>
+      <div class="divider"></div>
+      <div style="font-size:11px;font-weight:700;color:#4a4a7a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Repair Facility (optional)</div>
+      <div class="fgrid" style="gap:10px;margin-bottom:12px">
+        <div><label class="fl">Facility Name</label><input class="fi" id="nRepairFac"></div>
+        <div><label class="fl">Address</label><input class="fi" id="nRepairAddr"></div>
+      </div>
+    </div>
+    <div id="addEqErr" class="err-txt hidden" style="margin-bottom:10px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="setView('dashboard')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNewEquipment()">Add Equipment</button>
+    </div>
+  </div>`;
+}
+
+// ── Reports view ────────────────────────────────────────────────────────
+function renderReports() {
+  const activeRpts   = reports.filter(r=>r.status==='active');
+  const closedRpts   = reports.filter(r=>r.status==='inactive');
+  const displayRpts  = reportsTab==='active' ? activeRpts : closedRpts;
+  const rptCards = displayRpts.map(r => {
+    const eq = equipment.find(e=>e.id===r.equipId);
+    const isActive = r.status==='active';
+    return `<div class="rpt-card${isActive?' active':''}">
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:${isActive?'12px':'0'}">
+        <div style="width:40px;height:40px;background:#0a0a1a;border:1px solid #1e2035;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#6366f1">${eqIconSVG(r.equipImage||'monitor',26)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:3px">
+            <span style="font-size:14px;font-weight:700">${r.title}</span>
+            <span class="pbadge p-${r.priority}">${r.priority}</span>
+            ${!r.usable?`<span class="chip" style="background:#7f1d1d22;color:#fca5a5">Out of Service</span>`:''}
+            ${!isActive?`<span class="chip" style="background:#37415122;color:#9ca3af">Closed</span>`:''}
+          </div>
+          <div style="font-size:11px;color:#6366f1;font-family:'DM Mono',monospace;margin-bottom:4px">${eq?.name||r.equipName||''}</div>
+          <div style="font-size:13px;color:#94a3b8;line-height:1.5">${r.description||''}</div>
+          ${!isActive&&r.closeReason?`<div style="margin-top:5px;font-size:12px;color:#64748b;font-style:italic">Closed ${r.closeDate||''}${r.closedBy?' by '+r.closedBy:''}: ${r.closeReason}</div>`:''}
+          <div style="font-size:11px;color:#4a4a7a;font-family:'DM Mono',monospace;margin-top:5px;display:flex;gap:12px;flex-wrap:wrap">
+            <span>Filed ${r.date||''}</span>${r.openedBy?`<span style="color:#a5b4fc">By: ${r.openedBy}</span>`:''}${r.lastUpdated?`<span>Updated: ${r.lastUpdated}</span>`:''}
+          </div>
+        </div>
+        ${isActive?`<button class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="openCloseReport('${r.id}')">Close</button>`:`<button class="btn btn-success btn-sm" style="flex-shrink:0" onclick="reopenReport('${r.id}')">Reopen</button>`}
+      </div>
+      ${isActive?`<div style="background:#080c14;border:1px solid #1e2035;border-radius:8px;padding:12px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#4a4a7a;margin-bottom:10px">Repair Tracking</div>
+        <div class="repair-grid">
+          <div style="grid-column:1/-1" class="repair-field"><label>Repair Status</label>
+            <select class="ri" onchange="handleRepairStatusChange('${r.id}',this.value)">
+              ${REPAIR_STATUSES.map(s=>`<option value="${s}"${r.repairStatus===s?' selected':''}>${REPAIR_LABELS[s]}</option>`).join('')}
+            </select>
+          </div>
+          <div class="repair-field"><label>Date Sent</label><input type="date" class="ri" value="${r.sentDate||''}" onchange="updateRepairField('${r.id}','sentDate',this.value)"></div>
+          <div class="repair-field"><label>Date Received</label><input type="date" class="ri" value="${r.receivedDate||''}" ${!r.sentDate?'disabled style="opacity:.4"':''} onchange="updateRepairField('${r.id}','receivedDate',this.value)"></div>
+          <div class="repair-field"><label>Cost ($)</label><input class="ri" placeholder="0.00" value="${r.cost||''}" onchange="updateRepairField('${r.id}','cost',this.value)"></div>
+          <div class="repair-field"><label>Invoice #</label><input class="ri" placeholder="INV-001" value="${r.invoice||''}" onchange="updateRepairField('${r.id}','invoice',this.value)"></div>
+        </div>
+      </div>`:''}
+    </div>`;
+  }).join('') || `<div style="text-align:center;padding:50px 20px;color:#4a4a7a">No ${reportsTab} reports.</div>`;
+  return `<div class="page" style="max-width:860px">
+    <div style="margin-bottom:18px">
+      <div style="font-size:18px;font-weight:800">Service Reports</div>
+      <div style="font-size:12px;color:#64748b;margin-top:3px">${activeRpts.length} active · ${closedRpts.length} closed</div>
+    </div>
+    <div style="display:flex;gap:3px;background:#0a0a1a;border-radius:9px;padding:3px;width:fit-content;margin-bottom:20px">
+      ${['active','inactive'].map(t=>`<button class="nav-btn${reportsTab===t?' on':''}" onclick="setReportsTab('${t}')">${t==='active'?'Active':'Closed'}${t==='active'&&activeRpts.length>0?` <span class="badge" style="background:#6366f1;color:#fff">${activeRpts.length}</span>`:''}</button>`).join('')}
+    </div>
+    ${rptCards}
+  </div>`;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// DETAIL TOPBAR ACTIONS
+// ════════════════════════════════════════════════════════════════════════
+function updateDetailActions() {
+  const el = document.getElementById('detailActions');
+  if (!el) return;
+  if (currentView==='detail') {
+    el.classList.remove('hidden');
+    if (editMode) {
+      el.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="cancelEdit()">Cancel</button><button class="btn btn-primary btn-sm" onclick="saveEdit()">Save Changes</button>`;
+    } else {
+      el.innerHTML=`<button class="btn btn-warn btn-sm" onclick="startEdit()">Edit Equipment</button>`;
+    }
+  } else {
+    el.classList.add('hidden'); el.innerHTML='';
+  }
+  const addBtn = document.getElementById('addEqBtn');
+  if (addBtn) addBtn.classList.toggle('hidden', currentView!=='dashboard');
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// EQUIPMENT CRUD
+// ════════════════════════════════════════════════════════════════════════
+async function saveNewEquipment() {
+  const name = document.getElementById('nName')?.value.trim();
+  if (!name) { const el=document.getElementById('addEqErr'); if(el){el.textContent='Name is required';el.classList.remove('hidden');} return; }
+  const data = {
+    name, equipType:document.getElementById('nType')?.value,
+    brand:document.getElementById('nBrand')?.value||'',
+    model:document.getElementById('nModel')?.value||'',
+    sn:document.getElementById('nSN')?.value||'',
+    startDate:document.getElementById('nDate')?.value||today(),
+    price:document.getElementById('nPrice')?.value||'',
+    location:document.getElementById('nLoc')?.value||DEFAULT_LOCS[0],
+    ip:document.getElementById('nIP')?.value||'',
+    repairFacility:document.getElementById('nRepairFac')?.value||'',
+    repairAddress:document.getElementById('nRepairAddr')?.value||'',
+    status:'active', active:true, statusLog:[], createdAt:today()
+  };
+  try { await addDoc(collection(db,'equipment'), data); setView('dashboard'); }
+  catch(e) { const el=document.getElementById('addEqErr'); if(el){el.textContent=e.message;el.classList.remove('hidden');} }
+}
+
+function startEdit() {
+  const eq=equipment.find(e=>e.id===selectedEqId); if(!eq) return;
+  editForm={name:eq.name,equipType:eq.equipType||'',brand:eq.brand||'',model:eq.model||'',
+    sn:eq.sn||'',startDate:eq.startDate||'',price:eq.price||'',location:eq.location||'',
+    ip:eq.ip||'',repairFacility:eq.repairFacility||'',repairAddress:eq.repairAddress||'',active:eq.active!==false};
+  editMode=true; render();
+}
+function cancelEdit() { editMode=false; editForm={}; render(); }
+function setEditField(field, val) { editForm[field]=val; }
+
+async function saveEdit() {
+  const eq=equipment.find(e=>e.id===selectedEqId); if(!eq) return;
+  const logs=[...eq.statusLog||[]];
+  if (editForm.status&&editForm.status!==eq.status) logs.unshift({id:uid(),ts:ts(),text:`Status: "${STATUS_LABELS[eq.status]}" → "${STATUS_LABELS[editForm.status]}"`,actor:'Manual Edit'});
+  try {
+    await updateDoc(doc(db,'equipment',selectedEqId), {...editForm, statusLog:logs});
+    editMode=false; editForm={};
+  } catch(e) { alert('Save failed: '+e.message); }
+}
+
+async function toggleActive(id, val) {
+  try { await updateDoc(doc(db,'equipment',id), { active:val }); } catch(e) { alert(e.message); }
+}
+
+// Status recalc from reports
+async function recalcStatus(equipId) {
+  const active = reports.filter(r=>r.status==='active'&&r.equipId===equipId);
+  const newStatus = active.length===0?'active':active.some(r=>!r.usable)?'not_working':'needs_service';
+  const eq = equipment.find(e=>e.id===equipId); if(!eq) return;
+  if (newStatus!==eq.status) {
+    const logs=[{id:uid(),ts:ts(),text:`Status: "${STATUS_LABELS[eq.status]}" → "${STATUS_LABELS[newStatus]}"`,actor:'Auto (Service Reports)'},...(eq.statusLog||[])];
+    await updateDoc(doc(db,'equipment',equipId), {status:newStatus, statusLog:logs});
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// REPORTS CRUD
+// ════════════════════════════════════════════════════════════════════════
+function openAddReportModal(eqId) {
+  addReportEqId=eqId;
+  const eq=equipment.find(e=>e.id===eqId);
+  document.getElementById('addReportSubtitle').textContent=eq?.name||'Equipment';
+  ['rOpenedBy','rTitle','rDesc'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('rUsable').value='yes';
+  document.getElementById('rPriority').value='high';
+  hideEl('addReportErr'); hideEl('autoPriorityBadge');
+  showEl('addReportModal');
+}
+function closeAddReport() { hideEl('addReportModal'); }
+function onUsableChange() {
+  const usable=document.getElementById('rUsable').value==='yes';
+  document.getElementById('rPriority').disabled=!usable;
+  document.getElementById('rPriority').style.opacity=usable?'1':'.5';
+  if(!usable){document.getElementById('rPriority').value='high';}
+  document.getElementById('autoPriorityBadge').classList.toggle('hidden',usable);
+}
+async function submitReport() {
+  const openedBy=document.getElementById('rOpenedBy').value.trim();
+  const title=document.getElementById('rTitle').value.trim();
+  const desc=document.getElementById('rDesc').value.trim();
+  if(!openedBy||!title||!desc){showEl('addReportErr');document.getElementById('addReportErr').textContent='All fields are required.';return;}
+  const usable=document.getElementById('rUsable').value==='yes';
+  const eq=equipment.find(e=>e.id===addReportEqId);
+  const data={equipId:addReportEqId,equipName:eq?.name||'',equipImage:eq?.image||'monitor',
+    title,description:desc,usable,priority:usable?document.getElementById('rPriority').value:'high',
+    openedBy,date:today(),lastUpdated:today(),status:'active',
+    repairStatus:'pending',sentDate:'',receivedDate:'',cost:'',invoice:'',
+    closeReason:'',closeDate:'',closedBy:''};
+  try {
+    await addDoc(collection(db,'reports'), data);
+    await recalcStatus(addReportEqId);
+    closeAddReport();
+  } catch(e){showEl('addReportErr');document.getElementById('addReportErr').textContent=e.message;}
+}
+
+function openCloseReport(rptId) {
+  closeRptId=rptId;
+  document.getElementById('cClosedBy').value='';
+  document.getElementById('cReason').value='';
+  hideEl('closeReportErr'); showEl('closeReportModal');
+}
+function closeCloseReport() { hideEl('closeReportModal'); }
+async function submitCloseReport() {
+  const closedBy=document.getElementById('cClosedBy').value.trim();
+  const reason=document.getElementById('cReason').value.trim();
+  if(!closedBy||!reason){showEl('closeReportErr');document.getElementById('closeReportErr').textContent='Both fields required.';return;}
+  const rpt=reports.find(r=>r.id===closeRptId); if(!rpt) return;
+  try {
+    await updateDoc(doc(db,'reports',closeRptId),{status:'inactive',closeReason:reason,closeDate:today(),closedBy,lastUpdated:today()});
+    await recalcStatus(rpt.equipId);
+    closeCloseReport();
+  } catch(e){showEl('closeReportErr');document.getElementById('closeReportErr').textContent=e.message;}
+}
+
+async function reopenReport(rptId) {
+  const rpt=reports.find(r=>r.id===rptId); if(!rpt) return;
+  try {
+    await updateDoc(doc(db,'reports',rptId),{status:'active',closeReason:'',closeDate:'',closedBy:'',lastUpdated:today()});
+    await recalcStatus(rpt.equipId);
+  } catch(e){alert(e.message);}
+}
+
+async function updateRepairField(rptId, field, val) {
+  try { await updateDoc(doc(db,'reports',rptId),{[field]:val,lastUpdated:today()}); } catch(e){alert(e.message);}
+}
+
+function handleRepairStatusChange(rptId, status) {
+  if (status==='completed') { completeRptId=rptId; showEl('completeModal'); return; }
+  updateRepairField(rptId,'repairStatus',status);
+}
+async function confirmComplete(alsoClose) {
+  if(!completeRptId) return;
+  await updateRepairField(completeRptId,'repairStatus','completed');
+  if (alsoClose) { openCloseReport(completeRptId); }
+  closeCompleteModal(); completeRptId=null;
+}
+function closeCompleteModal() { hideEl('completeModal'); }
+
+// ════════════════════════════════════════════════════════════════════════
+// PING
+// ════════════════════════════════════════════════════════════════════════
+async function pingDevice(ip) {
+  const start=Date.now();
+  await new Promise(r=>setTimeout(r,400+Math.random()*1200));
+  return { online:Math.random()>.25, time:Date.now()-start };
+}
+async function pingAll() {
+  if (globalPinging) return;
+  globalPinging=true;
+  const dot=document.getElementById('pingDot');
+  const btn=document.getElementById('pingAllBtn');
+  if(dot) dot.style.background='#eab308';
+  if(btn) btn.classList.add('pulsing');
+  const withIP = equipment.filter(e=>e.ip);
+  await Promise.all(withIP.map(async eq => {
+    const r=await pingDevice(eq.ip);
+    pingCache[eq.id]=r;
+  }));
+  globalPinging=false;
+  if(dot) dot.style.background='#22c55e';
+  if(btn) btn.classList.remove('pulsing');
+  render();
+}
+async function pingOne(eqId, ip) {
+  if(!ip) return;
+  const r=await pingDevice(ip);
+  pingCache[eqId]=r;
+  render();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// EXPORT
+// ════════════════════════════════════════════════════════════════════════
+function openExportModal() {
+  closeGear();
+  const list=document.getElementById('exportEqList');
+  if(list){list.innerHTML=equipment.map(eq=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#94a3b8;cursor:pointer;padding:4px 8px;border-radius:6px;background:#0a0a1a;border:1px solid #1e2035;margin-bottom:3px"><input type="checkbox" class="exp-eq-cb" data-id="${eq.id}" style="accent-color:#6366f1"> ${eq.name} <span style="color:#4a4a7a;font-size:11px">— ${eq.equipType||eq.brand||''}</span></label>`).join('');}
+  showEl('exportModal');
+}
+function closeExportModal() { hideEl('exportModal'); }
+
+function runExport() {
+  const selectedIds=[...document.querySelectorAll('.exp-eq-cb:checked')].map(cb=>cb.dataset.id);
+  const sel=selectedIds.length>0?equipment.filter(e=>selectedIds.includes(e.id)):equipment;
+  const expInfo=document.getElementById('expInfo')?.checked;
+  const expFac=document.getElementById('expRepairFac')?.checked;
+  const expActive=document.getElementById('expActiveRpts')?.checked;
+  const expDone=document.getElementById('expRepairsDone')?.checked;
+  const wb=XLSX.utils.book_new();
+  const H=(r)=>r.map(c=>({v:c,s:{font:{bold:true,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:'1E1B4B'}}}}));
+  if(expInfo){
+    const rows=[['Equipment Name','Type','Brand','Model','Serial No','Location','Start Date','Price','Status','Active','IP Address']];
+    // Group by type
+    const byType={};
+    sel.forEach(e=>{const t=e.equipType||'Other';if(!byType[t])byType[t]=[];byType[t].push(e);});
+    Object.entries(byType).sort(([a],[b])=>a.localeCompare(b)).forEach(([type,items])=>{
+      rows.push([`── ${type} ──`,'','','','','','','','','','']);
+      items.forEach(e=>rows.push([e.name,e.equipType||'',e.brand||'',e.model||'',e.sn||'',e.location||'',e.startDate||'',e.price?`$${Number(e.price).toLocaleString()}`:'',STATUS_LABELS[e.status]||'',e.active!==false?'Yes':'No',e.ip||'']));
+    });
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Equipment Info');
+  }
+  if(expFac){
+    const rows=[['Equipment','Type','Repair Facility','Address']];
+    sel.filter(e=>e.repairFacility||e.repairAddress).forEach(e=>rows.push([e.name,e.equipType||'',e.repairFacility||'',e.repairAddress||'']));
+    if(rows.length>1) XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Repair Facilities');
+  }
+  if(expActive){
+    const rows=[['Equipment','Type','Date Reported','Title','Priority','Usable','Repair Status','Opened By','Last Updated','Description']];
+    sel.forEach(e=>reports.filter(r=>r.equipId===e.id&&r.status==='active').forEach(r=>rows.push([e.name,e.equipType||'',r.date||'',r.title||'',r.priority||'',r.usable?'Yes':'No',REPAIR_LABELS[r.repairStatus]||'',r.openedBy||'',r.lastUpdated||'',r.description||''])));
+    if(rows.length===1) rows.push(['No active reports','','','','','','','','','']);
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Active Reports');
+  }
+  if(expDone){
+    const rows=[['Equipment','Type','Date Reported','Title','Opened By','Closed By','Date Closed','Closure Reason','Repair Status','Date Sent','Date Received','Cost','Invoice','Last Updated']];
+    sel.forEach(e=>reports.filter(r=>r.equipId===e.id&&r.status==='inactive').forEach(r=>rows.push([e.name,e.equipType||'',r.date||'',r.title||'',r.openedBy||'',r.closedBy||'',r.closeDate||'',r.closeReason||'',REPAIR_LABELS[r.repairStatus]||'',r.sentDate||'',r.receivedDate||'',r.cost?`$${r.cost}`:'',r.invoice||'',r.lastUpdated||''])));
+    if(rows.length===1) rows.push(['No completed repairs','','','','','','','','','','','','','']);
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Repairs Done');
+  }
+  XLSX.writeFile(wb,`plessen-equipment-${today()}.xlsx`);
+  closeExportModal();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// GEAR + FILTERS + MISC
+// ════════════════════════════════════════════════════════════════════════
+function toggleGear() {
+  const m=document.getElementById('gearMenu');
+  const b=document.getElementById('gearBtn');
+  if(m.classList.contains('hidden')){showEl('gearMenu');b.classList.add('open');}
+  else{hideEl('gearMenu');b.classList.remove('open');}
+  gearOpen=!m.classList.contains('hidden');
+}
+document.addEventListener('click',e=>{
+  if(!document.getElementById('gearWrap')?.contains(e.target)){hideEl('gearMenu');document.getElementById('gearBtn')?.classList.remove('open');}
+});
+function closeGear(){hideEl('gearMenu');document.getElementById('gearBtn')?.classList.remove('open');}
+function setFilter(type,val){if(type==='status')filterStatus=val;else filterType=val;render();}
+function setSearch(val){searchQ=val;render();}
+function setReportsTab(tab){reportsTab=tab;render();}
+
+// ════════════════════════════════════════════════════════════════════════
+// SVG ICONS
+// ════════════════════════════════════════════════════════════════════════
+function eqIconSVG(type,size) {
+  const icons={
+    monitor:`<svg width="${size}" height="${size}" viewBox="0 0 56 56" fill="none"><rect x="4" y="8" width="48" height="30" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="8" y="12" width="40" height="22" rx="2" fill="currentColor" fill-opacity=".08"/><rect x="18" y="38" width="20" height="5" fill="currentColor" fill-opacity=".3"/><rect x="14" y="42" width="28" height="3" rx="1.5" fill="currentColor" fill-opacity=".2"/></svg>`,
+    camera: `<svg width="${size}" height="${size}" viewBox="0 0 56 56" fill="none"><rect x="6" y="16" width="44" height="30" rx="5" stroke="currentColor" stroke-width="2.5" fill="none"/><path d="M22 16V10h12v6" stroke="currentColor" stroke-width="2.5"/><circle cx="28" cy="30" r="9" stroke="currentColor" stroke-width="2.5" fill="none"/><circle cx="28" cy="30" r="4" fill="currentColor" fill-opacity=".3"/></svg>`,
+    tablet: `<svg width="${size}" height="${size}" viewBox="0 0 56 56" fill="none"><rect x="12" y="4" width="32" height="48" rx="5" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="16" y="10" width="24" height="32" rx="2" fill="currentColor" fill-opacity=".08"/><circle cx="28" cy="46" r="2.5" stroke="currentColor" stroke-width="2"/></svg>`,
+    router: `<svg width="${size}" height="${size}" viewBox="0 0 56 56" fill="none"><rect x="8" y="32" width="40" height="16" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><line x1="18" y1="32" x2="18" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><line x1="28" y1="32" x2="28" y2="14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><line x1="38" y1="32" x2="38" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="20" cy="40" r="3" fill="#22c55e" fill-opacity=".8"/><circle cx="30" cy="40" r="3" fill="#22c55e" fill-opacity=".8"/></svg>`,
+    phone:  `<svg width="${size}" height="${size}" viewBox="0 0 56 56" fill="none"><rect x="16" y="4" width="24" height="48" rx="5" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="20" y="10" width="16" height="30" rx="2" fill="currentColor" fill-opacity=".08"/><circle cx="28" cy="46" r="2.5" stroke="currentColor" stroke-width="2"/></svg>`,
+  };
+  return icons[type]||icons.monitor;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// UI HELPERS
+// ════════════════════════════════════════════════════════════════════════
+function showEl(id){document.getElementById(id)?.classList.remove('hidden')}
+function hideEl(id){document.getElementById(id)?.classList.add('hidden')}
+function showLogin(){showEl('loginScreen');hideEl('appScreen')}
+function showLoginErr(msg){showEl('loginErr');document.getElementById('loginErr').textContent=msg}
+function showApp(){hideEl('loginScreen');showEl('appScreen');render()}
+</script>
+</body>
+</html>
