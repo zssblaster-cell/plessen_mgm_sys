@@ -1,1 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plessen Ophthalmology — Credential &amp; Maintenance Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, getDocs, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+const firebaseConfig={apiKey:"AIzaSyCjMKkNunk0NoMLUX4SMLOd67BT_Z-0nDs",authDomain:"plessen-credentials.firebaseapp.com",projectId:"plessen-credentials",storageBucket:"plessen-credentials.firebasestorage.app",messagingSenderId:"508688741805",appId:"1:508688741805:web:e4fd46383bcfb63d8add24",measurementId:"G-PTVTN0NGSG"};
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
+
+// ── MASTER KEY (Option C) ──────────────────────────────────────────────────────
+// This key encrypts the admin-set file encryption passphrase stored in Firestore.
+// The file passphrase encrypts all uploaded files.
+// Both are needed together — neither alone can decrypt anything.
+const MASTER_KEY='3f8a2c9e1b7d4f6a0e5c8b2d9f1a4e7c3b6d0f2a5c8e1b4d7f0a3c6e9b2d5f8a';
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function daysUntil(s){if(!s)return null;const n=new Date();n.setHours(0,0,0,0);return Math.floor((new Date(s+'T00:00:00')-n)/86400000);}
+function docStatus(d){if(d===null)return'none';if(d<0)return'expired';if(d<=30)return'danger';if(d<=90)return'warn';return'ok';}
+function maintDaysUntil(i){if(!i.lastDone||!i.intervalDays)return null;const l=new Date(i.lastDone+'T00:00:00'),nx=new Date(l.getTime()+i.intervalDays*86400000),n=new Date();n.setHours(0,0,0,0);return Math.floor((nx-n)/86400000);}
+function maintStatus(i){const d=maintDaysUntil(i);if(d===null)return'none';if(d<0)return'expired';const nd=parseInt(i.notifyDays)||30;if(d<=nd&&d<=30)return'danger';if(d<=nd)return'warn';return'ok';}
+function worstStatus(p){const o=['expired','danger','warn','ok','none'];let w='none';for(const d of(p.docs||[])){const s=docStatus(daysUntil(d.expiry));if(o.indexOf(s)<o.indexOf(w))w=s;}return w;}
+function nextDueDate(i){if(!i.lastDone||!i.intervalDays)return null;const l=new Date(i.lastDone+'T00:00:00');return new Date(l.getTime()+i.intervalDays*86400000).toISOString().split('T')[0];}
+function statusLabel(d){if(d===null)return'—';if(d<0)return`Overdue ${Math.abs(d)}d`;if(d===0)return'Due today!';return`${d}d remaining`;}
+function statusText(d){if(d===null)return'No expiry';if(d<0)return'Expired';if(d===0)return'Due today';if(d<=30)return'Expiring soon';if(d<=90)return'Upcoming';return'Current';}
+function fmtDate(s){if(!s)return'—';const[y,m,d]=s.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]+' '+ +d+', '+y;}
+function fullName(p){return[p.firstName,p.middleName,p.lastName].filter(Boolean).join(' ')||p.name||'';}
+function initials(p){const n=fullName(p)||'?';return n.split(' ').filter(Boolean).map(w=>w[0]).slice(0,2).join('').toUpperCase();}
+function intLabel(days){if(!days)return'—';days=parseInt(days);if(days%365===0)return`Every ${days/365}yr${days/365>1?'s':''}`;if(days%30===0)return`Every ${days/30}mo${days/30>1?'s':''}`;if(days%7===0)return`Every ${days/7}wk${days/7>1?'s':''}`;return`Every ${days}d`;}
+function fmtBytes(b){if(!b)return'';if(b<1024)return b+'B';if(b<1024*1024)return(b/1024).toFixed(1)+'KB';return(b/1024/1024).toFixed(1)+'MB';}
+
+// ── Data constants ─────────────────────────────────────────────────────────────
+// Specialties per category
+const SPECIALTIES={
+  md:['Ophthalmologist','Retina Specialist','Cornea Specialist','Glaucoma Specialist','Oculoplastics Specialist','Pediatric Ophthalmologist','Neuro-Ophthalmologist','General Ophthalmologist','Anesthesiology','Cardiology','Dermatology','Emergency Medicine','Family Medicine','General Surgery','Internal Medicine','Neurology','OB/GYN','Oncology','Orthopedic Surgery','Otolaryngology (ENT)','Pathology','Pediatrics','Psychiatry','Radiology','Urology','Other'],
+  do:['Ophthalmologist','Retina Specialist','Cornea Specialist','Glaucoma Specialist','Oculoplastics Specialist','Pediatric Ophthalmologist','Neuro-Ophthalmologist','General Ophthalmologist','Anesthesiology','Cardiology','Dermatology','Emergency Medicine','Family Medicine','General Surgery','Internal Medicine','Neurology','OB/GYN','Oncology','Orthopedic Surgery','Otolaryngology (ENT)','Pathology','Pediatrics','Psychiatry','Radiology','Urology','Other'],
+  od:['Comprehensive Optometrist','Medical Optometrist','Pediatric Optometrist','Low Vision Specialist','Contact Lens Specialist (Hard/RGP)','Contact Lens Specialist (Soft)','Glasses & Optical Dispensing','Surgical Co-Management','Neuro-Optometrist','Sports Vision Specialist','Other'],
+  nppa:['Nurse Practitioner (NP)','Physician Assistant (PA)','Certified Registered Nurse Anesthetist (CRNA)','Clinical Nurse Specialist (CNS)','Certified Nurse Midwife (CNM)','Ophthalmic NP','Ophthalmic PA','Other'],
+  staff:['Optician','Ophthalmic Technician','Ophthalmic Assistant','Ophthalmic Photographer','Certified Ophthalmic Assistant (COA)','Certified Ophthalmic Technician (COT)','Registered Nurse (RN)','Licensed Practical Nurse (LPN)','Medical Assistant','Surgical Coordinator','Billing Specialist','Coding Specialist','Front Desk / Patient Services','Practice Manager','Other'],
+};
+const _PHYS_GROUPS={'Licenses & Registrations':['Medical license','DEA license','State controlled substance license','NPI registration','Medicare enrollment','Medicaid enrollment'],'Board & Certifications':['Board certification','ACLS certification','BLS certification','ATLS certification','Subspecialty certification','CAQH profile'],'Insurance & Privileges':['Malpractice insurance','Hospital privileges','Professional liability insurance'],'Compliance & Education':['CME credits','HIPAA training','Background check','Flu vaccine / immunizations']};
+const _STAFF_GROUPS={'Licenses & Registrations':['Professional license','DEA license','NPI registration','Medicare enrollment','Medicaid enrollment'],'Certifications':['ACLS certification','BLS certification','Specialty certification'],'Insurance & Credentialing':['Malpractice insurance','Professional liability insurance'],'Compliance & Education':['CEU credits','HIPAA training','Background check','TB test / health screening']};
+const DOC_GROUPS={
+  md:_PHYS_GROUPS, do:_PHYS_GROUPS, od:_PHYS_GROUPS, nppa:_STAFF_GROUPS, staff:_STAFF_GROUPS,
+  business:{'Business Licenses':['Business license','State business registration','DBA filing'],'Insurance':['General liability insurance','Workers compensation','Professional liability insurance','Cyber liability insurance'],'Healthcare Accreditation':['Medicare provider agreement','Medicaid provider agreement','CLIA certificate','Accreditation (AAAHC/TJC)','OSHA compliance'],'Contracts & Legal':['Lease agreement','HIPAA BAA','Tax-exempt status','DEA registration','Controlled substance registration']}
+};
+const CAT_LABEL={md:'MD',do:'DO',od:'OD',nppa:'NP / PA',staff:'Staff',business:'Business'};
+const CAT_CLR={
+  md:{bg:'#dbeafe',tx:'#1e40af'},
+  do:{bg:'#e0e7ff',tx:'#3730a3'},
+  od:{bg:'#d1fae5',tx:'#065f46'},
+  nppa:{bg:'#fce7f3',tx:'#9d174d'},
+  staff:{bg:'#e0f2fe',tx:'#0369a1'},
+  business:{bg:'#eff6ff',tx:'#1d4ed8'}
+};
+const MAINT_ICON={'Diagnostic Equipment':'🔬','Surgical Equipment':'🩺','IT & Technology':'💻','Safety & Compliance':'🛡️','Facility':'🏢','Office Equipment':'🖨️','Other':'⚙️'};
+const CHUNK_SIZE=500*1024; // 500KB per chunk — safe under Firestore 1MB doc limit after base64 overhead
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let people=[],maint=[],allowedUsers=[],fileMetas=[],currentUser=null,isAdmin=false;
+let unsubP=null,unsubM=null,unsubAU=null,unsubFM=null;
+let mainTab='credentials',credTab='all',metricFilter=null;
+let editId=null,editMId=null,addDocPersonId=null,rowCtr=0;
+let rF={expired:true,danger:true,warn:false},lastHtml='';
+// File encryption key — loaded from Firestore appConfig, decrypted with MASTER_KEY
+// Lives in memory only — never written to DOM or localStorage
+let FILE_ENC_KEY='';
+let encKeyReady=false;
+
+// ── UI helpers ─────────────────────────────────────────────────────────────────
+const $=id=>document.getElementById(id);
+function show(id){$(id).style.display='block';}
+function hide(id){$(id).style.display='none';}
+function setAE(m){$('auth-error').textContent=m;}
+function clrAE(){$('auth-error').textContent='';}
+function toast(msg,type='ok'){const t=$('toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.className='toast',3500);}
+window.openModal=id=>$(id).classList.add('open');
+window.closeModal=id=>$(id).classList.remove('open');
+
+// ── AES-256-GCM Crypto ────────────────────────────────────────────────────────
+const enc=new TextEncoder(),dec=new TextDecoder();
+
+async function deriveKey(passphrase,salt='PlessenPhSalt2024'){
+  const raw=await crypto.subtle.importKey('raw',enc.encode(passphrase),{name:'PBKDF2'},false,['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2',salt:enc.encode(salt),iterations:150000,hash:'SHA-256'},
+    raw,{name:'AES-GCM',length:256},false,['encrypt','decrypt']
+  );
+}
+
+async function aesEncrypt(plaintext,passphrase){
+  const key=await deriveKey(passphrase);
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const data=typeof plaintext==='string'?enc.encode(plaintext):plaintext;
+  const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,data);
+  // Pack: [iv(12)] + [ciphertext]
+  const out=new Uint8Array(12+cipher.byteLength);
+  out.set(iv);out.set(new Uint8Array(cipher),12);
+  return btoa(String.fromCharCode(...out)); // base64 string
+}
+
+async function aesDecrypt(b64,passphrase){
+  const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const iv=bytes.slice(0,12),cipher=bytes.slice(12);
+  const key=await deriveKey(passphrase);
+  return crypto.subtle.decrypt({name:'AES-GCM',iv},key,cipher);
+}
+
+async function aesDecryptToString(b64,passphrase){
+  const buf=await aesDecrypt(b64,passphrase);
+  return dec.decode(buf);
+}
+
+// ── Encryption key management (Option C) ─────────────────────────────────────
+// Admin sets a file passphrase → encrypted with MASTER_KEY → stored in Firestore
+// On every login → fetched from Firestore → decrypted with MASTER_KEY → held in memory
+
+async function loadFileEncKey(){
+  try{
+    const snap=await getDoc(doc(db,'appConfig','fileEncryption'));
+    if(!snap.exists()||!snap.data().encryptedKey){
+      encKeyReady=false;
+      updateKeyStatus(false);
+      return;
+    }
+    const decrypted=await aesDecryptToString(snap.data().encryptedKey,MASTER_KEY);
+    FILE_ENC_KEY=decrypted;
+    encKeyReady=true;
+    updateKeyStatus(true);
+  }catch(e){
+    console.error('Key load error:',e);
+    encKeyReady=false;
+    updateKeyStatus(false);
+  }
+}
+
+function updateKeyStatus(ready){
+  const el=$('enc-key-status');
+  if(!el)return;
+  el.textContent=ready?'🔒 File encryption active':'⚠️ File encryption not configured';
+  el.style.color=ready?'#4ade80':'#fca5a5';
+}
+
+// Admin saves a new file encryption passphrase
+window.saveFileEncKey=async()=>{
+  const passphrase=$('admin-enc-key').value.trim();
+  if(passphrase.length<12){alert('Passphrase must be at least 12 characters for security.');return;}
+  try{
+    const encrypted=await aesEncrypt(passphrase,MASTER_KEY);
+    await setDoc(doc(db,'appConfig','fileEncryption'),{
+      encryptedKey:encrypted,
+      setAt:new Date().toISOString(),
+      setBy:currentUser.email
+    });
+    FILE_ENC_KEY=passphrase;
+    encKeyReady=true;
+    updateKeyStatus(true);
+    $('admin-enc-key').value='';
+    toast('File encryption key saved and activated ✓');
+  }catch(e){
+    toast('Error saving key: '+e.message,'error');
+  }
+};
+
+// ── File chunking ─────────────────────────────────────────────────────────────
+function arrayBufferToBase64(buffer){
+  const bytes=new Uint8Array(buffer);
+  let binary='';
+  for(let i=0;i<bytes.byteLength;i++)binary+=String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function base64ToArrayBuffer(b64){
+  const binary=atob(b64);
+  const bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  return bytes.buffer;
+}
+function chunkArrayBuffer(buffer,chunkSize){
+  const chunks=[];
+  let offset=0;
+  while(offset<buffer.byteLength){
+    chunks.push(buffer.slice(offset,offset+chunkSize));
+    offset+=chunkSize;
+  }
+  return chunks;
+}
+
+// ── Generate filename ─────────────────────────────────────────────────────────
+function makeFileName(person,docType,ext){
+  const date=new Date().toISOString().split('T')[0].replace(/-/g,'');
+  const typeClean=docType.replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_');
+  let prefix='';
+  if(person.category==='md'||person.category==='staff'){
+    const inits=initials(person);
+    const id=person.npi||person.employeeId||'NOID';
+    prefix=`${inits}-${id}`;
+  } else {
+    const words=(fullName(person)||person.name||'BIZ').split(' ').filter(Boolean);
+    const abbr=words.map(w=>w[0]).join('').toUpperCase().slice(0,6)||'BIZ';
+    prefix=`${abbr}-BIZ`;
+  }
+  return `${prefix}-${typeClean}-${date}.${ext}`;
+}
+
+// ── Upload file (encrypt → chunk → store in Firestore) ────────────────────────
+window.triggerFileUpload=(personId,docId,docType)=>{
+  if(!encKeyReady){
+    toast('File encryption not configured. Ask your admin to set it up in ⚙ Users → File Encryption.','error');
+    return;
+  }
+  // Create hidden input, trigger click
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='.pdf,.jpg,.jpeg,.png,.gif,.doc,.docx';
+  input.onchange=()=>{if(input.files[0])doUpload(personId,docId,docType,input.files[0]);};
+  input.click();
+};
+
+async function doUpload(personId,docId,docType,file){
+  const MAX=15*1024*1024; // 15MB practical limit
+  if(file.size>MAX){toast('File too large. Maximum size is 15MB.','error');return;}
+  const ext=file.name.split('.').pop().toLowerCase();
+  const allowed=['pdf','jpg','jpeg','png','gif','doc','docx'];
+  if(!allowed.includes(ext)){toast('File type not allowed. Use PDF, image, or Word doc.','error');return;}
+
+  const person=people.find(p=>p.id===personId);if(!person)return;
+  const fileName=makeFileName(person,docType,ext);
+  const fileId=uid();
+
+  // Show progress modal
+  showUploadProgress(0,'Reading file…');
+  try{
+    // 1. Read
+    const rawBuffer=await file.arrayBuffer();
+    showUploadProgress(15,'Encrypting…');
+
+    // 2. Encrypt with FILE_ENC_KEY
+    const encryptedB64=await aesEncrypt(rawBuffer,FILE_ENC_KEY);
+    const encryptedBuffer=base64ToArrayBuffer(encryptedB64);
+    showUploadProgress(35,'Splitting into chunks…');
+
+    // 3. Chunk
+    const chunks=chunkArrayBuffer(encryptedBuffer,CHUNK_SIZE);
+    const totalChunks=chunks.length;
+    const chunkIds=[];
+
+    // 4. Upload each chunk to Firestore
+    for(let i=0;i<chunks.length;i++){
+      showUploadProgress(35+Math.round((i/chunks.length)*55),`Uploading chunk ${i+1} of ${totalChunks}…`);
+      const chunkId=uid();
+      chunkIds.push(chunkId);
+      const chunkB64=arrayBufferToBase64(chunks[i]);
+      await setDoc(doc(db,'filesChunks',chunkId),{
+        fileId,chunkIndex:i,totalChunks,data:chunkB64
+      });
+    }
+
+    showUploadProgress(92,'Saving metadata…');
+
+    // 5. Save metadata
+    const meta={
+      id:fileId,personId,docId,
+      personNPI:person.npi||person.employeeId||'',
+      personInitials:initials(person),
+      personName:fullName(person)||person.name||'',
+      personCategory:person.category,
+      docType,fileName,
+      originalName:file.name,
+      fileSize:file.size,
+      fileExt:ext,
+      totalChunks,chunkIds,
+      uploadedAt:new Date().toISOString(),
+      uploadedBy:currentUser.email
+    };
+    await setDoc(doc(db,'filesMeta',fileId),meta);
+    showUploadProgress(100,'Done!');
+    setTimeout(()=>hideUploadProgress(),800);
+    toast(`${file.name} uploaded and encrypted ✓`);
+    renderAll();
+  }catch(e){
+    hideUploadProgress();
+    console.error('Upload error:',e);
+    toast('Upload failed: '+e.message,'error');
+  }
+}
+
+function showUploadProgress(pct,label){
+  let modal=$('upload-progress-modal');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='upload-progress-modal';
+    modal.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:200;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:32px 40px;width:340px;text-align:center;border:1.5px solid #bfdbfe">
+      <div style="font-size:15px;font-weight:600;color:#1e3a8a;margin-bottom:16px">Uploading File</div>
+      <div style="background:#e2e8f0;border-radius:20px;height:10px;overflow:hidden;margin-bottom:12px">
+        <div id="upload-progress-bar" style="height:100%;background:#1e3a8a;border-radius:20px;transition:width .3s;width:0%"></div>
+      </div>
+      <div id="upload-progress-label" style="font-size:13px;color:#475569"></div>
+    </div>`;
+    document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  $('upload-progress-bar').style.width=pct+'%';
+  $('upload-progress-label').textContent=label;
+}
+function hideUploadProgress(){
+  const m=$('upload-progress-modal');
+  if(m)m.style.display='none';
+}
+
+// ── View / download file (fetch chunks → reassemble → decrypt → open) ─────────
+window.viewFile=async(fileId)=>{
+  if(!encKeyReady){toast('File encryption not configured.','error');return;}
+  const meta=fileMetas.find(f=>f.id===fileId);if(!meta)return;
+  showUploadProgress(0,'Fetching file…');
+  try{
+    // Fetch all chunks
+    const chunkData=[];
+    for(let i=0;i<meta.totalChunks;i++){
+      showUploadProgress(Math.round((i/meta.totalChunks)*70),`Loading chunk ${i+1} of ${meta.totalChunks}…`);
+      const chunkSnap=await getDoc(doc(db,'filesChunks',meta.chunkIds[i]));
+      if(!chunkSnap.exists())throw new Error(`Chunk ${i} missing`);
+      chunkData.push(chunkSnap.data().data);
+    }
+    showUploadProgress(75,'Reassembling…');
+
+    // Reassemble chunks into single base64 string then buffer
+    const totalLen=chunkData.reduce((s,c)=>s+atob(c).length,0);
+    const combined=new Uint8Array(totalLen);
+    let offset=0;
+    for(const c of chunkData){
+      const bytes=Uint8Array.from(atob(c),ch=>ch.charCodeAt(0));
+      combined.set(bytes,offset);offset+=bytes.length;
+    }
+    showUploadProgress(85,'Decrypting…');
+
+    // The chunks reassemble to a base64 string that was the encrypted output
+    const encB64=arrayBufferToBase64(combined.buffer);
+    const decrypted=await aesDecrypt(encB64,FILE_ENC_KEY);
+
+    showUploadProgress(95,'Opening…');
+    const mimeMap={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'};
+    const mime=mimeMap[meta.fileExt]||'application/octet-stream';
+    const blob=new Blob([decrypted],{type:mime});
+    const url=URL.createObjectURL(blob);
+    window.open(url,'_blank');
+    setTimeout(()=>URL.revokeObjectURL(url),120000);
+    showUploadProgress(100,'Done!');
+    setTimeout(()=>hideUploadProgress(),600);
+  }catch(e){
+    hideUploadProgress();
+    console.error('View error:',e);
+    toast('Failed to open file: '+e.message,'error');
+  }
+};
+
+// ── Delete file (chunks + metadata) ──────────────────────────────────────────
+window.deleteFile=async(fileId)=>{
+  const meta=fileMetas.find(f=>f.id===fileId);if(!meta)return;
+  if(!confirm(`Delete "${meta.originalName}"? This cannot be undone.`))return;
+  try{
+    // Delete all chunks
+    const batch=writeBatch(db);
+    for(const cid of(meta.chunkIds||[])){
+      batch.delete(doc(db,'filesChunks',cid));
+    }
+    batch.delete(doc(db,'filesMeta',fileId));
+    await batch.commit();
+    toast('File deleted.');
+  }catch(e){toast('Delete failed: '+e.message,'error');}
+};
+
+// ── File helpers ──────────────────────────────────────────────────────────────
+function filesForDoc(personId,docId){return fileMetas.filter(f=>f.personId===personId&&f.docId===docId);}
+
+function renderFilePills(personId,docId,docType){
+  const files=filesForDoc(personId,docId);
+  const pills=files.map(f=>`
+    <span class="file-pill">
+      <button class="file-view-btn" onclick="viewFile('${f.id}')" title="${esc(f.originalName)} (${fmtBytes(f.fileSize)})">📎 ${esc(f.originalName.length>20?f.originalName.slice(0,18)+'…':f.originalName)}</button>
+      <button class="file-del-btn" onclick="deleteFile('${f.id}')" title="Delete file">✕</button>
+    </span>`).join('');
+  const uploadBtn=`<button class="file-upload-btn" onclick="triggerFileUpload('${personId}','${docId}','${esc(docType)}')" title="Attach file">＋ Attach</button>`;
+  return `<div class="doc-files">${pills}${uploadBtn}</div>`;
+}
+
+// ── Brute force protection ─────────────────────────────────────────────────────
+const LOCK_LIMIT=5,LOCK_MS=15*60*1000;
+let loginAttempts=0,lockUntil=0;
+function checkRateLimit(){const now=Date.now();if(now<lockUntil){const m=Math.ceil((lockUntil-now)/60000);setAE('Too many failed attempts. Try again in '+m+' minute'+(m>1?'s':'')+'.'); return false;}return true;}
+function recordFail(){loginAttempts++;if(loginAttempts>=LOCK_LIMIT){lockUntil=Date.now()+LOCK_MS;loginAttempts=0;}}
+function resetAttempts(){loginAttempts=0;lockUntil=0;}
+
+// ── Auth ───────────────────────────────────────────────────────────────────────
+onAuthStateChanged(auth,async user=>{
+  currentUser=user;
+  if(user){
+    try{
+      const allowed=await getDoc(doc(db,'allowedUsers',user.email));
+      if(!allowed.exists()){await signOut(auth);setAE('Access denied. Contact your administrator.');return;}
+      isAdmin=allowed.data().role==='admin';
+      $('user-email').textContent=user.email;
+      if(isAdmin)show('admin-btn'); else hide('admin-btn');
+      listen();
+      // Load file encryption key silently
+      await loadFileEncKey();
+      hide('auth-screen');show('app-screen');
+      resetAttempts();
+    }catch(err){
+      if(err.code==='permission-denied'){await signOut(auth);setAE('Access denied. Contact your administrator.');}
+      else{console.error(err);setAE('Error verifying access: '+err.message);}
+    }
+  } else {
+    if(unsubP){unsubP();unsubP=null;}if(unsubM){unsubM();unsubM=null;}
+    if(unsubAU){unsubAU();unsubAU=null;}if(unsubFM){unsubFM();unsubFM=null;}
+    people=[];maint=[];allowedUsers=[];fileMetas=[];
+    FILE_ENC_KEY='';encKeyReady=false;
+    hide('app-screen');show('auth-screen');
+  }
+});
+window.doSignIn=async()=>{
+  clrAE();if(!checkRateLimit())return;
+  const e=$('a-email').value.trim(),p=$('a-pass').value;
+  if(!e||!p){setAE('Please enter email and password.');return;}
+  try{await signInWithEmailAndPassword(auth,e,p);}catch(err){recordFail();setAE(authErr(err.code));}
+};
+window.doSignOut=async()=>{await signOut(auth);};
+window.doReset=async()=>{const e=$('a-email').value.trim();if(!e){setAE('Enter your email first.');return;}try{await sendPasswordResetEmail(auth,e);setAE('Reset email sent.');}catch(e){setAE(authErr(e.code));}};
+function authErr(c){return({'auth/invalid-email':'Invalid email.','auth/user-not-found':'No account found.','auth/wrong-password':'Incorrect password.','auth/too-many-requests':'Too many attempts — wait a moment.','auth/invalid-credential':'Incorrect email or password.','auth/network-request-failed':'Network error.'})[c]||'Something went wrong.';}
+
+// ── Firestore listeners ────────────────────────────────────────────────────────
+function listen(){
+  if(unsubP)unsubP();if(unsubM)unsubM();if(unsubAU)unsubAU();if(unsubFM)unsubFM();
+  unsubP=onSnapshot(collection(db,'people'),
+    snap=>{people=snap.docs.map(d=>d.data()).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));renderAll();},
+    err=>{console.error('People:',err);toast('Data error: '+err.message,'error');}
+  );
+  unsubM=onSnapshot(collection(db,'maintenance'),
+    snap=>{maint=snap.docs.map(d=>d.data()).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));renderAll();},
+    err=>console.error('Maint:',err)
+  );
+  unsubFM=onSnapshot(collection(db,'filesMeta'),
+    snap=>{fileMetas=snap.docs.map(d=>d.data());renderAll();},
+    err=>console.error('FileMeta:',err)
+  );
+  if(isAdmin){
+    unsubAU=onSnapshot(collection(db,'allowedUsers'),
+      snap=>{allowedUsers=snap.docs.map(d=>({email:d.id,...d.data()}));renderAdminList();},
+      err=>console.error('AllowedUsers:',err)
+    );
+  }
+  renderAll();
+}
+async function savePerson(p){await setDoc(doc(db,'people',p.id),p);}
+async function deletePerson(id){await deleteDoc(doc(db,'people',id));}
+async function saveMaintItem(i){await setDoc(doc(db,'maintenance',i.id),i);}
+async function deleteMaintItem(id){await deleteDoc(doc(db,'maintenance',id));}
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+function renderAll(){
+  try{renderMetrics();renderAlerts();if(mainTab==='credentials')renderCreds();else renderMaint();}
+  catch(e){console.error('Render error:',e);toast('Display error: '+e.message,'error');}
+}
+function renderMetrics(){
+  const cE=people.filter(p=>worstStatus(p)==='expired').length;
+  const cD=people.filter(p=>worstStatus(p)==='danger').length;
+  const mO=maint.filter(i=>maintStatus(i)==='expired').length;
+  const mD=maint.filter(i=>maintStatus(i)==='danger'||maintStatus(i)==='warn').length;
+  $('metrics').innerHTML=`
+    <div class="metric${metricFilter==='all-creds'?' active':''}" onclick="applyMetricFilter('all-creds','credentials')"><div class="mval">${people.length}</div><div class="mlbl">Staff tracked</div></div>
+    <div class="metric${metricFilter==='expired-creds'?' active':''}" onclick="applyMetricFilter('expired-creds','credentials')"><div class="mval red">${cE}</div><div class="mlbl">Expired creds</div></div>
+    <div class="metric${metricFilter==='danger-creds'?' active':''}" onclick="applyMetricFilter('danger-creds','credentials')"><div class="mval amber">${cD}</div><div class="mlbl">Expiring ≤30d</div></div>
+    <div class="metric${metricFilter==='all-maint'?' active':''}" onclick="applyMetricFilter('all-maint','maintenance')"><div class="mval">${maint.length}</div><div class="mlbl">Maint. items</div></div>
+    <div class="metric${metricFilter==='overdue-maint'?' active':''}" onclick="applyMetricFilter('overdue-maint','maintenance')"><div class="mval red">${mO}</div><div class="mlbl">Maint. overdue</div></div>
+    <div class="metric${metricFilter==='due-maint'?' active':''}" onclick="applyMetricFilter('due-maint','maintenance')"><div class="mval amber">${mD}</div><div class="mlbl">Maint. due soon</div></div>`;
+}
+window.applyMetricFilter=(filter,tab)=>{
+  metricFilter=metricFilter===filter?null:filter;
+  document.querySelectorAll('.main-tab').forEach(b=>b.classList.remove('active'));
+  document.querySelector(`.main-tab[data-tab="${tab}"]`).classList.add('active');
+  mainTab=tab;
+  const btn=$('header-add-btn');
+  if(tab==='maintenance'){btn.textContent='+ Add item';btn.onclick=()=>openAddMaintModal();}
+  else{btn.textContent='+ Add record';btn.onclick=()=>openAddModal();}
+  if(tab==='credentials'){const sf=$('status-filter');if(filter==='expired-creds')sf.value='expired';else if(filter==='danger-creds')sf.value='danger';else sf.value='all';}
+  renderAll();
+};
+function renderAlerts(){
+  const ce=people.filter(p=>worstStatus(p)==='expired'),cd=people.filter(p=>worstStatus(p)==='danger'),mo=maint.filter(i=>maintStatus(i)==='expired');
+  const ae=$('alert-expired'),ad=$('alert-danger'),am=$('alert-maint');
+  if(ce.length){ae.innerHTML=`<strong>${ce.length} record${ce.length>1?'s have':' has'} expired credentials</strong> — ${ce.map(p=>`<em>${esc(fullName(p))}</em>`).join(', ')}.`;ae.classList.add('show');}else ae.classList.remove('show');
+  if(cd.length){ad.innerHTML=`<strong>${cd.length} credential${cd.length>1?'s':''} expiring within 30 days</strong> — ${cd.map(p=>`<em>${esc(fullName(p))}</em>`).join(', ')}.`;ad.classList.add('show');}else ad.classList.remove('show');
+  if(mo.length){am.innerHTML=`<strong>${mo.length} maintenance item${mo.length>1?'s are':' is'} overdue</strong> — ${mo.map(i=>`<em>${esc(i.name)}</em>`).join(', ')}.`;am.classList.add('show');}else am.classList.remove('show');
+}
+
+// ── CREDENTIALS ────────────────────────────────────────────────────────────────
+function renderCreds(){
+  $('cred-section').style.display='block';$('maint-section').style.display='none';
+  const s=$('search').value.toLowerCase(),sf=$('status-filter').value,o=['expired','danger','warn','ok','none'];
+  const f=people.filter(p=>{
+    if(credTab!=='all'&&p.category!==credTab)return false;
+    const name=fullName(p).toLowerCase();
+    const specs=(p.specialties||[]).join(' ').toLowerCase()+(p.specialty||'').toLowerCase();
+    if(s&&!name.includes(s)&&!specs.includes(s)&&!(p.role||'').toLowerCase().includes(s))return false;
+    if(sf!=='all'&&worstStatus(p)!==sf)return false;
+    return true;
+  }).sort((a,b)=>o.indexOf(worstStatus(a))-o.indexOf(worstStatus(b)));
+  const el=$('card-list');
+  if(!f.length){el.innerHTML=`<div class="empty-state"><strong>${people.length===0?'No records yet':'Nothing matches'}</strong><span>${people.length===0?'Click "+ Add record" to get started.':'Try adjusting the filters.'}</span></div>`;return;}
+  const providers=f.filter(p=>p.category!=='business');
+  const businesses=f.filter(p=>p.category==='business');
+  el.innerHTML=[...providers.map(renderProviderCard),...businesses.map(renderBusinessSection)].join('');
+}
+
+function renderProviderCard(p){
+  const ws=worstStatus(p),cc=CAT_CLR[p.category],groups=DOC_GROUPS[p.category];
+  const grouped={};for(const g of Object.keys(groups))grouped[g]=[];
+  for(const d of(p.docs||[])){if(grouped[d.group]!==undefined)grouped[d.group].push(d);else{grouped['Other']=grouped['Other']||[];grouped['Other'].push(d);}}
+  const ec=(p.docs||[]).filter(d=>docStatus(daysUntil(d.expiry))==='expired').length;
+  const dc=(p.docs||[]).filter(d=>docStatus(daysUntil(d.expiry))==='danger').length;
+  const secs=Object.entries(grouped).filter(([,d])=>d.length>0).map(([g,docs])=>`
+    <div class="doc-group"><div class="grp-hdr">${esc(g)}</div><div class="doc-grid">${docs.map(d=>{
+      const days=daysUntil(d.expiry),st=docStatus(days);
+      return`<div class="doc-chip st-${st}">
+        <div class="doc-type">${esc(d.type)}</div>
+        ${d.licenseNo?`<div class="doc-licno">Lic #: ${esc(d.licenseNo)}</div>`:''}
+        <div class="doc-date">${fmtDate(d.expiry)}</div>
+        ${st!=='none'?`<div class="doc-st ${st}">${st==='ok'?'Current':statusLabel(days)}</div>`:''}
+        ${d.notes?`<div class="doc-notes">${esc(d.notes)}</div>`:''}
+        ${renderFilePills(p.id,d.id,d.type)}
+      </div>`;}).join('')}</div></div>`).join('');
+  const dob=p.dob?`<span class="meta-item">DOB: ${fmtDate(p.dob)}</span>`:'';
+  const ssn=p.ssn4?`<span class="meta-item">SSN: ***-**-${esc(p.ssn4)}</span>`:'';
+  const npi=p.npi?`<span class="meta-item">NPI: ${esc(p.npi)}</span>`:'';
+  const name=fullName(p);
+  return`<div class="pcard st-${ws}">
+    <div class="pcard-hdr">
+      <div class="avatar" style="background:${cc.bg};color:${cc.tx}">${initials(p)}</div>
+      <div style="flex:1;min-width:0">
+        <div class="pname">${esc(name)}<span class="badge bc-${p.category}">${CAT_LABEL[p.category]}</span>${ec>0?`<span class="badge bx">${ec} expired</span>`:''} ${dc>0?`<span class="badge bs">${dc} expiring soon</span>`:''}</div>
+        <div class="pmeta">
+          ${(p.specialties&&p.specialties.length?p.specialties:p.specialty?[p.specialty]:[]).map(s=>`<span class="spec-pill">${esc(s)}</span>`).join('')}
+          ${p.role?`<span class="meta-item">${esc(p.role)}</span>`:''}
+          ${npi}${dob}${ssn}${p.email?`<span class="meta-item">${esc(p.email)}</span>`:''}
+        </div>
+      </div>
+      <div class="cactions">
+        <button class="bg" onclick="toggleBody('pb-${p.id}',this)">▾ Show</button>
+        <button class="bg" onclick="openAddDocModal('${p.id}')">+ Doc</button>
+        <button class="bg" onclick="openEditModal('${p.id}')">Edit</button>
+        <button class="bg bdel" onclick="confirmDelP('${p.id}','${esc(name)}')">Remove</button>
+      </div>
+    </div>
+    <div class="pbody" id="pb-${p.id}" hidden>
+      ${!(p.docs||[]).length?'<div class="empty-card">No documents yet. Click "+ Doc" to add credentials.</div>':secs}
+    </div>
+  </div>`;
+}
+
+function renderBusinessSection(p){
+  const cc=CAT_CLR.business,docs=p.docs||[];
+  const ec=docs.filter(d=>docStatus(daysUntil(d.expiry))==='expired').length;
+  const dc=docs.filter(d=>docStatus(daysUntil(d.expiry))==='danger').length;
+  const docCards=docs.map(d=>{
+    const days=daysUntil(d.expiry),st=docStatus(days);
+    const stClr={expired:'var(--red)',danger:'var(--amber)',warn:'#2563eb',ok:'var(--green)',none:'var(--t3)'};
+    return`<div class="biz-doc-card st-b-${st}">
+      <div class="biz-doc-top">
+        <div>
+          <div class="biz-doc-name">${esc(d.type)}</div>
+          <div class="biz-doc-group">${esc(d.group)}</div>
+          ${d.licenseNo?`<div class="biz-doc-licno">Lic #: ${esc(d.licenseNo)}</div>`:''}
+        </div>
+        <span class="biz-doc-status" style="color:${stClr[st]}">${statusText(days)}</span>
+      </div>
+      <div class="biz-doc-date">Expires: ${fmtDate(d.expiry)}</div>
+      ${d.notes?`<div class="doc-notes" style="margin-top:4px">${esc(d.notes)}</div>`:''}
+      ${renderFilePills(p.id,d.id,d.type)}
+    </div>`;
+  }).join('');
+  const name=fullName(p)||p.name||'Business';
+  return`<div class="biz-section">
+    <div class="biz-header">
+      <div class="avatar" style="background:${cc.bg};color:${cc.tx};font-size:12px">${initials(p)}</div>
+      <div style="flex:1">
+        <div class="biz-name">${esc(name)}<span class="badge bc-business">Business</span>${ec>0?`<span class="badge bx">${ec} expired</span>`:''} ${dc>0?`<span class="badge bs">${dc} expiring soon</span>`:''}</div>
+        ${p.email?`<div class="pmeta">${esc(p.email)}</div>`:''}
+      </div>
+      <div class="cactions">
+        <button class="bg" onclick="toggleBody('biz-docs-${p.id}',this)">▾ Show</button>
+        <button class="bg" onclick="openAddDocModal('${p.id}')">+ Doc</button>
+        <button class="bg" onclick="openEditModal('${p.id}')">Edit</button>
+        <button class="bg bdel" onclick="confirmDelP('${p.id}','${esc(name)}')">Remove</button>
+      </div>
+    </div>
+    <div class="biz-docs" id="biz-docs-${p.id}" hidden>
+      ${!docs.length?'<div class="empty-card" style="padding:12px">No documents yet. Click "+ Doc" to add.</div>':docCards}
+    </div>
+  </div>`;
+}
+
+window.toggleBody=(id,btn)=>{const b=$(id);if(!b)return;b.hidden=!b.hidden;btn.textContent=b.hidden?'▾ Show':'▴ Hide';};
+window.switchMainTab=el=>{
+  document.querySelectorAll('.main-tab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');mainTab=el.dataset.tab;metricFilter=null;
+  const btn=$('header-add-btn');
+  if(mainTab==='maintenance'){btn.textContent='+ Add item';btn.onclick=()=>openAddMaintModal();}
+  else{btn.textContent='+ Add record';btn.onclick=()=>openAddModal();}
+  renderAll();
+};
+window.switchCredTab=el=>{document.querySelectorAll('.cred-tab').forEach(b=>b.classList.remove('active'));el.classList.add('active');credTab=el.dataset.cat;metricFilter=null;renderCreds();};
+
+// ── Person modal ───────────────────────────────────────────────────────────────
+window.openAddModal=()=>{
+  editId=null;$('pm-title').textContent='Add record';
+  ['f-fname','f-mname','f-lname','f-npi','f-email','f-phone','f-dob','f-ssn4','f-empid'].forEach(id=>$(id)&&($(id).value=''));
+  $('f-cat').value='md';onCatChange();buildDocSections('md',[]);openModal('person-modal');
+};
+window.openEditModal=id=>{
+  const p=people.find(x=>x.id===id);if(!p)return;
+  editId=id;$('pm-title').textContent='Edit record';
+  $('f-fname').value=p.firstName||p.name||'';$('f-mname').value=p.middleName||'';$('f-lname').value=p.lastName||'';
+  $('f-cat').value=p.category;$('f-npi').value=p.npi||'';$('f-email').value=p.email||'';
+  $('f-phone').value=p.phone||'';$('f-dob').value=p.dob||'';$('f-ssn4').value=p.ssn4||'';
+  if($('f-empid'))$('f-empid').value=p.employeeId||'';
+  onCatChange(p.specialties||p.specialty||p.role||'');buildDocSections(p.category,p.docs||[]);openModal('person-modal');
+};
+// Build specialty checklist (multi-select)
+function buildSpecialtyList(cat, selected){
+  const list=SPECIALTIES[cat]||[];
+  const sel=Array.isArray(selected)?selected:(selected?[selected]:[]);
+  $('f-specialty-list').innerHTML=list.map(s=>`
+    <label class="spec-check-row">
+      <input type="checkbox" value="${esc(s)}"${sel.includes(s)?' checked':''}>
+      <span>${esc(s)}</span>
+    </label>`).join('');
+}
+function getSelectedSpecialties(){
+  return [...document.querySelectorAll('#f-specialty-list input:checked')].map(i=>i.value);
+}
+
+window.onCatChange=(prefill)=>{
+  const cat=$('f-cat').value;
+  const specWrap=$('f-specialty-wrap'),roleWrap=$('f-role-wrap'),dobWrap=$('f-dobssn-wrap'),empWrap=$('f-empid-wrap');
+  const npiLbl=$('f-npi-label-text'),npiStar=$('f-npi-req-star');
+  const npiRequired=['md','do','od','nppa'];
+  const hasDobSsn=['md','do','od','nppa','staff'];
+  const hasEmpId=['staff'];
+
+  if(cat==='business'){
+    specWrap.style.display='none';roleWrap.style.display='block';
+    npiLbl.textContent='Tax ID / EIN';npiStar.style.display='none';
+    dobWrap.style.display='none';if(empWrap)empWrap.style.display='none';
+  } else {
+    specWrap.style.display='block';roleWrap.style.display='none';
+    npiLbl.textContent='NPI #';
+    npiStar.style.display=npiRequired.includes(cat)?'inline':'none';
+    dobWrap.style.display=hasDobSsn.includes(cat)?'grid':'none';
+    if(empWrap)empWrap.style.display=hasEmpId.includes(cat)?'block':'none';
+    // Build checklist — prefill can be array or string (legacy)
+    buildSpecialtyList(cat, prefill||[]);
+  }
+  if(prefill===undefined)buildDocSections(cat,[]);
+};
+function buildDocSections(cat,ex,containerId='doc-sections'){
+  rowCtr=0;const g=DOC_GROUPS[cat];
+  $(containerId).innerHTML=Object.entries(g).map(([gn,pr])=>{
+    const gd=ex.filter(d=>d.group===gn);const rows=gd.length?gd:[null];
+    return`<div class="dsec" data-group="${esc(gn)}" data-cat="${esc(cat)}">
+      <div class="dsec-hdr"><div class="dsec-title">${esc(gn)}</div><button type="button" class="bg" onclick="addDocRow(this)">+ Add</button></div>
+      <div class="drows">${rows.map(d=>buildDocRow(gn,cat,pr,d)).join('')}</div>
+    </div>`;
+  }).join('');
+}
+function buildDocRow(gn,cat,pr,ex){
+  rowCtr++;
+  const sv=ex&&pr.includes(ex.type)?ex.type:pr[0];
+  const cv=ex&&!pr.includes(ex.type)?ex.type:'';
+  return`<div class="doc-row">
+    <select class="dr-type" onchange="onTC(this)">
+      <option value="">Custom…</option>
+      ${pr.map(t=>`<option value="${esc(t)}"${sv===t?' selected':''}>${esc(t)}</option>`).join('')}
+    </select>
+    <input type="text" class="dr-custom" placeholder="Custom name" value="${esc(cv)}" style="display:${cv?'block':'none'}">
+    <input type="text" class="dr-licno" placeholder="License #" value="${esc(ex?.licenseNo||'')}">
+    <input type="date" class="dr-date" value="${esc(ex?.expiry||'')}">
+    <input type="text" class="dr-notes" placeholder="Notes" value="${esc(ex?.notes||'')}">
+    <button type="button" class="bg bdel" onclick="this.closest('.doc-row').remove()">✕</button>
+  </div>`;
+}
+window.onTC=sel=>{sel.parentElement.querySelector('.dr-custom').style.display=sel.value===''?'block':'none';};
+window.addDocRow=btn=>{
+  const s=btn.closest('.dsec'),pr=DOC_GROUPS[s.dataset.cat]?.[s.dataset.group]||[];
+  const div=document.createElement('div');div.innerHTML=buildDocRow(s.dataset.group,s.dataset.cat,pr,null);
+  s.querySelector('.drows').appendChild(div.firstElementChild);
+};
+function collectDocsFrom(containerId){
+  const d=[];
+  document.querySelectorAll(`#${containerId} .dsec`).forEach(s=>{
+    const gn=s.dataset.group;
+    s.querySelectorAll('.doc-row').forEach(r=>{
+      const sel=r.querySelector('.dr-type').value,cust=r.querySelector('.dr-custom').value.trim();
+      const licenseNo=r.querySelector('.dr-licno').value.trim();
+      const exp=r.querySelector('.dr-date').value,notes=r.querySelector('.dr-notes').value.trim();
+      const type=sel===''?cust:sel;
+      if(type)d.push({id:uid(),group:gn,type,licenseNo:licenseNo||null,expiry:exp||null,notes});
+    });
+  });
+  return d;
+}
+window.savePersonForm=async()=>{
+  const firstName=$('f-fname').value.trim(),lastName=$('f-lname').value.trim(),middleName=$('f-mname').value.trim();
+  if(!firstName&&!lastName){alert('Please enter at least a first or last name.');return;}
+  const cat=$('f-cat').value,npi=$('f-npi').value.trim();
+  const npiRequired=['md','do','od','nppa'];
+  if(npiRequired.includes(cat)&&!npi){alert('NPI # is required for this category.');$('f-npi').focus();return;}
+  const ssn4=$('f-ssn4').value.replace(/\D/g,'').slice(-4);
+  const now=new Date().toISOString(),ex=editId?people.find(p=>p.id===editId):null;
+  const name=[firstName,middleName,lastName].filter(Boolean).join(' ');
+  const specialties=cat!=='business'?getSelectedSpecialties():[];
+  const p={
+    id:editId||uid(),name,firstName,middleName,lastName,category:cat,
+    specialties,
+    specialty:specialties.join(', '), // legacy field for backward compat
+    role:cat==='business'?($('f-role').value.trim()):'',
+    npi,employeeId:$('f-empid')?$('f-empid').value.trim():'',
+    email:$('f-email').value.trim(),phone:$('f-phone').value.trim(),
+    dob:$('f-dob').value||null,ssn4:ssn4||null,
+    docs:collectDocsFrom('doc-sections'),createdAt:ex?.createdAt||now,updatedAt:now
+  };
+  try{await savePerson(p);closeModal('person-modal');toast(editId?'Record updated.':'Record added.');}
+  catch(e){toast('Error: '+e.message,'error');}
+};
+window.confirmDelP=async(id,name)=>{if(!confirm(`Remove "${name}"?`))return;try{await deletePerson(id);toast('Record removed.');}catch(e){toast('Error.','error');}};
+
+// ── Add Document modal ─────────────────────────────────────────────────────────
+window.openAddDocModal=id=>{
+  addDocPersonId=id;
+  const p=people.find(x=>x.id===id);if(!p)return;
+  $('adoc-title').textContent='Add document — '+esc(fullName(p)||p.name||'');
+  buildDocSections(p.category,[],'adoc-sections');
+  openModal('adoc-modal');
+};
+window.saveAddDocForm=async()=>{
+  const p=people.find(x=>x.id===addDocPersonId);if(!p)return;
+  const newDocs=collectDocsFrom('adoc-sections');
+  if(!newDocs.length){alert('Please add at least one document.');return;}
+  const updated={...p,docs:[...(p.docs||[]),...newDocs],updatedAt:new Date().toISOString()};
+  try{await savePerson(updated);closeModal('adoc-modal');toast(`${newDocs.length} document${newDocs.length>1?'s':''} added.`);}
+  catch(e){toast('Error: '+e.message,'error');}
+};
+
+// ── MAINTENANCE ────────────────────────────────────────────────────────────────
+function renderMaint(){
+  $('cred-section').style.display='none';$('maint-section').style.display='block';
+  const o=['expired','danger','warn','ok','none'],s=$('maint-search').value.toLowerCase(),cf=$('maint-cat-filter').value;
+  let f=maint.filter(i=>{
+    if(cf!=='all'&&i.category!==cf)return false;
+    if(s&&!i.name.toLowerCase().includes(s)&&!(i.location||'').toLowerCase().includes(s))return false;
+    return true;
+  }).sort((a,b)=>o.indexOf(maintStatus(a))-o.indexOf(maintStatus(b)));
+  if(metricFilter==='overdue-maint')f=f.filter(i=>maintStatus(i)==='expired');
+  else if(metricFilter==='due-maint')f=f.filter(i=>maintStatus(i)==='danger'||maintStatus(i)==='warn');
+  const el=$('maint-list');
+  if(!f.length){el.innerHTML=`<div class="empty-state"><strong>${maint.length===0?'No maintenance items yet':'Nothing matches'}</strong><span>${maint.length===0?'Click "+ Add item" to get started.':'Try adjusting the filters.'}</span></div>`;return;}
+  const byC={};for(const i of f){const c=i.category||'Other';if(!byC[c])byC[c]=[];byC[c].push(i);}
+  el.innerHTML=Object.entries(byC).map(([cat,items])=>`
+    <div class="mcat-sec"><div class="mcat-hdr">${esc(cat)}</div>
+    <div class="mgrid">${items.map(renderMaintCard).join('')}</div></div>`).join('');
+}
+function renderMaintCard(item){
+  const st=maintStatus(item),days=maintDaysUntil(item),next=nextDueDate(item);
+  const stLbl={expired:'Overdue',danger:'Due soon',warn:'Upcoming',ok:'On schedule',none:'Not scheduled'};
+  const stClr={expired:'var(--red)',danger:'var(--amber)',warn:'#2563eb',ok:'var(--green)',none:'var(--t3)'};
+  const icon=MAINT_ICON[item.category]||'⚙️';
+  const daysTxt=days===null?'':(days<0?` (${Math.abs(days)}d overdue)`:days===0?' (today)':`(${days}d away)`);
+  return`<div class="mcard st-b-${st}">
+    <div class="mcard-hdr">
+      <div class="micon">${icon}</div>
+      <div style="flex:1;min-width:0"><div class="mname">${esc(item.name)}</div><div class="mmeta">${esc(item.location||'')}${item.serialNo?` · S/N: ${esc(item.serialNo)}`:''}</div></div>
+      <div style="display:flex;gap:5px;flex-shrink:0">
+        <button class="bg" onclick="openEditMaintModal('${item.id}')">Edit</button>
+        <button class="bg" onclick="markDone('${item.id}')">✓ Done</button>
+        <button class="bg bdel" onclick="confirmDelM('${item.id}','${esc(item.name)}')">✕</button>
+      </div>
+    </div>
+    <div class="mdetails">
+      <div class="mrow"><span class="mlbl">Frequency</span><span class="mval">${intLabel(item.intervalDays)}</span></div>
+      <div class="mrow"><span class="mlbl">Last done</span><span class="mval">${fmtDate(item.lastDone)}</span></div>
+      <div class="mrow"><span class="mlbl">Next due</span><span class="mval" style="color:${stClr[st]};font-weight:600">${fmtDate(next)}</span></div>
+      ${days!==null?`<div class="mrow"><span class="mlbl">Status</span><span class="mval" style="color:${stClr[st]};font-weight:600">${stLbl[st]}${daysTxt}</span></div>`:''}
+      ${item.notifyDays?`<div class="mrow"><span class="mlbl">Notify</span><span class="mval">${item.notifyDays}d before due</span></div>`:''}
+      ${item.notes?`<div class="mrow"><span class="mlbl">Notes</span><span class="mval">${esc(item.notes)}</span></div>`:''}
+    </div>
+  </div>`;
+}
+window.openAddMaintModal=()=>{
+  editMId=null;$('mm-title').textContent='Add maintenance item';
+  ['m-name','m-location','m-serial','m-last-done','m-notes'].forEach(id=>$(id).value='');
+  $('m-category').value='Diagnostic Equipment';$('m-interval-preset').value='90';
+  $('m-custom-wrap').style.display='none';$('m-interval-custom').value='';$('m-notify-days').value='30';
+  openModal('maint-modal');
+};
+window.openEditMaintModal=id=>{
+  const item=maint.find(x=>x.id===id);if(!item)return;
+  editMId=id;$('mm-title').textContent='Edit maintenance item';
+  $('m-name').value=item.name||'';$('m-category').value=item.category||'Diagnostic Equipment';
+  $('m-location').value=item.location||'';$('m-serial').value=item.serialNo||'';
+  $('m-last-done').value=item.lastDone||'';$('m-notes').value=item.notes||'';$('m-notify-days').value=item.notifyDays||30;
+  const pr=[1,7,30,90,180,365,730];
+  if(pr.includes(parseInt(item.intervalDays))){$('m-interval-preset').value=String(item.intervalDays);$('m-custom-wrap').style.display='none';}
+  else{$('m-interval-preset').value='0';$('m-interval-custom').value=item.intervalDays||'';$('m-custom-wrap').style.display='block';}
+  openModal('maint-modal');
+};
+window.onIntChange=()=>{$('m-custom-wrap').style.display=$('m-interval-preset').value==='0'?'block':'none';};
+window.saveMaintForm=async()=>{
+  const name=$('m-name').value.trim();if(!name){alert('Please enter an item name.');return;}
+  const pv=$('m-interval-preset').value,cv=$('m-interval-custom').value;
+  const intervalDays=parseInt(pv==='0'?cv:pv)||0;if(!intervalDays){alert('Please enter a maintenance interval.');return;}
+  const notifyDays=parseInt($('m-notify-days').value)||30;
+  const now=new Date().toISOString(),ex=editMId?maint.find(i=>i.id===editMId):null;
+  const item={id:editMId||uid(),name,category:$('m-category').value,location:$('m-location').value.trim(),serialNo:$('m-serial').value.trim(),lastDone:$('m-last-done').value||null,intervalDays,notifyDays,notes:$('m-notes').value.trim(),createdAt:ex?.createdAt||now,updatedAt:now};
+  try{await saveMaintItem(item);closeModal('maint-modal');toast(editMId?'Item updated.':'Item added.');}
+  catch(e){toast('Error: '+e.message,'error');}
+};
+window.markDone=async id=>{
+  const item=maint.find(x=>x.id===id);if(!item)return;
+  const today=new Date().toISOString().split('T')[0];
+  try{await saveMaintItem({...item,lastDone:today,updatedAt:new Date().toISOString()});toast('Marked as done today ✓');}
+  catch(e){toast('Error.','error');}
+};
+window.confirmDelM=async(id,name)=>{if(!confirm(`Remove "${name}"?`))return;try{await deleteMaintItem(id);toast('Item removed.');}catch(e){toast('Error.','error');}};
+
+// ── Admin panel ────────────────────────────────────────────────────────────────
+window.openAdminPanel=()=>{renderAdminList();openModal('admin-modal');};
+function renderAdminList(){
+  const el=$('admin-user-list');if(!el)return;
+  el.innerHTML=allowedUsers.length?allowedUsers.map(u=>`
+    <div class="admin-user-row">
+      <div><div style="font-size:13px;font-weight:600">${esc(u.email)}</div>
+      <div style="font-size:11px;color:var(--t3)">${esc(u.role||'user')} · Added ${fmtDate((u.addedAt||'').split('T')[0])}</div></div>
+      ${u.email!==currentUser.email?`<button class="bg bdel" onclick="removeUser('${esc(u.email)}')">Remove</button>`:'<span style="font-size:11px;color:var(--t3)">(you)</span>'}
+    </div>`).join(''):'<div style="font-size:13px;color:var(--t3);padding:8px">No users yet.</div>';
+}
+window.addAllowedUser=async()=>{
+  const email=$('admin-new-email').value.trim().toLowerCase(),role=$('admin-new-role').value;
+  if(!email){alert('Please enter an email.');return;}
+  try{await setDoc(doc(db,'allowedUsers',email),{role,addedAt:new Date().toISOString()});$('admin-new-email').value='';toast('User added: '+email);}
+  catch(e){toast('Error: '+e.message,'error');}
+};
+window.removeUser=async email=>{
+  if(!confirm(`Remove access for ${email}?`))return;
+  try{await deleteDoc(doc(db,'allowedUsers',email));toast('User removed.');}catch(e){toast('Error.','error');}
+};
+
+// ── Export ─────────────────────────────────────────────────────────────────────
+window.openExportModal=()=>{
+  const pList=$('export-people-list');
+  pList.innerHTML=people.map(p=>`
+    <label class="pcheck-row">
+      <input type="checkbox" class="exp-person-cb" value="${p.id}" checked>
+      <span style="flex:1">${esc(fullName(p)||p.name)}</span>
+      <span class="badge bc-${p.category}">${CAT_LABEL[p.category]}</span>
+    </label>`).join('')||'<div style="font-size:12px;color:var(--t3)">No records yet.</div>';
+  openModal('export-modal');
+};
+window.runExport=()=>{
+  const fmt=$('export-format').value;
+  const inclCreds=$('exp-creds').checked,inclMaint=$('exp-maint').checked;
+  const statusFilter=$('export-status-filter').value;
+  const selectedIds=[...document.querySelectorAll('.exp-person-cb:checked')].map(i=>i.value);
+  if(!inclCreds&&!inclMaint){alert('Please select at least one section.');return;}
+  if(fmt==='excel')exportExcel(inclCreds,inclMaint,statusFilter,selectedIds);
+  else exportPDF(inclCreds,inclMaint,statusFilter,selectedIds);
+};
+function filterDocsForExport(docs,statusFilter){
+  if(statusFilter==='all')return docs||[];
+  return(docs||[]).filter(d=>{const st=docStatus(daysUntil(d.expiry));return statusFilter==='expired'?st==='expired':statusFilter==='danger'?['expired','danger'].includes(st):['expired','danger','warn'].includes(st);});
+}
+function exportExcel(inclCreds,inclMaint,statusFilter,selectedIds){
+  const wb=XLSX.utils.book_new();
+  if(inclCreds){
+    const rows=[['Name','Category','Specialty/Role','NPI','Employee ID','Email','Document Type','Group','License #','Expiry Date','Status','Notes']];
+    people.filter(p=>selectedIds.includes(p.id)).forEach(p=>{
+      const docs=filterDocsForExport(p.docs,statusFilter);
+      if(!docs.length){rows.push([fullName(p)||p.name,CAT_LABEL[p.category],p.specialty||p.role||'',p.npi||'',p.employeeId||'',p.email||'','','','','','','']);return;}
+      docs.forEach(d=>{const days=daysUntil(d.expiry);rows.push([fullName(p)||p.name,CAT_LABEL[p.category],p.specialty||p.role||'',p.npi||'',p.employeeId||'',p.email||'',d.type,d.group,d.licenseNo||'',d.expiry||'',statusText(days),d.notes||'']);});
+    });
+    const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:22},{wch:14},{wch:22},{wch:14},{wch:12},{wch:24},{wch:28},{wch:22},{wch:16},{wch:14},{wch:14},{wch:24}];
+    XLSX.utils.book_append_sheet(wb,ws,'Credentials');
+  }
+  if(inclMaint){
+    const rows=[['Item Name','Category','Location','Serial/Model #','Last Done','Interval','Next Due','Notify (days)','Status','Notes']];
+    maint.forEach(i=>{const days=maintDaysUntil(i),next=nextDueDate(i),st=maintStatus(i);const stLbl={expired:'Overdue',danger:'Due soon',warn:'Upcoming',ok:'On schedule',none:'Not scheduled'};rows.push([i.name,i.category||'',i.location||'',i.serialNo||'',i.lastDone||'',intLabel(i.intervalDays),next||'',i.notifyDays||'',stLbl[st],i.notes||'']);});
+    const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:24},{wch:20},{wch:18},{wch:16},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:28}];
+    XLSX.utils.book_append_sheet(wb,ws,'Maintenance');
+  }
+  XLSX.writeFile(wb,`Plessen_Credentials_${new Date().toISOString().split('T')[0]}.xlsx`);
+  closeModal('export-modal');toast('Excel file downloaded.');
+}
+function exportPDF(inclCreds,inclMaint,statusFilter,selectedIds){
+  const today=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const stColor={expired:'#7f1d1d',danger:'#92400e',warn:'#1e40af',ok:'#166534',none:'#64748b'};
+  const stBg={expired:'#fee2e2',danger:'#fef3c7',warn:'#dbeafe',ok:'#dcfce7',none:'#f1f5f9'};
+  let credHtml='',maintHtml='';
+  if(inclCreds){
+    credHtml=`<h2 style="color:#1e3a8a;font-size:16px;margin:24px 0 12px;border-bottom:2px solid #bfdbfe;padding-bottom:8px">Credentials</h2>`;
+    people.filter(p=>selectedIds.includes(p.id)).forEach(p=>{
+      const docs=filterDocsForExport(p.docs,statusFilter);
+      credHtml+=`<div style="margin-bottom:18px;border:1px solid #bfdbfe;border-radius:8px;overflow:hidden">
+        <div style="background:#eff6ff;padding:10px 14px;border-bottom:1px solid #bfdbfe">
+          <span style="font-weight:700;font-size:13px;color:#1e3a8a">${esc(fullName(p)||p.name)}</span>
+          <span style="margin-left:8px;font-size:11px;color:#64748b">${esc(CAT_LABEL[p.category])} · ${esc(p.specialty||p.role||'')}${p.npi?' · NPI: '+esc(p.npi):''}${p.employeeId?' · EMP: '+esc(p.employeeId):''}</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#f8faff">
+            <th style="padding:7px 10px;text-align:left;color:#475569;font-weight:600;border-bottom:1px solid #e2e8f0">Document</th>
+            <th style="padding:7px 10px;text-align:left;color:#475569;font-weight:600;border-bottom:1px solid #e2e8f0">License #</th>
+            <th style="padding:7px 10px;text-align:left;color:#475569;font-weight:600;border-bottom:1px solid #e2e8f0">Expiry</th>
+            <th style="padding:7px 10px;text-align:left;color:#475569;font-weight:600;border-bottom:1px solid #e2e8f0">Status</th>
+          </tr></thead>
+          <tbody>${docs.length?docs.map(d=>{const days=daysUntil(d.expiry),st=docStatus(days);return`<tr><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${esc(d.type)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${esc(d.licenseNo||'—')}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${fmtDate(d.expiry)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9"><span style="background:${stBg[st]};color:${stColor[st]};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">${statusText(days)}</span></td></tr>`;}).join(''):`<tr><td colspan="4" style="padding:10px;color:#94a3b8;font-style:italic">No documents match the selected filter.</td></tr>`}</tbody>
+        </table>
+      </div>`;
+    });
+  }
+  if(inclMaint){
+    maintHtml=`<h2 style="color:#1e3a8a;font-size:16px;margin:24px 0 12px;border-bottom:2px solid #bfdbfe;padding-bottom:8px">Maintenance</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #bfdbfe;border-radius:8px;overflow:hidden">
+      <thead><tr style="background:#eff6ff"><th style="padding:8px 10px;text-align:left;color:#1e40af;font-weight:700;border-bottom:1px solid #bfdbfe">Item</th><th style="padding:8px 10px;text-align:left;color:#1e40af;font-weight:700;border-bottom:1px solid #bfdbfe">Category</th><th style="padding:8px 10px;text-align:left;color:#1e40af;font-weight:700;border-bottom:1px solid #bfdbfe">Interval</th><th style="padding:8px 10px;text-align:left;color:#1e40af;font-weight:700;border-bottom:1px solid #bfdbfe">Last Done</th><th style="padding:8px 10px;text-align:left;color:#1e40af;font-weight:700;border-bottom:1px solid #bfdbfe">Next Due</th><th style="padding:8px 10px;text-align:left;color:#1e40af;font-weight:700;border-bottom:1px solid #bfdbfe">Status</th></tr></thead>
+      <tbody>${maint.map(i=>{const days=maintDaysUntil(i),next=nextDueDate(i),st=maintStatus(i);const stLbl={expired:'Overdue',danger:'Due soon',warn:'Upcoming',ok:'On schedule',none:'Not scheduled'};return`<tr><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9"><strong>${esc(i.name)}</strong>${i.location?`<br><span style="color:#94a3b8;font-size:11px">${esc(i.location)}</span>`:''}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${esc(i.category||'')}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${intLabel(i.intervalDays)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${fmtDate(i.lastDone)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${fmtDate(next)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9"><span style="background:${stBg[st]||'#f1f5f9'};color:${stColor[st]||'#64748b'};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">${stLbl[st]}</span></td></tr>`;}).join('')}</tbody>
+    </table>`;
+  }
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:32px;color:#0f172a}@media print{body{padding:16px}}</style></head><body>
+  <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1e3a8a;padding-bottom:16px;margin-bottom:24px">
+    <div><div style="font-size:10px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.1em">Plessen Ophthalmology</div><div style="font-size:22px;font-weight:700;color:#1e3a8a">Credential &amp; Maintenance Report</div></div>
+    <div style="text-align:right;font-size:12px;color:#64748b">Generated: ${today}</div>
+  </div>${credHtml}${maintHtml}</body></html>`;
+  const win=window.open('','_blank');win.document.write(html);win.document.close();setTimeout(()=>{win.print();},600);
+  closeModal('export-modal');
+}
+
+// ── Reminder ───────────────────────────────────────────────────────────────────
+window.openReminderModal=()=>{
+  $('person-checklist').innerHTML=people.map(p=>`<label class="pcheck-row"><input type="checkbox" value="${p.id}"><span style="flex:1">${esc(fullName(p)||p.name)}</span><span class="badge bc-${p.category}">${CAT_LABEL[p.category]}</span></label>`).join('')||'<div style="font-size:13px;color:var(--t3);padding:8px">No records yet.</div>';
+  $('reminder-result').style.display='none';$('email-preview').classList.remove('show');
+  updateTogBtns();openModal('reminder-modal');
+};
+window.toggleFilter=k=>{rF[k]=!rF[k];updateTogBtns();};
+function updateTogBtns(){['expired','danger','warn'].forEach(k=>{const b=$('tog-'+k);b.className='toggle-btn';if(rF[k])b.classList.add('on-'+k);});}
+function getTargets(){
+  const ids=[...document.querySelectorAll('#person-checklist input:checked')].map(i=>i.value);
+  const pool=ids.length?people.filter(p=>ids.includes(p.id)):people;
+  const t=[];
+  for(const p of pool)for(const d of(p.docs||[])){const days=daysUntil(d.expiry);if(days===null)continue;const st=docStatus(days);if(rF[st])t.push({person:p,doc:d,days,st});}
+  return t;
+}
+function buildEmailHtml(targets,rName){
+  const today=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const exp=targets.filter(t=>t.days<0).length,dan=targets.filter(t=>t.days>=0&&t.days<=30).length;
+  const rows=targets.map(t=>{
+    const col=t.days<0?'#7f1d1d':t.days<=30?'#92400e':'#1e40af';
+    const bg=t.days<0?'#fee2e2':t.days<=30?'#fef3c7':'#dbeafe';
+    const lbl=t.days<0?`Expired ${Math.abs(t.days)}d ago`:t.days===0?'Expires TODAY':`Expires in ${t.days} days`;
+    return`<tr><td style="padding:10px 14px;border-bottom:1px solid #eee;font-size:13px">${esc(fullName(t.person)||t.person.name)}</td><td style="padding:10px 14px;border-bottom:1px solid #eee;font-size:13px">${esc(t.doc.type)}</td><td style="padding:10px 14px;border-bottom:1px solid #eee;font-size:13px">${fmtDate(t.doc.expiry)}</td><td style="padding:10px 14px;border-bottom:1px solid #eee"><span style="background:${bg};color:${col};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">${lbl}</span></td></tr>`;
+  }).join('');
+  return`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#eff6ff;font-family:system-ui,sans-serif"><div style="max-width:700px;margin:32px auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #bfdbfe"><div style="background:#1e3a8a;padding:28px 32px"><div style="font-size:9px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Plessen Ophthalmology</div><div style="font-size:20px;font-weight:700;color:#fff">Credential Reminder</div></div><div style="padding:28px 32px"><p style="font-size:15px;color:#1e3a8a;margin:0 0 8px;font-weight:600">Hello ${esc(rName)},</p><p style="font-size:13px;color:#555;line-height:1.6;margin:0 0 24px">${exp>0?`<strong style="color:#7f1d1d">${exp} credential${exp>1?'s have':' has'} expired.</strong> `:''}${dan>0?`<strong style="color:#92400e">${dan} expiring within 30 days.</strong>`:''}</p><table style="width:100%;border-collapse:collapse;border:1px solid #bfdbfe"><thead><tr style="background:#eff6ff"><th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase">Person</th><th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase">Document</th><th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase">Expiry</th><th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase">Status</th></tr></thead><tbody>${rows}</tbody></table><p style="font-size:12px;color:#aaa;margin:20px 0 0">Plessen Ophthalmology · ${today}</p></div></div></body></html>`;
+}
+window.previewReminder=()=>{
+  const t=getTargets(),rn=$('r-name').value.trim()||'Administrator';
+  const res=$('reminder-result');res.style.display='block';
+  if(!t.length){res.innerHTML='<div class="rbox info">No documents match the selected filters.</div>';$('email-preview').classList.remove('show');return;}
+  lastHtml=buildEmailHtml(t,rn);res.innerHTML=`<div class="rbox ok">${t.length} document(s) included.</div>`;
+  $('email-preview').classList.add('show');$('preview-frame').srcdoc=lastHtml;
+};
+window.openMailto=()=>{
+  const re=$('r-email').value.trim();if(!re){alert('Please enter a recipient email.');return;}
+  const t=getTargets();if(!t.length){alert('No documents match the filters.');return;}
+  const exp=t.filter(x=>x.days<0).length,dan=t.filter(x=>x.days>=0&&x.days<=30).length;
+  const subj=encodeURIComponent(`[Action Required] ${exp} Expired, ${dan} Expiring Soon — Plessen Ophthalmology`);
+  const body=encodeURIComponent(['Credential expiration summary:','',...t.map(x=>`• ${fullName(x.person)||x.person.name} | ${x.doc.type} | ${fmtDate(x.doc.expiry)} | ${statusLabel(x.days)}`),'',`Plessen Ophthalmology · ${new Date().toLocaleDateString()}`].join('\n'));
+  window.location.href=`mailto:${encodeURIComponent(re)}?subject=${subj}&body=${body}`;
+};
+window.copyHtml=()=>{if(!lastHtml)return;navigator.clipboard.writeText(lastHtml).then(()=>toast('HTML copied!')).catch(()=>alert('Copy failed.'));};
+</script>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ff:'DM Sans',system-ui,sans-serif;
+  --bd:#1e3a8a;--bm:#2563eb;--bl:#3b82f6;
+  --bp:#eff6ff;--bs:#dbeafe;--bb:#bfdbfe;
+  --bg:#eef2ff;--surf:#fff;--s2:#f8faff;--s3:#eff6ff;
+  --bdr:#e2e8f0;--t1:#0f172a;--t2:#475569;--t3:#94a3b8;
+  --green:#166534;--gbg:#dcfce7;
+  --amber:#92400e;--abg:#fef3c7;--abb:#fcd34d;
+  --red:#7f1d1d;--rbg:#fee2e2;--rbb:#fca5a5;
+  --r4:6px;--r8:10px;--r12:14px;--r20:20px;
+}
+body{font-family:var(--ff);background:var(--bg);color:var(--t1);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+input,select,button{font-family:var(--ff);font-size:14px}button{cursor:pointer}
+
+/* Auth */
+#auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.abox{background:var(--surf);border:1.5px solid var(--bb);border-radius:20px;padding:44px 40px;width:100%;max-width:420px;box-shadow:0 8px 40px rgba(30,58,138,.12)}
+.aey{font-size:10px;font-weight:700;color:var(--bm);text-transform:uppercase;letter-spacing:.12em;margin-bottom:6px}
+.alogo{font-size:22px;font-weight:700;color:var(--bd);letter-spacing:-.5px;margin-bottom:2px}
+.asub{font-size:13px;color:var(--t3);margin-bottom:32px}
+#auth-title{font-size:18px;font-weight:600;margin-bottom:20px}
+.afield{margin-bottom:14px}.afield label{display:block;font-size:12px;font-weight:500;color:var(--t2);margin-bottom:5px}
+.afield input{width:100%;padding:10px 13px;border-radius:var(--r8);border:1.5px solid var(--bdr);background:var(--surf);color:var(--t1);outline:none;transition:border-color .15s}
+.afield input:focus{border-color:var(--bm)}
+#auth-error{font-size:13px;color:var(--red);min-height:20px;margin-bottom:10px}
+.abtn{width:100%;padding:12px;border-radius:var(--r8);border:none;background:var(--bd);color:#fff;font-size:14px;font-weight:600;margin-bottom:12px}
+.abtn:hover{opacity:.88}
+.alink{background:none;border:none;color:var(--t3);font-size:13px;text-decoration:underline;padding:0;display:block;text-align:center;margin-bottom:6px}
+.alink:hover{color:var(--t2)}
+.auth-note{font-size:11px;color:var(--t3);text-align:center;margin-top:16px;padding-top:16px;border-top:1px solid var(--bdr);line-height:1.5}
+
+/* App layout */
+#app-screen{display:none}
+header{background:var(--bd);padding:0 32px;position:sticky;top:0;z-index:50;box-shadow:0 2px 16px rgba(30,58,138,.25)}
+.hinner{max-width:1200px;margin:0 auto;display:flex;align-items:center;height:62px;gap:10px}
+.hey{font-size:9px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.12em}
+.hlogo{font-weight:700;font-size:17px;letter-spacing:-.3px;color:#fff}
+.spacer{flex:1}
+.upill{font-size:12px;color:#93c5fd;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:var(--r20);padding:5px 12px}
+.sdot{width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;margin-right:6px}
+.enc-status-pill{font-size:11px;padding:4px 10px;border-radius:var(--r20);background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.15)}
+main{max-width:1200px;margin:0 auto;padding:28px 32px 64px}
+.hbtn{padding:8px 13px;border-radius:var(--r8);font-size:13px;font-weight:500;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.12);color:#fff}
+.hbtn:hover{background:rgba(255,255,255,.22)}
+.hbtn-p{background:#fff;color:var(--bd);border-color:#fff;font-weight:600}.hbtn-p:hover{background:#eff6ff}
+.hbtn-admin{background:rgba(255,215,0,.2);border-color:rgba(255,215,0,.4);color:#fde68a}.hbtn-admin:hover{background:rgba(255,215,0,.3)}
+.bsurf{padding:8px 16px;border-radius:var(--r8);font-size:13px;font-weight:500;border:1.5px solid var(--bdr);background:var(--surf);color:var(--t1)}
+.bsurf:hover{background:var(--s2)}
+.bsurf-p{padding:8px 16px;border-radius:var(--r8);font-size:13px;font-weight:600;border:none;background:var(--bd);color:#fff}
+.bsurf-p:hover{opacity:.88}
+.bg{padding:5px 10px;border-radius:var(--r4);font-size:12px;border:1px solid var(--bdr);background:transparent;color:var(--t2)}
+.bg:hover{background:var(--s3)}
+.bdel{color:var(--red);border-color:var(--rbb)}.bdel:hover{background:var(--rbg)}
+.bpill{padding:6px 15px;border-radius:var(--r20);font-size:13px;border:1.5px solid var(--bdr);background:var(--surf);color:var(--t2)}
+.bpill.active{background:var(--bd);color:#fff;border-color:var(--bd)}
+.main-tabs{display:flex;gap:4px;margin-bottom:24px;background:var(--surf);border:1.5px solid var(--bb);border-radius:var(--r12);padding:4px;width:fit-content}
+.main-tab{padding:8px 22px;border-radius:10px;font-size:14px;font-weight:500;border:none;background:transparent;color:var(--t2)}
+.main-tab.active{background:var(--bd);color:#fff}
+
+/* Form */
+.field{margin-bottom:14px}.field label{display:block;font-size:12px;font-weight:500;color:var(--t2);margin-bottom:5px}
+input[type=text],input[type=email],input[type=date],input[type=tel],input[type=number],input[type=password],select{width:100%;padding:9px 12px;border-radius:var(--r8);border:1.5px solid var(--bdr);background:var(--surf);color:var(--t1);outline:none;transition:border-color .15s}
+input:focus,select:focus{border-color:var(--bm)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.span2{grid-column:1/-1}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+
+/* Metrics */
+.metrics{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+.metric{background:var(--surf);border:1.5px solid var(--bb);border-radius:var(--r8);padding:14px 20px;flex:1;min-width:110px;cursor:pointer;transition:all .15s}
+.metric:hover{border-color:var(--bl);box-shadow:0 0 0 2px var(--bs)}
+.metric.active{border-color:var(--bd);box-shadow:0 0 0 2px var(--bs);background:var(--bp)}
+.mval{font-size:26px;font-weight:700;line-height:1;color:var(--bd)}
+.mlbl{font-size:11px;color:var(--t3);margin-top:6px}
+.mval.red{color:var(--red)}.mval.amber{color:var(--amber)}
+
+/* Alerts */
+.alert{border-radius:var(--r8);padding:11px 16px;font-size:13px;margin-bottom:12px;border-left:4px solid;display:none}
+.alert.show{display:block}
+.alert.red{background:var(--rbg);border-color:var(--red);color:var(--red)}
+.alert.amber{background:var(--abg);border-color:var(--amber);color:var(--amber)}
+.alert.blue{background:var(--bs);border-color:var(--bl);color:var(--bd)}
+
+/* Toolbar */
+.toolbar,.maint-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.toolbar-right{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.si,.fi{padding:8px 12px;border-radius:var(--r8);border:1.5px solid var(--bdr);background:var(--surf);color:var(--t1);outline:none}
+.si{min-width:180px}
+
+/* Cards */
+.card-list{display:flex;flex-direction:column;gap:14px}
+.pcard{background:var(--surf);border:1.5px solid var(--bdr);border-radius:var(--r12);overflow:hidden}
+.pcard.st-expired{border-color:var(--rbb);box-shadow:0 0 0 1.5px var(--rbb)}
+.pcard.st-danger{border-color:var(--abb);box-shadow:0 0 0 1.5px var(--abb)}
+.pcard-hdr{display:flex;align-items:center;gap:14px;padding:16px 20px}
+.avatar{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
+.pname{font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pmeta{font-size:12px;color:var(--t3);margin-top:3px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.meta-item{display:inline-flex;align-items:center}
+.cactions{margin-left:auto;display:flex;gap:5px;flex-shrink:0}
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 9px;border-radius:var(--r20);text-transform:uppercase;letter-spacing:.03em}
+.bc-md{background:#dbeafe;color:#1e40af}.bc-do{background:#e0e7ff;color:#3730a3}.bc-od{background:#d1fae5;color:#065f46}.bc-nppa{background:#fce7f3;color:#9d174d}.bc-staff{background:#e0f2fe;color:#0369a1}.bc-business{background:var(--bp);color:var(--bm)}
+.bx{background:var(--rbg);color:var(--red)}.bs{background:var(--abg);color:var(--amber)}
+.pbody{border-top:1.5px solid var(--bdr);padding:16px 20px}
+.doc-group{margin-bottom:18px}.doc-group:last-child{margin-bottom:0}
+.grp-hdr{font-size:10px;font-weight:700;color:var(--bm);text-transform:uppercase;letter-spacing:.08em;padding-bottom:8px;border-bottom:2px solid var(--bb);margin-bottom:10px}
+.doc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.doc-chip{border-radius:var(--r8);padding:10px 12px;border-left:3px solid var(--bb);background:var(--bp)}
+.doc-chip.st-ok{border-left-color:#4ade80;background:#f0fdf4}
+.doc-chip.st-warn{border-left-color:#fbbf24;background:#fffbeb}
+.doc-chip.st-danger{border-left-color:#f87171;background:#fff5f5}
+.doc-chip.st-expired{border-left-color:#9ca3af;background:#f9fafb}
+.doc-type{font-size:12px;font-weight:600;margin-bottom:2px}
+.doc-licno{font-size:11px;color:var(--bm);font-weight:500;margin-bottom:2px}
+.doc-date{font-size:11px;color:var(--t3)}
+.doc-st{font-size:10px;font-weight:700;margin-top:5px;text-transform:uppercase;letter-spacing:.04em}
+.doc-st.ok{color:var(--green)}.doc-st.warn{color:var(--amber)}.doc-st.danger,.doc-st.expired{color:var(--red)}
+.doc-notes{font-size:11px;color:var(--t3);font-style:italic;margin-top:3px}
+.empty-card{font-size:13px;color:var(--t3);font-style:italic}
+.empty-state{text-align:center;padding:60px 0;color:var(--t3);font-size:14px}
+.empty-state strong{display:block;font-size:18px;font-weight:600;color:var(--bd);margin-bottom:8px}
+
+/* File attachment UI */
+.doc-files{margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.file-pill{display:inline-flex;align-items:center;background:#f0f9ff;border:1px solid #bae6fd;border-radius:20px;overflow:hidden;max-width:100%}
+.file-view-btn{background:none;border:none;padding:3px 6px 3px 8px;cursor:pointer;color:#0369a1;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
+.file-view-btn:hover{background:#e0f2fe}
+.file-del-btn{background:none;border:none;border-left:1px solid #bae6fd;padding:3px 8px;cursor:pointer;color:#94a3b8;font-size:11px;flex-shrink:0}
+.file-del-btn:hover{background:#fee2e2;color:var(--red)}
+.file-upload-btn{padding:3px 10px;border-radius:20px;border:1.5px dashed var(--bb);background:transparent;color:var(--bm);font-size:11px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.file-upload-btn:hover{background:var(--bd);color:#fff;border-color:var(--bd)}
+
+/* Business section */
+.biz-section{background:var(--surf);border:1.5px solid var(--bb);border-radius:var(--r12);overflow:hidden}
+.biz-header{display:flex;align-items:center;gap:14px;padding:16px 20px;background:var(--s3);border-bottom:1.5px solid var(--bb)}
+.biz-name{font-size:15px;font-weight:700;color:var(--bd);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.biz-docs{padding:16px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.biz-doc-card{background:var(--surf);border:1.5px solid var(--bdr);border-radius:var(--r8);padding:12px 14px;border-top:3px solid var(--bb)}
+.biz-doc-card.st-b-expired{border-top-color:var(--red)}.biz-doc-card.st-b-danger{border-top-color:var(--amber)}
+.biz-doc-card.st-b-warn{border-top-color:var(--bl)}.biz-doc-card.st-b-ok{border-top-color:#4ade80}
+.biz-doc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
+.biz-doc-name{font-size:13px;font-weight:600}.biz-doc-group{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+.biz-doc-licno{font-size:11px;color:var(--bm);font-weight:500;margin-top:2px}
+.biz-doc-status{font-size:11px;font-weight:600;flex-shrink:0}.biz-doc-date{font-size:11px;color:var(--t3)}
+
+/* Maintenance */
+.mcat-sec{margin-bottom:28px}.mcat-hdr{font-size:11px;font-weight:700;color:var(--bm);text-transform:uppercase;letter-spacing:.08em;padding-bottom:10px;border-bottom:2px solid var(--bb);margin-bottom:14px}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.mcard{background:var(--surf);border:1.5px solid var(--bdr);border-radius:var(--r12);overflow:hidden;border-top:3px solid var(--bb)}
+.mcard.st-b-expired{border-top-color:var(--red)}.mcard.st-b-danger{border-top-color:var(--amber)}
+.mcard.st-b-warn{border-top-color:var(--bl)}.mcard.st-b-ok{border-top-color:#4ade80}
+.mcard-hdr{display:flex;align-items:flex-start;gap:10px;padding:14px 16px 10px}
+.micon{font-size:20px;flex-shrink:0}.mname{font-size:14px;font-weight:600}.mmeta{font-size:11px;color:var(--t3);margin-top:2px}
+.mdetails{padding:0 16px 14px}
+.mrow{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--s3);font-size:12px}
+.mrow:last-child{border-bottom:none}.mlbl{color:var(--t3)}.mval{color:var(--t1);text-align:right;max-width:65%}
+
+/* Modals */
+.modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100;display:none;justify-content:center;align-items:flex-start;padding:36px 16px;overflow-y:auto}
+.modal-bg.open{display:flex}
+.modal{background:var(--surf);border-radius:16px;border:1.5px solid var(--bb);width:100%;max-width:640px;padding:32px;position:relative}
+.modal-close-btn{position:absolute;top:14px;right:14px;width:28px;height:28px;border-radius:6px;border:none;background:#dc2626;color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;transition:background .15s}
+.modal-close-btn:hover{background:#b91c1c}
+.modal h2{font-size:18px;font-weight:700;color:var(--bd);margin-bottom:6px;padding-right:36px}
+.modal .sub{font-size:13px;color:var(--t3);margin-bottom:24px}
+.mfooter{display:flex;gap:10px;justify-content:flex-end;margin-top:22px;border-top:1px solid var(--bdr);padding-top:20px}
+.slbl{font-size:10px;font-weight:700;color:var(--bm);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 12px;padding-top:16px;border-top:1px solid var(--bdr)}
+.dsec{margin-bottom:16px}
+.dsec-hdr{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px}
+.dsec-title{font-size:12px;font-weight:600;color:var(--bd)}
+.doc-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.doc-row select,.doc-row input[type=text],.doc-row input[type=date]{padding:6px 8px;border-radius:var(--r4);border:1.5px solid var(--bdr);background:var(--surf);color:var(--t1);font-size:12px;width:auto}
+.dr-type{flex:2;min-width:130px}.dr-custom{flex:2;min-width:110px}.dr-licno{flex:1;min-width:100px}.dr-date{min-width:135px}.dr-notes{flex:2;min-width:90px}
+
+/* Admin */
+.admin-user-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bdr)}
+.admin-user-row:last-child{border-bottom:none}
+.admin-add-row{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.admin-add-row input,.admin-add-row select{flex:1;min-width:150px}
+.security-note{background:var(--bs);border:1px solid var(--bb);border-radius:var(--r8);padding:12px 14px;font-size:12px;color:var(--bd);margin-bottom:20px;line-height:1.6}
+.security-note strong{display:block;margin-bottom:4px}
+.enc-setup-box{background:var(--s3);border:1.5px solid var(--bb);border-radius:var(--r8);padding:16px;margin-top:16px}
+.enc-setup-box h3{font-size:13px;font-weight:700;color:var(--bd);margin-bottom:4px}
+.enc-setup-box p{font-size:12px;color:var(--t2);margin-bottom:12px;line-height:1.5}
+.enc-key-row{display:flex;gap:8px}
+.enc-key-row input{flex:1}
+
+/* Reminder / Export */
+.toggle-group{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.toggle-btn{padding:7px 16px;border-radius:var(--r20);font-size:13px;border:1.5px solid var(--bdr);background:transparent;color:var(--t2)}
+.toggle-btn.on-expired{border-color:var(--red);background:var(--rbg);color:var(--red);font-weight:600}
+.toggle-btn.on-danger{border-color:var(--amber);background:var(--abg);color:var(--amber);font-weight:600}
+.toggle-btn.on-warn{border-color:var(--bl);background:var(--bs);color:var(--bd);font-weight:600}
+.pclist{max-height:180px;overflow-y:auto;border:1.5px solid var(--bdr);border-radius:var(--r8);padding:8px}
+.pcheck-row{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:var(--r4);cursor:pointer;font-size:13px}
+.pcheck-row:hover{background:var(--bp)}
+.rbox{padding:12px 16px;border-radius:var(--r8);font-size:13px;margin-bottom:14px;border-left:4px solid}
+.rbox.ok{background:var(--gbg);border-color:var(--green);color:var(--green)}
+.rbox.info{background:var(--abg);border-color:var(--amber);color:var(--amber)}
+.email-preview{margin-top:16px;border:1px solid var(--bdr);border-radius:var(--r8);overflow:hidden;display:none}
+.email-preview.show{display:block}
+.ep-head{background:var(--s2);padding:10px 14px;font-size:12px;color:var(--t2);border-bottom:1px solid var(--bdr);display:flex;justify-content:space-between;align-items:center}
+.email-preview iframe{width:100%;height:380px;border:none;display:block}
+.export-section-toggle{display:flex;gap:16px;margin-bottom:20px}
+.export-section-toggle label{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;cursor:pointer}
+
+/* Specialty multi-select checklist */
+.spec-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:2px;max-height:180px;overflow-y:auto;border:1.5px solid var(--bdr);border-radius:var(--r8);padding:8px;background:var(--surf)}
+.spec-check-row{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:var(--r4);cursor:pointer;font-size:12px;color:var(--t1)}
+.spec-check-row:hover{background:var(--bp)}
+.spec-check-row input{flex-shrink:0;accent-color:var(--bd)}
+/* Specialty pills on cards */
+.spec-pill{display:inline-block;background:var(--bs);color:var(--bd);font-size:10px;font-weight:600;padding:2px 8px;border-radius:12px;margin:1px 2px 1px 0}
+
+/* Toast */
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--bd);color:#fff;padding:10px 22px;border-radius:var(--r20);font-size:13px;font-weight:500;opacity:0;transition:all .25s;pointer-events:none;z-index:999;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.error{background:var(--red)}
+
+@media(max-width:640px){
+  header{padding:0 12px}main{padding:20px 16px 48px}
+  .grid2,.grid3{grid-template-columns:1fr}.modal{padding:20px}
+  .pcard-hdr{flex-wrap:wrap}.cactions{width:100%;justify-content:flex-end;margin-left:0;margin-top:8px}
+  .hinner{gap:6px}.upill{display:none}.mgrid{grid-template-columns:1fr}.biz-docs{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- Auth -->
+<div id="auth-screen">
+  <div class="abox">
+    <div class="aey">Plessen Ophthalmology</div>
+    <div class="alogo">Credential &amp; Maintenance Tracker</div>
+    <div class="asub">Staff credentials · Equipment · Business documents</div>
+    <h2 id="auth-title">Sign in</h2>
+    <div class="afield"><label>Email address</label><input type="email" id="a-email" placeholder="you@plessenoph.com" onkeydown="if(event.key==='Enter')doSignIn()"></div>
+    <div class="afield"><label>Password</label><input type="password" id="a-pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doSignIn()"></div>
+    <div id="auth-error"></div>
+    <button class="abtn" onclick="doSignIn()">Sign in</button>
+    <button class="alink" onclick="doReset()">Forgot password?</button>
+    <div class="auth-note">🔒 Access restricted to authorized Plessen Ophthalmology staff only.</div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app-screen">
+  <header>
+    <div class="hinner">
+      <div><div class="hey">Plessen Ophthalmology</div><div class="hlogo">Credential &amp; Maintenance Tracker</div></div>
+      <div class="spacer"></div>
+      <div class="upill"><span class="sdot"></span><span id="user-email"></span></div>
+      <span id="enc-key-status" class="enc-status-pill" style="color:#fca5a5">⚠️ Encryption not set</span>
+      <button class="hbtn hbtn-admin" id="admin-btn" onclick="openAdminPanel()" style="display:none">⚙ Admin</button>
+      <button class="hbtn" onclick="openExportModal()">⬇ Export</button>
+      <button class="hbtn" onclick="openReminderModal()">📧 Reminder</button>
+      <button class="hbtn hbtn-p" id="header-add-btn" onclick="openAddModal()">+ Add record</button>
+      <button class="hbtn" onclick="doSignOut()" title="Sign out" style="padding:8px 11px">↩</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="alert red" id="alert-expired"></div>
+    <div class="alert amber" id="alert-danger"></div>
+    <div class="alert blue" id="alert-maint"></div>
+    <div class="metrics" id="metrics"></div>
+    <div class="main-tabs">
+      <button class="main-tab active" data-tab="credentials" onclick="switchMainTab(this)">📋 Credentials</button>
+      <button class="main-tab" data-tab="maintenance" onclick="switchMainTab(this)">🔧 Maintenance</button>
+    </div>
+    <div id="cred-section">
+      <div class="toolbar">
+        <button class="bpill cred-tab active" data-cat="all" onclick="switchCredTab(this)">All</button>
+        <button class="bpill cred-tab" data-cat="md" onclick="switchCredTab(this)">MD</button>
+        <button class="bpill cred-tab" data-cat="do" onclick="switchCredTab(this)">DO</button>
+        <button class="bpill cred-tab" data-cat="od" onclick="switchCredTab(this)">OD</button>
+        <button class="bpill cred-tab" data-cat="nppa" onclick="switchCredTab(this)">NP / PA</button>
+        <button class="bpill cred-tab" data-cat="staff" onclick="switchCredTab(this)">Staff</button>
+        <button class="bpill cred-tab" data-cat="business" onclick="switchCredTab(this)">Business</button>
+        <div class="toolbar-right">
+          <input class="si" type="text" id="search" placeholder="Search…" oninput="renderCreds()">
+          <select class="fi" id="status-filter" onchange="renderCreds()">
+            <option value="all">All statuses</option><option value="expired">Expired</option>
+            <option value="danger">≤ 30 days</option><option value="warn">≤ 90 days</option><option value="ok">Current</option>
+          </select>
+        </div>
+      </div>
+      <div class="card-list" id="card-list"><div class="empty-state"><strong>Loading…</strong></div></div>
+    </div>
+    <div id="maint-section" style="display:none">
+      <div class="maint-toolbar">
+        <input class="si" type="text" id="maint-search" placeholder="Search equipment…" oninput="renderMaint()">
+        <select class="fi" id="maint-cat-filter" onchange="renderMaint()">
+          <option value="all">All categories</option>
+          <option>Diagnostic Equipment</option><option>Surgical Equipment</option><option>Office Equipment</option>
+          <option>Facility</option><option>Safety &amp; Compliance</option><option>IT &amp; Technology</option><option>Other</option>
+        </select>
+        <div class="spacer"></div>
+        <button class="bsurf-p" onclick="openAddMaintModal()">+ Add item</button>
+      </div>
+      <div id="maint-list"><div class="empty-state"><strong>Loading…</strong></div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Person Modal -->
+<div class="modal-bg" id="person-modal">
+  <div class="modal">
+    <button class="modal-close-btn" onclick="closeModal('person-modal')">✕</button>
+    <h2 id="pm-title">Add record</h2>
+    <p class="sub">Physicians, Staff / NP / PA, or Business Entity.</p>
+    <div class="grid3">
+      <div class="field"><label>First name *</label><input type="text" id="f-fname" placeholder="Jane"></div>
+      <div class="field"><label>Middle name</label><input type="text" id="f-mname" placeholder="M."></div>
+      <div class="field"><label>Last name *</label><input type="text" id="f-lname" placeholder="Smith"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Category</label>
+        <select id="f-cat" onchange="onCatChange()">
+          <option value="md">MD — Physician (Allopathic)</option>
+          <option value="do">DO — Physician (Osteopathic)</option>
+          <option value="od">OD — Optometrist</option>
+          <option value="nppa">NP / PA — Mid-Level Provider</option>
+          <option value="staff">Staff — Clinical &amp; Administrative</option>
+          <option value="business">Business Entity</option>
+        </select>
+      </div>
+      <div class="field span2" id="f-specialty-wrap">
+        <label>Specialties <span style="font-weight:400;color:var(--t3)">(select all that apply)</span></label>
+        <div id="f-specialty-list" class="spec-list"></div>
+      </div>
+      <div class="field" id="f-role-wrap" style="display:none"><label>Role / Title</label><input type="text" id="f-role" placeholder="e.g. Practice Manager"></div>
+      <div class="field">
+        <label><span id="f-npi-label-text">NPI #</span><span id="f-npi-req-star" style="color:var(--red)"> *</span></label>
+        <input type="text" id="f-npi" placeholder="10-digit NPI" maxlength="10">
+      </div>
+      <div class="field"><label>Email</label><input type="email" id="f-email" placeholder="dr@plessenoph.com"></div>
+      <div class="field"><label>Phone</label><input type="tel" id="f-phone" placeholder="(340) 555-0100"></div>
+    </div>
+    <div class="grid2" id="f-dobssn-wrap">
+      <div class="field"><label>Date of birth</label><input type="date" id="f-dob"></div>
+      <div class="field"><label>SSN (last 4 only)</label><input type="text" id="f-ssn4" placeholder="1234" maxlength="4"></div>
+    </div>
+    <div class="field" id="f-empid-wrap" style="display:none">
+      <label>Employee ID</label><input type="text" id="f-empid" placeholder="EMP-001">
+    </div>
+    <div class="slbl">Documents &amp; Credentials</div>
+    <div id="doc-sections"></div>
+    <div class="mfooter">
+      <button class="bsurf" onclick="closeModal('person-modal')">Cancel</button>
+      <button class="bsurf-p" onclick="savePersonForm()">Save record</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Document Modal -->
+<div class="modal-bg" id="adoc-modal">
+  <div class="modal">
+    <button class="modal-close-btn" onclick="closeModal('adoc-modal')">✕</button>
+    <h2 id="adoc-title">Add document</h2>
+    <p class="sub">Select a category below and click "+ Add" to add new documents.</p>
+    <div id="adoc-sections"></div>
+    <div class="mfooter">
+      <button class="bsurf" onclick="closeModal('adoc-modal')">Cancel</button>
+      <button class="bsurf-p" onclick="saveAddDocForm()">Save documents</button>
+    </div>
+  </div>
+</div>
+
+<!-- Maintenance Modal -->
+<div class="modal-bg" id="maint-modal">
+  <div class="modal" style="max-width:520px">
+    <button class="modal-close-btn" onclick="closeModal('maint-modal')">✕</button>
+    <h2 id="mm-title">Add maintenance item</h2>
+    <p class="sub">Track equipment, facility checks, or any recurring maintenance task.</p>
+    <div class="grid2">
+      <div class="field span2"><label>Item name *</label><input type="text" id="m-name" placeholder="Slit lamp, autoclave, HVAC filter…"></div>
+      <div class="field"><label>Category</label>
+        <select id="m-category">
+          <option>Diagnostic Equipment</option><option>Surgical Equipment</option><option>Office Equipment</option>
+          <option>Facility</option><option>Safety &amp; Compliance</option><option>IT &amp; Technology</option><option>Other</option>
+        </select>
+      </div>
+      <div class="field"><label>Location / Room</label><input type="text" id="m-location" placeholder="Exam room 1, Lab…"></div>
+      <div class="field"><label>Serial / Model #</label><input type="text" id="m-serial" placeholder="SN-00123"></div>
+      <div class="field"><label>Last maintenance date</label><input type="date" id="m-last-done"></div>
+      <div class="field"><label>Maintenance interval</label>
+        <select id="m-interval-preset" onchange="onIntChange()">
+          <option value="1">Daily</option><option value="7">Weekly</option><option value="30">Monthly</option>
+          <option value="90" selected>Quarterly</option><option value="180">Every 6 months</option>
+          <option value="365">Annually</option><option value="730">Every 2 years</option><option value="0">Custom…</option>
+        </select>
+      </div>
+      <div class="field span2" id="m-custom-wrap" style="display:none">
+        <label>Custom — days until maintenance is due</label>
+        <input type="number" id="m-interval-custom" placeholder="e.g. 45" min="1">
+      </div>
+      <div class="field span2">
+        <label>Notify me this many days before due date</label>
+        <input type="number" id="m-notify-days" placeholder="e.g. 30" min="1" value="30">
+      </div>
+      <div class="field span2"><label>Notes</label><input type="text" id="m-notes" placeholder="Service provider, special instructions…"></div>
+    </div>
+    <div class="mfooter">
+      <button class="bsurf" onclick="closeModal('maint-modal')">Cancel</button>
+      <button class="bsurf-p" onclick="saveMaintForm()">Save item</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Modal -->
+<div class="modal-bg" id="admin-modal">
+  <div class="modal" style="max-width:520px">
+    <button class="modal-close-btn" onclick="closeModal('admin-modal')">✕</button>
+    <h2>⚙ Admin Panel</h2>
+    <p class="sub">Manage user access and file encryption settings.</p>
+    <div class="security-note">
+      <strong>🔒 Three-layer security active</strong>
+      Layer 1: Firebase Authentication. Layer 2: Allowlist checked server-side in Firestore rules. Layer 3: AES-256 file encryption — files are encrypted before leaving the browser.
+    </div>
+
+    <!-- File Encryption Setup -->
+    <div class="enc-setup-box">
+      <h3>🔑 File Encryption Key</h3>
+      <p>Set a passphrase to encrypt all uploaded files. This is stored encrypted in Firestore — only this app can decrypt it. All users share this key automatically after login.</p>
+      <div style="margin-bottom:10px;font-size:12px" id="enc-key-status-admin"></div>
+      <div class="enc-key-row">
+        <input type="password" id="admin-enc-key" placeholder="Enter passphrase (min. 12 characters)">
+        <button class="bsurf-p" onclick="saveFileEncKey();updateAdminEncStatus()">Save key</button>
+      </div>
+      <p style="font-size:11px;color:var(--t3);margin-top:8px">⚠️ Changing the key means existing files can no longer be decrypted. Only change if starting fresh.</p>
+    </div>
+
+    <div class="slbl">Authorized Users</div>
+    <div id="admin-user-list"></div>
+    <div class="slbl">Add new user</div>
+    <div class="admin-add-row">
+      <input type="email" id="admin-new-email" placeholder="newuser@plessenoph.com">
+      <select id="admin-new-role"><option value="user">User</option><option value="admin">Admin</option></select>
+      <button class="bsurf-p" onclick="addAllowedUser()">Add</button>
+    </div>
+    <p style="font-size:11px;color:var(--t3);margin-top:10px">Note: You must also create their login account in Firebase Console → Authentication.</p>
+    <div class="mfooter"><button class="bsurf" onclick="closeModal('admin-modal')">Close</button></div>
+  </div>
+</div>
+
+<!-- Export Modal -->
+<div class="modal-bg" id="export-modal">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close-btn" onclick="closeModal('export-modal')">✕</button>
+    <h2>⬇ Export Report</h2>
+    <p class="sub">Choose what to include and download as PDF or Excel.</p>
+    <div class="field"><label>Export format</label>
+      <select id="export-format">
+        <option value="pdf">PDF (formatted, printable)</option>
+        <option value="excel">Excel (.xlsx spreadsheet)</option>
+      </select>
+    </div>
+    <div class="field"><label>Sections to include</label>
+      <div class="export-section-toggle">
+        <label><input type="checkbox" id="exp-creds" checked> Credentials</label>
+        <label><input type="checkbox" id="exp-maint" checked> Maintenance</label>
+      </div>
+    </div>
+    <div class="field"><label>Credential status filter</label>
+      <select id="export-status-filter">
+        <option value="all">All statuses</option>
+        <option value="expired">Expired only</option>
+        <option value="danger">Expired + expiring ≤30d</option>
+        <option value="warn">Expired + expiring ≤90d</option>
+      </select>
+    </div>
+    <div class="field"><label>Providers to include <span style="color:var(--t3);font-weight:400">(all = everyone)</span></label>
+      <div class="pclist" id="export-people-list"></div>
+    </div>
+    <div class="mfooter">
+      <button class="bsurf" onclick="closeModal('export-modal')">Cancel</button>
+      <button class="bsurf-p" onclick="runExport()">Download</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reminder Modal -->
+<div class="modal-bg" id="reminder-modal">
+  <div class="modal" style="max-width:540px">
+    <button class="modal-close-btn" onclick="closeModal('reminder-modal')">✕</button>
+    <h2>Send Email Reminder</h2>
+    <p class="sub">Compose a credential expiration reminder and open in your mail client.</p>
+    <div class="grid2">
+      <div class="field span2"><label>Recipient email *</label><input type="email" id="r-email" placeholder="admin@plessenoph.com"></div>
+      <div class="field span2"><label>Recipient name</label><input type="text" id="r-name" placeholder="Administrator"></div>
+    </div>
+    <div class="field"><label>Include in email</label>
+      <div class="toggle-group">
+        <button class="toggle-btn on-expired" id="tog-expired" onclick="toggleFilter('expired')">Expired</button>
+        <button class="toggle-btn on-danger" id="tog-danger" onclick="toggleFilter('danger')">≤ 30 days</button>
+        <button class="toggle-btn" id="tog-warn" onclick="toggleFilter('warn')">≤ 90 days</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Filter by person <span style="color:var(--t3);font-weight:400">(all unchecked = everyone)</span></label>
+      <div class="pclist" id="person-checklist"></div>
+    </div>
+    <div id="reminder-result" style="display:none"></div>
+    <div class="email-preview" id="email-preview">
+      <div class="ep-head"><span>Email preview</span><button class="bg" onclick="copyHtml()">Copy HTML</button></div>
+      <iframe id="preview-frame" title="Email preview"></iframe>
+    </div>
+    <div class="mfooter">
+      <button class="bsurf" onclick="closeModal('reminder-modal')">Close</button>
+      <button class="bsurf" onclick="previewReminder()">Preview</button>
+      <button class="bsurf-p" onclick="openMailto()">Open in mail client ↗</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// Sync admin panel encryption status display
+window.updateAdminEncStatus=()=>{
+  const el=document.getElementById('enc-key-status-admin');
+  if(!el)return;
+  el.textContent=encKeyReady?'✅ Encryption key is configured and active':'⚠️ Not configured — file uploads are disabled until a key is set';
+  el.style.color=encKeyReady?'var(--green)':'var(--amber)';
+};
+// Expose encKeyReady for the inline script above
+Object.defineProperty(window,'encKeyReady',{get:()=>window._encKeyReady||false,set:v=>{window._encKeyReady=v;}});
+</script>
+</body>
+</html>
