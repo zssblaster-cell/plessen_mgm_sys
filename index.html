@@ -481,30 +481,31 @@ async function restDeleteDoc(projectId, colPath, docId, idToken) {
 // ═══════════════════════════════════════════════════════════════════════════
 // SYNC USER TO SUB-PROJECTS
 // ═══════════════════════════════════════════════════════════════════════════
-async function syncUserToSystem(systemKey, userEmail, userPassword, role, access) {
-  const proj = SUB_PROJECTS[systemKey];
-  if (!proj) return { ok:false, msg:"Unknown system" };
+async function syncUserToSystem(sys, userEmail, userPassword, role, accessLevel) {
   try {
-    // 1. Create user in sub-project (ignore EMAIL_EXISTS)
+    // Create user in sub-project — or sign in if they already exist
+    let userToken;
     try {
-      await restCreateUser(proj.apiKey, userEmail, userPassword);
+      const created = await restCreateUser(sys.apiKey, userEmail, userPassword);
+      userToken = created.idToken;
     } catch(e) {
       if (!e.message.includes("EMAIL_EXISTS")) throw e;
+      // Already exists — sign in as that user to get their token
+      const signedIn = await restSignIn(sys.apiKey, userEmail, userPassword);
+      userToken = signedIn.idToken;
     }
-    // 2. Get admin token for sub-project
-    const adminAuth = await restSignIn(proj.apiKey, sessionEmail, sessionPass);
-    // 3. Write allowedUsers doc
-    await restWriteDoc(proj.projectId, "allowedUsers", userEmail, {
-      email:       userEmail,
-      role:        role,
-      access:      access,
-      active:      true,
-      syncedAt:    new Date().toISOString(),
-      syncedFrom:  "portal",
-    }, adminAuth.idToken);
-    return { ok:true, msg:"Synced" };
+    // Use the user's OWN token to write their allowedUsers doc
+    await restWriteDoc(sys.projectId, "allowedUsers", userEmail, {
+      email:      userEmail,
+      role:       role,
+      access:     accessLevel,
+      active:     true,
+      syncedAt:   new Date().toISOString(),
+      syncedFrom: "portal"
+    }, userToken);
+    return { ok:true };
   } catch(e) {
-    return { ok:false, msg: e.message };
+    return { ok:false, msg:e.message };
   }
 }
 
