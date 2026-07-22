@@ -1,1 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Plessen Management System</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:#f0f4ff;min-height:100vh}
+    :root{
+      --blue:#1d4ed8;--blue-mid:#2563eb;--blue-lt:#dbeafe;--blue-pale:#eff6ff;
+      --navy:#0f172a;--slate:#475569;--slate-lt:#94a3b8;
+      --border:#e2e8f0;--white:#fff;
+      --shadow:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+      --shadow-md:0 4px 16px rgba(30,64,175,.10);
+      --shadow-lg:0 12px 40px rgba(30,64,175,.16);
+    }
+    .hidden{display:none!important}
+    /* ── Login ── */
+    #loginScreen{display:flex;min-height:100vh}
+    .login-left{flex:1;display:none;flex-direction:column;justify-content:center;padding:60px;background:linear-gradient(145deg,#1d4ed8 0%,#1e40af 60%,#1e3a8a 100%);position:relative;overflow:hidden}
+    @media(min-width:900px){.login-left{display:flex}}
+    .login-left::before{content:'';position:absolute;width:500px;height:500px;background:rgba(255,255,255,.06);border-radius:50%;top:-120px;right:-120px}
+    .login-left::after{content:'';position:absolute;width:300px;height:300px;background:rgba(255,255,255,.04);border-radius:50%;bottom:-60px;left:-60px}
+    .ll-brand{display:flex;align-items:center;gap:12px;margin-bottom:56px;position:relative;z-index:1}
+    .ll-mark{width:42px;height:42px;background:rgba(255,255,255,.2);border-radius:12px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.3)}
+    .ll-name{font-size:17px;font-weight:800;color:#fff;letter-spacing:-.3px}
+    .ll-title{font-size:34px;font-weight:800;color:#fff;line-height:1.2;letter-spacing:-.5px;margin-bottom:16px;position:relative;z-index:1}
+    .ll-sub{font-size:15px;color:rgba(255,255,255,.7);line-height:1.6;max-width:340px;position:relative;z-index:1}
+    .ll-systems{margin-top:48px;display:flex;flex-direction:column;gap:10px;position:relative;z-index:1}
+    .ll-sys{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:rgba(255,255,255,.85)}
+    .ll-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.5);flex-shrink:0}
+    .login-right{width:100%;max-width:480px;display:flex;align-items:center;justify-content:center;padding:32px 24px;background:#fff;box-shadow:-4px 0 40px rgba(0,0,0,.06)}
+    @media(max-width:899px){.login-right{max-width:100%;box-shadow:none}}
+    .login-box{width:100%;max-width:380px}
+    .login-title{font-size:26px;font-weight:800;color:#0f172a;letter-spacing:-.4px;margin-bottom:6px}
+    .login-sub{font-size:14px;color:#64748b;margin-bottom:32px}
+    .field-label{display:block;font-size:12px;font-weight:700;color:#475569;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+    .field-input{width:100%;padding:11px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;color:#0f172a;outline:none;transition:border .15s;margin-bottom:16px}
+    .field-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+    .field-select{width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:#0f172a;outline:none;background:#fff;margin-bottom:12px}
+    .err-box{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;color:#dc2626;margin-bottom:16px}
+    .login-btn{width:100%;padding:12px;background:#1d4ed8;color:#fff;border:none;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s}
+    .login-btn:hover{background:#1e40af}
+    .login-btn:disabled{opacity:.6;cursor:not-allowed}
+    .login-footer{margin-top:24px;font-size:11px;color:#94a3b8;text-align:center;line-height:1.5}
+    /* ── Portal ── */
+    #portalScreen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(29,78,216,.12) 0%,transparent 70%),#f0f4ff;min-height:100vh}
+    .topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 32px;height:64px;background:rgba(255,255,255,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+    .brand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;color:var(--navy)}
+    .brand-mark{width:34px;height:34px;background:var(--blue);border-radius:9px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(29,78,216,.35)}
+    .brand-name span{color:var(--blue)}
+    .topbar-right{display:flex;align-items:center;gap:12px}
+    .loc-pill{display:flex;align-items:center;gap:6px;background:var(--blue-pale);border:1px solid var(--blue-lt);border-radius:20px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--blue)}
+    .loc-dot{width:7px;height:7px;border-radius:50%;background:var(--blue-mid);box-shadow:0 0 5px rgba(37,99,235,.7)}
+    .gear-wrap{position:relative}
+    .gear-btn{width:38px;height:38px;border-radius:10px;border:1px solid var(--border);background:var(--white);color:var(--slate);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;box-shadow:var(--shadow)}
+    .gear-btn:hover,.gear-btn.open{background:var(--blue-pale);border-color:var(--blue-lt);color:var(--blue)}
+    .gear-menu{position:absolute;top:calc(100% + 10px);right:0;background:var(--white);border:1px solid var(--border);border-radius:14px;padding:8px;min-width:220px;box-shadow:var(--shadow-lg);animation:menuIn .15s ease;z-index:200}
+    @keyframes menuIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}
+    .gear-user{padding:10px 12px 8px;border-bottom:1px solid var(--border);margin-bottom:6px}
+    .gear-user-name{font-size:13px;font-weight:700;color:var(--navy)}
+    .gear-user-role{font-size:11px;color:var(--slate-lt);margin-top:2px}
+    .gear-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--slate-lt);padding:6px 10px 4px}
+    .gear-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:8px;border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;color:var(--slate);cursor:pointer;transition:all .12s;text-align:left}
+    .gear-item:hover{background:var(--blue-pale);color:var(--navy)}
+    .gear-item.danger:hover{background:#fff1f2;color:#dc2626}
+    .gear-div{height:1px;background:var(--border);margin:6px 0}
+    /* ── Hero ── */
+    .hero{padding:48px 32px 32px;max-width:1200px;margin:0 auto}
+    .hero-greeting{font-size:13px;font-weight:600;color:var(--blue-mid);letter-spacing:.3px;margin-bottom:8px}
+    .hero-title{font-size:clamp(24px,4vw,34px);font-weight:800;color:var(--navy);letter-spacing:-.5px;margin-bottom:8px}
+    .hero-sub{font-size:15px;color:var(--slate)}
+    /* ── Cards ── */
+    .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px;padding:0 32px 48px;max-width:1200px;margin:0 auto}
+    .sys-card{background:var(--white);border:1px solid var(--border);border-radius:16px;padding:28px;cursor:pointer;transition:all .2s cubic-bezier(.22,1,.36,1);box-shadow:var(--shadow);display:flex;flex-direction:column;position:relative;overflow:hidden;text-decoration:none}
+    .sys-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--card-accent,#eff6ff) 0%,transparent 60%);opacity:0;transition:opacity .2s;pointer-events:none}
+    .sys-card:hover{border-color:var(--card-color,#1d4ed8);box-shadow:var(--shadow-lg);transform:translateY(-3px)}
+    .sys-card:hover::before{opacity:1}
+    .sys-card:hover .card-arrow{transform:translateX(4px);opacity:1}
+    .sys-card:hover .card-icon{background:var(--card-color,#1d4ed8);color:#fff}
+    .sys-card.locked{opacity:.5;cursor:not-allowed;pointer-events:none}
+    .sys-card.coming-soon{opacity:.6;cursor:default;pointer-events:none}
+    .card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
+    .card-icon{width:60px;height:60px;border-radius:14px;background:var(--card-accent,#eff6ff);color:var(--card-color,#1d4ed8);display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+    .card-arrow{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--slate-lt);transition:all .2s;opacity:0;flex-shrink:0}
+    .card-label{font-size:20px;font-weight:800;color:var(--navy);letter-spacing:-.3px;margin-bottom:6px}
+    .card-desc{font-size:13px;color:var(--slate);line-height:1.55;flex:1}
+    .card-footer{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .card-status{font-size:11px;font-weight:700;letter-spacing:.3px;color:var(--card-color,#1d4ed8);background:var(--card-accent,#eff6ff);padding:3px 10px;border-radius:20px}
+    /* ── Modals ── */
+    .mo{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(4px);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;animation:fadeIn .15s}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .md{background:var(--white);border:1px solid var(--border);border-radius:18px;padding:28px;width:100%;max-width:540px;max-height:92vh;overflow-y:auto;box-shadow:var(--shadow-lg);animation:slideUp .18s cubic-bezier(.22,1,.36,1)}
+    .md-lg{max-width:800px}
+    @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+    .md-title{font-size:17px;font-weight:800;color:var(--navy);margin-bottom:5px}
+    .md-sub{font-size:13px;color:var(--slate);margin-bottom:22px}
+    .md-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:22px;padding-top:16px;border-top:1px solid var(--border)}
+    .field-group{margin-bottom:14px}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:10px;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s}
+    .btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:#1e40af}
+    .btn-ghost{background:transparent;color:var(--slate);border:1.5px solid var(--border)}.btn-ghost:hover{background:var(--blue-pale);color:var(--navy)}
+    .btn-danger{background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca}.btn-danger:hover{background:#fee2e2}
+    .btn-sm{padding:6px 12px;font-size:12px}
+    .btn-xs{padding:3px 8px;font-size:11px;border-radius:6px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    /* ── Users table ── */
+    .users-table{width:100%;border-collapse:collapse;font-size:13px}
+    .users-table th{background:#f8fafc;padding:9px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:1px solid var(--border)}
+    .users-table td{padding:11px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+    .users-table tr:hover td{background:#f8faff}
+    .users-table tr:last-child td{border-bottom:none}
+    .role-pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.4px}
+    .role-superuser{background:#dbeafe;color:#1e40af}
+    .role-admin{background:#ede9fe;color:#5b21b6}
+    .role-staff{background:#d1fae5;color:#065f46}
+    .role-viewer{background:#fef3c7;color:#92400e}
+    .access-dots{display:flex;gap:4px;flex-wrap:wrap}
+    .access-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;cursor:help}
+    /* ── Sync status ── */
+    .sync-row{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;background:#f8faff;border:1px solid var(--border);margin-bottom:6px;font-size:13px}
+    .sync-status{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px}
+    .sync-ok{background:#dcfce7;color:#166534}
+    .sync-err{background:#fee2e2;color:#991b1b}
+    .sync-pending{background:#fef9c3;color:#854d0e}
+    /* ── Checkbox group ── */
+    .cb-group{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+    .cb-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate);cursor:pointer}
+    .cb-row input{accent-color:var(--blue);width:14px;height:14px;cursor:pointer}
+    .section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--blue);margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--blue-lt)}
+    /* ── Setup banner ── */
+    .setup-banner{background:#fef9c3;border:1px solid #fde68a;border-radius:12px;padding:14px 18px;margin:0 32px 24px;max-width:calc(1200px - 64px);font-size:13px;color:#92400e}
+    .setup-banner strong{font-weight:700}
+    @media(max-width:600px){
+      .topbar{padding:0 16px}.hero{padding:28px 16px 20px}.cards-grid{padding:0 16px 32px;gap:14px}
+    }
+  </style>
+</head>
+<body>
 
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LOGIN SCREEN
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="loginScreen">
+  <div class="login-left">
+    <div class="ll-brand">
+      <div class="ll-mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </div>
+      <span class="ll-name">Plessen Management</span>
+    </div>
+    <div class="ll-title">One platform.<br>Every system.</div>
+    <div class="ll-sub">A unified management platform for all Plessen Eye Care operations across St. Croix and St. Thomas.</div>
+    <div class="ll-systems">
+      <div class="ll-sys"><span class="ll-dot"></span>Equipment Management</div>
+      <div class="ll-sys"><span class="ll-dot"></span>Inventory</div>
+      <div class="ll-sys"><span class="ll-dot"></span>Credentialing</div>
+      <div class="ll-sys"><span class="ll-dot"></span>Procedures</div>
+      <div class="ll-sys"><span class="ll-dot"></span>Ordering</div>
+    </div>
+  </div>
+  <div class="login-right">
+    <div class="login-box">
+      <div class="login-title">Welcome back</div>
+      <div class="login-sub">Sign in to your Plessen account</div>
+      <div id="loginErr" class="err-box hidden"></div>
+      <label class="field-label">Username / Email</label>
+      <input type="email" id="loginEmail" class="field-input" placeholder="Enter email">
+      <label class="field-label">Password</label>
+      <input type="password" id="loginPass" class="field-input" placeholder="Enter password">
+      <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
+      <div class="login-footer">Plessen Eye Care · Internal Use Only<br>Unauthorized access is prohibited.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PORTAL SCREEN
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="portalScreen" class="hidden">
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </div>
+      <span class="brand-name">Plessen <span>Management</span></span>
+    </div>
+    <div class="topbar-right">
+      <div class="loc-pill"><span class="loc-dot"></span><span id="locLabel">STX</span></div>
+      <div class="gear-wrap" id="gearWrap">
+        <button class="gear-btn" id="gearBtn" onclick="toggleGear()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <div class="gear-menu hidden" id="gearMenu">
+          <div class="gear-user">
+            <div class="gear-user-name" id="gearName">—</div>
+            <div class="gear-user-role" id="gearRole">—</div>
+          </div>
+          <div class="gear-section">Account</div>
+          <button class="gear-item" onclick="openChangePw()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Change Password
+          </button>
+          <div id="adminGearItems" class="hidden">
+            <div class="gear-div"></div>
+            <div class="gear-section">Management</div>
+            <button class="gear-item" onclick="openUserMgmt()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>User Management
+            </button>
+          </div>
+          <div class="gear-div"></div>
+          <button class="gear-item danger" onclick="doSignOut()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Setup banner (shown if no allowedUsers written yet) -->
+  <div id="setupBanner" class="setup-banner hidden">
+    <strong>First-time setup:</strong> You're logged in as superuser. Add users and configure system access from <strong>User Management</strong> in the gear menu.
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-greeting" id="heroGreeting">Good morning</div>
+    <div class="hero-title" id="heroTitle">Plessen Management System</div>
+    <div class="hero-sub">Select a system to get started.</div>
+  </div>
+
+  <!-- System Cards -->
+  <div class="cards-grid" id="cardsGrid"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MODAL: CHANGE PASSWORD
+════════════════════════════════════════════════════════════════════════════ -->
+<div class="mo hidden" id="changePwModal" onclick="if(event.target===this)closeChangePw()">
+  <div class="md">
+    <div class="md-title">Change Password</div>
+    <div class="md-sub">Must be at least 8 characters.</div>
+    <div id="pwErr" class="err-box hidden"></div>
+    <div id="pwSuccess" class="hidden" style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:12px 14px;font-size:13px;font-weight:600;color:#166534;margin-bottom:14px">Password changed successfully.</div>
+    <div class="field-group"><label class="field-label">Current Password</label><input type="password" id="pwCurrent" class="field-input"></div>
+    <div class="field-group"><label class="field-label">New Password</label><input type="password" id="pwNew" class="field-input"></div>
+    <div class="field-group"><label class="field-label">Confirm New Password</label><input type="password" id="pwConfirm" class="field-input"></div>
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="closeChangePw()">Cancel</button>
+      <button class="btn btn-primary" onclick="doChangePw()">Save Password</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MODAL: USER MANAGEMENT
+════════════════════════════════════════════════════════════════════════════ -->
+<div class="mo hidden" id="userMgmtModal" onclick="if(event.target===this)closeUserMgmt()">
+  <div class="md md-lg">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <div>
+        <div class="md-title">User Management</div>
+        <div style="font-size:13px;color:#64748b">Manage access across all systems</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openAddUser()">+ Add User</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="users-table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Email</th><th>Role</th><th>Access</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="usersTableBody">
+          <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="closeUserMgmt()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MODAL: ADD / EDIT USER
+════════════════════════════════════════════════════════════════════════════ -->
+<div class="mo hidden" id="userFormModal" onclick="if(event.target===this)closeUserForm()">
+  <div class="md">
+    <div class="md-title" id="userFormTitle">Add User</div>
+    <div class="md-sub">User will be created in all assigned systems.</div>
+    <div id="userFormErr" class="err-box hidden"></div>
+    <input type="hidden" id="editUserId">
+    <div class="grid2">
+      <div class="field-group"><label class="field-label">Display Name *</label><input type="text" id="uName" class="field-input" placeholder="Full name"></div>
+      <div class="field-group"><label class="field-label">Email *</label><input type="email" id="uEmail" class="field-input" placeholder="email@plesseneye.com"></div>
+    </div>
+    <div class="grid2">
+      <div class="field-group">
+        <label class="field-label">Password *</label>
+        <input type="password" id="uPass" class="field-input" placeholder="Min 8 characters">
+        <div style="font-size:11px;color:#94a3b8;margin-top:-10px;margin-bottom:10px" id="passHint">Required for new users</div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Role *</label>
+        <select id="uRole" class="field-select">
+          <option value="staff">Staff</option>
+          <option value="viewer">Viewer (read-only)</option>
+          <option value="admin">Admin</option>
+          <option value="superuser">Superuser</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Locations</label>
+      <div class="cb-group">
+        <label class="cb-row"><input type="checkbox" id="locSTX" checked> STX — St. Croix</label>
+        <label class="cb-row"><input type="checkbox" id="locSTT"> STT — St. Thomas</label>
+      </div>
+    </div>
+    <div class="section-label">System Access</div>
+    <div id="systemAccessFields"></div>
+    <div class="section-label" style="margin-top:16px">Sync to Systems</div>
+    <div id="syncStatusDiv" style="font-size:12px;color:#64748b">Status will appear here after saving.</div>
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="closeUserForm()">Cancel</button>
+      <button class="btn btn-primary" id="userFormSaveBtn" onclick="saveUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+// ═══════════════════════════════════════════════════════════════════════════
+// FIREBASE CONFIG
+// ═══════════════════════════════════════════════════════════════════════════
+import { initializeApp }                                  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword, signOut,
+         onAuthStateChanged, updatePassword,
+         EmailAuthProvider, reauthenticateWithCredential,
+         createUserWithEmailAndPassword }                 from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { getFirestore, doc, getDoc, setDoc, getDocs,
+         collection, updateDoc, deleteDoc, query,
+         orderBy }                                        from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+const PORTAL_CFG = {
+  apiKey:            "AIzaSyAeboC3xoZR_jyUs1yqBpqK4LgFkBnXEwQ",
+  authDomain:        "plessen-auth.firebaseapp.com",
+  projectId:         "plessen-auth",
+  storageBucket:     "plessen-auth.firebasestorage.app",
+  messagingSenderId: "813046971813",
+  appId:             "1:813046971813:web:9237ad554a7eeb1a4c7c4c"
+};
+
+// Sub-project configurations for auth sync
+const SUB_PROJECTS = {
+  equipment: {
+    key:       "equipment",
+    label:     "Equipment Management",
+    apiKey:    "AIzaSyBUZg65JYsT5BtZMhG9CClJQZJCpsdGK-E",
+    projectId: "plessen-repair",
+    color:     "#1d4ed8",
+    accent:    "#dbeafe",
+    path:      "../equipment/index.html",
+    desc:      "Track, service, and manage all clinic equipment",
+  },
+  inventory: {
+    key:       "inventory",
+    label:     "Inventory",
+    apiKey:    "AIzaSyCC3k6i9ADfkhUOusGv_EvvO5PxcuIFgtc",
+    projectId: "plessen-inventory",
+    color:     "#0369a1",
+    accent:    "#e0f2fe",
+    path:      "../inventory/index.html",
+    desc:      "Monitor stock levels, medications, and medical supplies",
+  },
+  credentialing: {
+    key:       "credentialing",
+    label:     "Credentialing",
+    apiKey:    "AIzaSyCjMKkNunk0NoMLUX4SMLOd67BT_Z-0nDs",
+    projectId: "plessen-credentials",
+    color:     "#075985",
+    accent:    "#f0f9ff",
+    path:      "../credentialing/index.html",
+    desc:      "Manage staff licenses, certifications, and credentials",
+  },
+};
+
+const COMING_SOON = [
+  { label:"Procedures", desc:"Log and schedule all in-office procedures", color:"#1d4ed8", accent:"#eff6ff" },
+  { label:"Ordering",   desc:"Request and approve medication and supply orders", color:"#0369a1", accent:"#f0f9ff" },
+];
+
+// ── Firebase init ─────────────────────────────────────────────────────────────
+const portalApp  = initializeApp(PORTAL_CFG, "portal");
+const auth       = getAuth(portalApp);
+const db         = getFirestore(portalApp);
+
+// ── Session state ─────────────────────────────────────────────────────────────
+let currentUser    = null;
+let currentProfile = null;
+let sessionPass    = "";   // stored from login for sub-project admin sync
+let sessionEmail   = "";
+
+// ── Expose to global for onclick handlers ─────────────────────────────────────
+window.doLogin       = doLogin;
+window.doSignOut     = doSignOut;
+window.toggleGear    = toggleGear;
+window.openChangePw  = openChangePw;
+window.closeChangePw = closeChangePw;
+window.doChangePw    = doChangePw;
+window.openUserMgmt  = openUserMgmt;
+window.closeUserMgmt = closeUserMgmt;
+window.openAddUser   = openAddUser;
+window.closeUserForm = closeUserForm;
+window.saveUser      = saveUser;
+window.editUser      = editUser;
+window.deleteUser    = deleteUser;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REST API HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+const AUTH_REST = "https://identitytoolkit.googleapis.com/v1/accounts";
+const FS_REST   = "https://firestore.googleapis.com/v1/projects";
+
+async function restPost(url, body) {
+  const res  = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return data;
+}
+
+// Sign in to a sub-project — returns idToken
+async function restSignIn(apiKey, email, password) {
+  return restPost(`${AUTH_REST}:signInWithPassword?key=${apiKey}`, { email, password, returnSecureToken:true });
+}
+
+// Create a user in a sub-project — returns idToken
+async function restCreateUser(apiKey, email, password) {
+  return restPost(`${AUTH_REST}:signUp?key=${apiKey}`, { email, password, returnSecureToken:true });
+}
+
+// Convert JS value → Firestore REST field format
+function toFSVal(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === "boolean")        return { booleanValue: v };
+  if (typeof v === "number")         return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === "string")         return { stringValue: v };
+  if (Array.isArray(v))              return { arrayValue: { values: v.map(toFSVal) } };
+  if (typeof v === "object")         return { mapValue: { fields: toFSFields(v) } };
+  return { stringValue: String(v) };
+}
+function toFSFields(obj) {
+  const f = {};
+  for (const [k, v] of Object.entries(obj)) f[k] = toFSVal(v);
+  return f;
+}
+
+// Write a Firestore doc in a sub-project via REST API
+async function restWriteDoc(projectId, colPath, docId, data, idToken) {
+  const url = `${FS_REST}/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
+  const res = await fetch(url, {
+    method:  "PATCH",
+    headers: { "Content-Type":"application/json", "Authorization":`Bearer ${idToken}` },
+    body:    JSON.stringify({ fields: toFSFields(data) }),
+  });
+  const result = await res.json();
+  if (result.error) throw new Error(result.error.message);
+  return result;
+}
+
+// Delete a Firestore doc in a sub-project via REST API
+async function restDeleteDoc(projectId, colPath, docId, idToken) {
+  const url = `${FS_REST}/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
+  const res = await fetch(url, { method:"DELETE", headers:{ "Authorization":`Bearer ${idToken}` } });
+  return res.ok;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYNC USER TO SUB-PROJECTS
+// ═══════════════════════════════════════════════════════════════════════════
+async function syncUserToSystem(systemKey, userEmail, userPassword, role, access) {
+  const proj = SUB_PROJECTS[systemKey];
+  if (!proj) return { ok:false, msg:"Unknown system" };
+  try {
+    // 1. Create user in sub-project (ignore EMAIL_EXISTS)
+    try {
+      await restCreateUser(proj.apiKey, userEmail, userPassword);
+    } catch(e) {
+      if (!e.message.includes("EMAIL_EXISTS")) throw e;
+    }
+    // 2. Get admin token for sub-project
+    const adminAuth = await restSignIn(proj.apiKey, sessionEmail, sessionPass);
+    // 3. Write allowedUsers doc
+    await restWriteDoc(proj.projectId, "allowedUsers", userEmail, {
+      email:       userEmail,
+      role:        role,
+      access:      access,
+      active:      true,
+      syncedAt:    new Date().toISOString(),
+      syncedFrom:  "portal",
+    }, adminAuth.idToken);
+    return { ok:true, msg:"Synced" };
+  } catch(e) {
+    return { ok:false, msg: e.message };
+  }
+}
+
+async function removeUserFromSystem(systemKey, userEmail) {
+  const proj = SUB_PROJECTS[systemKey];
+  if (!proj) return { ok:false };
+  try {
+    const adminAuth = await restSignIn(proj.apiKey, sessionEmail, sessionPass);
+    await restDeleteDoc(proj.projectId, "allowedUsers", userEmail, adminAuth.idToken);
+    return { ok:true };
+  } catch(e) {
+    return { ok:false, msg: e.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH STATE
+// ═══════════════════════════════════════════════════════════════════════════
+onAuthStateChanged(auth, async (fbUser) => {
+  if (!fbUser) { showLogin(); return; }
+
+  // Load user profile from Firestore
+  const snap = await getDoc(doc(db, "users", fbUser.uid));
+
+  if (!snap.exists()) {
+    // First time: if this is the known admin email, create their profile
+    if (fbUser.email === "anthony.jolly@plesseneye.com") {
+      const profile = {
+        uid:         fbUser.uid,
+        email:       fbUser.email,
+        displayName: "Anthony Jolly",
+        role:        "superuser",
+        locations:   ["STX","STT"],
+        access:      { equipment:"editor", inventory:"editor", credentialing:"editor", procedures:"editor", ordering:"editor" },
+        active:      true,
+        createdAt:   new Date().toISOString(),
+      };
+      await setDoc(doc(db, "users", fbUser.uid), profile);
+      currentUser    = fbUser;
+      currentProfile = profile;
+      showPortal(true);
+    } else {
+      await signOut(auth);
+      showLoginErr("Your account has not been configured. Contact your administrator.");
+    }
+    return;
+  }
+
+  const profile = snap.data();
+  if (!profile.active) { await signOut(auth); showLoginErr("Your account has been deactivated."); return; }
+
+  currentUser    = fbUser;
+  currentProfile = profile;
+  showPortal(false);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOGIN
+// ═══════════════════════════════════════════════════════════════════════════
+async function doLogin() {
+  const email = document.getElementById("loginEmail").value.trim();
+  const pass  = document.getElementById("loginPass").value;
+  if (!email || !pass) { showLoginErr("Both fields are required."); return; }
+  const btn = document.getElementById("loginBtn");
+  btn.disabled = true; btn.textContent = "Signing in...";
+  hideEl("loginErr");
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+    sessionEmail = email;
+    sessionPass  = pass; // store for sub-project admin sync
+  } catch(e) {
+    const msgs = { "auth/wrong-password":"Incorrect password.", "auth/user-not-found":"No account found with that email.", "auth/invalid-credential":"Invalid email or password.", "auth/too-many-requests":"Too many attempts. Please wait a moment." };
+    showLoginErr(msgs[e.code] || e.message);
+    btn.disabled = false; btn.textContent = "Sign In";
+  }
+}
+
+document.getElementById("loginPass").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+document.getElementById("loginEmail").addEventListener("keydown", e => { if(e.key==="Enter") document.getElementById("loginPass").focus(); });
+
+async function doSignOut() {
+  sessionPass = ""; sessionEmail = "";
+  await signOut(auth);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SHOW/HIDE SCREENS
+// ═══════════════════════════════════════════════════════════════════════════
+function showLogin() {
+  showEl("loginScreen"); hideEl("portalScreen");
+  document.getElementById("loginBtn").disabled = false;
+  document.getElementById("loginBtn").textContent = "Sign In";
+}
+function showLoginErr(msg) { showEl("loginErr"); document.getElementById("loginErr").textContent = msg; }
+function showPortal(isFirstTime) {
+  hideEl("loginScreen"); showEl("portalScreen");
+  const p = currentProfile;
+  // Greeting
+  const h = new Date().getHours();
+  const g = h<12?"Good morning":h<17?"Good afternoon":"Good evening";
+  const fn = (p.displayName||"").split(" ")[0] || "there";
+  document.getElementById("heroGreeting").textContent = `${g}, ${fn}`;
+  document.getElementById("heroTitle").textContent    = "Plessen Management System";
+  // Gear user info
+  document.getElementById("gearName").textContent = p.displayName || p.email;
+  document.getElementById("gearRole").textContent = `${p.role} · ${(p.locations||[]).join(", ")}`;
+  // Admin-only gear items
+  if (p.role==="superuser"||p.role==="admin") showEl("adminGearItems"); else hideEl("adminGearItems");
+  // First time setup banner
+  if (isFirstTime) showEl("setupBanner"); else hideEl("setupBanner");
+  // Render cards
+  renderCards();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RENDER SYSTEM CARDS
+// ═══════════════════════════════════════════════════════════════════════════
+function renderCards() {
+  const p    = currentProfile;
+  const grid = document.getElementById("cardsGrid");
+  const isPriv = p.role==="superuser"||p.role==="admin";
+
+  const svgMap = {
+    equipment:    `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="4" y="8" width="48" height="32" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="8" y="12" width="40" height="24" rx="2" fill="currentColor" fill-opacity=".07"/><rect x="18" y="40" width="20" height="5" fill="currentColor" fill-opacity=".3"/><rect x="14" y="44" width="28" height="3" rx="1.5" fill="currentColor" fill-opacity=".2"/><circle cx="28" cy="24" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M25 24l4-2.5v5L25 24z" fill="currentColor" fill-opacity=".6"/></svg>`,
+    inventory:    `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="6" y="14" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="6" y="26" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="6" y="38" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="10" y="16.5" width="14" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="10" y="28.5" width="10" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="10" y="40.5" width="16" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/></svg>`,
+    credentialing:`<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="10" y="8" width="36" height="44" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="14" y="14" width="28" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="14" y="20" width="20" height="3" rx="1.5" fill="currentColor" fill-opacity=".3"/><circle cx="28" cy="34" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M25 33l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    procedures:   `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="8" y="10" width="40" height="40" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><line x1="8" y1="22" x2="48" y2="22" stroke="currentColor" stroke-width="2" stroke-opacity=".3"/><rect x="16" y="6" width="4" height="12" rx="2" fill="currentColor" fill-opacity=".5"/><rect x="36" y="6" width="4" height="12" rx="2" fill="currentColor" fill-opacity=".5"/></svg>`,
+    ordering:     `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><path d="M8 12h4l6 22h20l6-16H18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="26" cy="44" r="3" stroke="currentColor" stroke-width="2.5"/><circle cx="38" cy="44" r="3" stroke="currentColor" stroke-width="2.5"/></svg>`,
+  };
+
+  const arrow = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
+
+  let html = "";
+
+  // Active systems
+  for (const [key, proj] of Object.entries(SUB_PROJECTS)) {
+    const userAccess = p.access?.[key] || "none";
+    const hasAccess  = isPriv || (userAccess !== "none");
+    const locked     = !hasAccess;
+    html += `
+      <div class="sys-card${locked?" locked":""}" style="--card-color:${proj.color};--card-accent:${proj.accent}"
+           onclick="${locked?"":`window.location.href='${proj.path}'`}">
+        <div class="card-top">
+          <div class="card-icon">${svgMap[key]||svgMap.equipment}</div>
+          <div class="card-arrow">${arrow}</div>
+        </div>
+        <div class="card-label">${proj.label}</div>
+        <div class="card-desc">${proj.desc}</div>
+        <div class="card-footer">
+          <span class="card-status">${locked?"No Access":"Open"}</span>
+          ${isPriv&&userAccess!=="none"?`<span style="font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace">${userAccess}</span>`:""}
+        </div>
+      </div>`;
+  }
+
+  // Coming soon
+  for (const cs of COMING_SOON) {
+    html += `
+      <div class="sys-card coming-soon" style="--card-color:${cs.color};--card-accent:${cs.accent}">
+        <div class="card-top">
+          <div class="card-icon">${svgMap.procedures}</div>
+          <div style="font-size:10px;font-weight:700;background:#f1f5f9;color:#94a3b8;padding:3px 8px;border-radius:10px;letter-spacing:.5px">COMING SOON</div>
+        </div>
+        <div class="card-label">${cs.label}</div>
+        <div class="card-desc">${cs.desc}</div>
+        <div class="card-footer"><span class="card-status" style="color:#94a3b8;background:#f1f5f9">In Development</span></div>
+      </div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GEAR MENU
+// ═══════════════════════════════════════════════════════════════════════════
+function toggleGear() {
+  const menu = document.getElementById("gearMenu");
+  const btn  = document.getElementById("gearBtn");
+  const open = menu.classList.contains("hidden");
+  if (open) { showEl("gearMenu"); btn.classList.add("open"); }
+  else       { hideEl("gearMenu"); btn.classList.remove("open"); }
+}
+document.addEventListener("click", e => {
+  if (!document.getElementById("gearWrap")?.contains(e.target)) {
+    hideEl("gearMenu"); document.getElementById("gearBtn")?.classList.remove("open");
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHANGE PASSWORD
+// ═══════════════════════════════════════════════════════════════════════════
+function openChangePw() {
+  hideEl("gearMenu"); document.getElementById("gearBtn")?.classList.remove("open");
+  document.getElementById("pwCurrent").value = "";
+  document.getElementById("pwNew").value     = "";
+  document.getElementById("pwConfirm").value = "";
+  hideEl("pwErr"); hideEl("pwSuccess");
+  showEl("changePwModal");
+}
+function closeChangePw() { hideEl("changePwModal"); }
+
+async function doChangePw() {
+  const cur  = document.getElementById("pwCurrent").value;
+  const nw   = document.getElementById("pwNew").value;
+  const conf = document.getElementById("pwConfirm").value;
+  hideEl("pwErr"); hideEl("pwSuccess");
+  if (!cur||!nw)     { showEl("pwErr"); document.getElementById("pwErr").textContent = "All fields required."; return; }
+  if (nw !== conf)   { showEl("pwErr"); document.getElementById("pwErr").textContent = "New passwords do not match."; return; }
+  if (nw.length < 8) { showEl("pwErr"); document.getElementById("pwErr").textContent = "Password must be at least 8 characters."; return; }
+  try {
+    const cred = EmailAuthProvider.credential(currentUser.email, cur);
+    await reauthenticateWithCredential(currentUser, cred);
+    await updatePassword(currentUser, nw);
+    sessionPass = nw;
+    showEl("pwSuccess");
+    setTimeout(closeChangePw, 2000);
+  } catch(e) {
+    showEl("pwErr");
+    document.getElementById("pwErr").textContent = e.code==="auth/wrong-password" ? "Current password is incorrect." : e.message;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// USER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+let allUsers = [];
+
+async function openUserMgmt() {
+  hideEl("gearMenu"); document.getElementById("gearBtn")?.classList.remove("open");
+  showEl("userMgmtModal");
+  await loadUsers();
+}
+function closeUserMgmt() { hideEl("userMgmtModal"); }
+
+async function loadUsers() {
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    allUsers   = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderUsersTable();
+  } catch(e) {
+    document.getElementById("usersTableBody").innerHTML = `<tr><td colspan="6" style="color:#dc2626;padding:16px">${e.message}</td></tr>`;
+  }
+}
+
+function renderUsersTable() {
+  const rolePills = { superuser:"role-superuser", admin:"role-admin", staff:"role-staff", viewer:"role-viewer" };
+  const sysDots   = Object.entries(SUB_PROJECTS).map(([k,p]) => ({ key:k, color:p.color, label:p.label }));
+
+  const rows = allUsers.map(u => {
+    const dots = sysDots.map(s => {
+      const acc = u.access?.[s.key]||"none";
+      const col = acc==="none"?"#e2e8f0":acc==="editor"?s.color:"#93c5fd";
+      return `<span class="access-dot" style="background:${col}" title="${s.label}: ${acc}"></span>`;
+    }).join("");
+    return `<tr>
+      <td style="font-weight:600">${u.displayName||"—"}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:11px">${u.email}</td>
+      <td><span class="role-pill ${rolePills[u.role]||"role-staff"}">${u.role}</span></td>
+      <td><div class="access-dots">${dots}</div></td>
+      <td><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;${u.active?"background:#dcfce7;color:#166534":"background:#fee2e2;color:#991b1b"}">${u.active?"Active":"Inactive"}</span></td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-xs" onclick="editUser('${u.id}')">Edit</button>
+          ${u.email!==currentUser.email?`<button class="btn btn-danger btn-xs" onclick="deleteUser('${u.id}','${u.email}')">Remove</button>`:""}
+        </div>
+      </td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">No users found.</td></tr>`;
+
+  document.getElementById("usersTableBody").innerHTML = rows;
+}
+
+function buildAccessFields(currentAccess) {
+  return Object.entries(SUB_PROJECTS).map(([key, proj]) => {
+    const cur = currentAccess?.[key] || "none";
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;background:#f8faff;border:1px solid #e2e8f0;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${proj.color}"></div>
+        <span style="font-size:13px;font-weight:600;color:#0f172a">${proj.label}</span>
+      </div>
+      <select id="access_${key}" style="padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:#0f172a;background:#fff;outline:none">
+        <option value="none"    ${cur==="none"?"selected":""}>No Access</option>
+        <option value="viewer"  ${cur==="viewer"?"selected":""}>Viewer</option>
+        <option value="editor"  ${cur==="editor"?"selected":""}>Editor</option>
+      </select>
+    </div>`;
+  }).join("");
+}
+
+function openAddUser() {
+  document.getElementById("editUserId").value      = "";
+  document.getElementById("userFormTitle").textContent = "Add User";
+  document.getElementById("userFormSaveBtn").textContent = "Create User";
+  document.getElementById("uName").value  = "";
+  document.getElementById("uEmail").value = "";
+  document.getElementById("uPass").value  = "";
+  document.getElementById("uRole").value  = "staff";
+  document.getElementById("locSTX").checked = true;
+  document.getElementById("locSTT").checked = false;
+  document.getElementById("passHint").textContent = "Required for new users";
+  document.getElementById("systemAccessFields").innerHTML = buildAccessFields({});
+  document.getElementById("syncStatusDiv").innerHTML = "<span style='color:#94a3b8;font-size:12px'>Sync status will appear here after saving.</span>";
+  hideEl("userFormErr");
+  showEl("userFormModal");
+}
+
+function editUser(uid) {
+  const u = allUsers.find(x => x.id===uid);
+  if (!u) return;
+  document.getElementById("editUserId").value          = uid;
+  document.getElementById("userFormTitle").textContent = "Edit User";
+  document.getElementById("userFormSaveBtn").textContent = "Save Changes";
+  document.getElementById("uName").value  = u.displayName||"";
+  document.getElementById("uEmail").value = u.email;
+  document.getElementById("uPass").value  = "";
+  document.getElementById("uRole").value  = u.role||"staff";
+  document.getElementById("locSTX").checked = (u.locations||[]).includes("STX");
+  document.getElementById("locSTT").checked = (u.locations||[]).includes("STT");
+  document.getElementById("passHint").textContent = "Leave blank to keep current password";
+  document.getElementById("systemAccessFields").innerHTML = buildAccessFields(u.access||{});
+  document.getElementById("syncStatusDiv").innerHTML = "<span style='color:#94a3b8;font-size:12px'>Click Save to re-sync access to systems.</span>";
+  hideEl("userFormErr");
+  showEl("userFormModal");
+}
+
+async function deleteUser(uid, email) {
+  if (!confirm(`Remove ${email}? This will revoke their portal access. Their accounts in each system will also be deactivated.`)) return;
+  try {
+    // Mark inactive in portal
+    await updateDoc(doc(db, "users", uid), { active:false });
+    // Remove from each sub-project allowedUsers
+    const results = await Promise.all(Object.keys(SUB_PROJECTS).map(k => removeUserFromSystem(k, email)));
+    await loadUsers();
+  } catch(e) {
+    alert("Error: " + e.message);
+  }
+}
+
+function closeUserForm() { hideEl("userFormModal"); }
+
+async function saveUser() {
+  const uid   = document.getElementById("editUserId").value;
+  const name  = document.getElementById("uName").value.trim();
+  const email = document.getElementById("uEmail").value.trim();
+  const pass  = document.getElementById("uPass").value;
+  const role  = document.getElementById("uRole").value;
+  const locs  = ["STX","STT"].filter(l => document.getElementById(`loc${l}`).checked);
+  hideEl("userFormErr");
+
+  if (!name||!email)     { showUserFormErr("Name and email are required."); return; }
+  if (!uid && !pass)     { showUserFormErr("Password is required for new users."); return; }
+  if (pass && pass.length<8) { showUserFormErr("Password must be at least 8 characters."); return; }
+
+  const access = {};
+  for (const key of Object.keys(SUB_PROJECTS)) access[key] = document.getElementById(`access_${key}`)?.value || "none";
+
+  const saveBtn = document.getElementById("userFormSaveBtn");
+  saveBtn.disabled = true; saveBtn.textContent = "Saving...";
+
+  try {
+    let fbUid = uid;
+
+    if (!uid) {
+      // Create new Firebase Auth user in portal
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      // Need to re-sign in as admin since createUser signs in as new user
+      await signInWithEmailAndPassword(auth, sessionEmail, sessionPass);
+      fbUid = cred.user.uid;
+    }
+
+    // Write/update portal Firestore profile
+    const profile = {
+      uid:         fbUid,
+      email,
+      displayName: name,
+      role,
+      locations:   locs,
+      access,
+      active:      true,
+      updatedAt:   new Date().toISOString(),
+      ...(uid ? {} : { createdAt: new Date().toISOString() }),
+    };
+    await setDoc(doc(db, "users", fbUid), profile, { merge:true });
+
+    // Sync to sub-projects
+    const syncResults = {};
+    const syncDiv = document.getElementById("syncStatusDiv");
+    syncDiv.innerHTML = "<span style='color:#64748b;font-size:12px'>Syncing to systems...</span>";
+
+    for (const [key] of Object.entries(SUB_PROJECTS)) {
+      if (access[key] !== "none") {
+        const effectivePass = pass || sessionPass; // use entered pass or admin pass as fallback for new user
+        const result = await syncUserToSystem(key, email, pass || "plessen2024", role, access[key]);
+        syncResults[key] = result;
+      } else {
+        // Remove from system if access set to none
+        const result = await removeUserFromSystem(key, email);
+        syncResults[key] = { ok:result.ok, msg: result.ok?"Removed":"Could not remove" };
+      }
+    }
+
+    // Show sync results
+    syncDiv.innerHTML = Object.entries(syncResults).map(([k, r]) =>
+      `<div class="sync-row">
+        <span style="font-weight:600">${SUB_PROJECTS[k]?.label||k}</span>
+        <span class="sync-status ${r.ok?"sync-ok":"sync-err"}">${r.ok?(access[k]==="none"?"Removed":"Synced"):"Failed: "+r.msg}</span>
+      </div>`
+    ).join("");
+
+    saveBtn.textContent = "✓ Saved";
+    await loadUsers();
+    setTimeout(() => { saveBtn.disabled=false; saveBtn.textContent = uid?"Save Changes":"Create User"; }, 2000);
+
+  } catch(e) {
+    showUserFormErr(e.message);
+    saveBtn.disabled = false; saveBtn.textContent = uid?"Save Changes":"Create User";
+  }
+}
+
+function showUserFormErr(msg) {
+  showEl("userFormErr"); document.getElementById("userFormErr").textContent = msg;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════════════════════
+function showEl(id) { document.getElementById(id)?.classList.remove("hidden"); }
+function hideEl(id) { document.getElementById(id)?.classList.add("hidden"); }
+</script>
+</body>
+</html>
