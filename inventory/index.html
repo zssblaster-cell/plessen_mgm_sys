@@ -9,6 +9,32 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<!-- Config loader: decrypts Firebase credentials from config.js at runtime -->
+<script type="module">
+  import { portalAuth, loadConfig } from '/crypto.js';
+  import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+  // Wait for portal auth session, then decrypt config and init inventory Firebase
+  const unsub = onAuthStateChanged(portalAuth, async (portalUser) => {
+    unsub();
+    if (!portalUser) { window._inventoryConfigReady = false; return; }
+    try {
+      const configs = await loadConfig();
+      const cfg = configs?.inventory;
+      if (!cfg) throw new Error("Inventory config missing");
+      // Store for compat SDK (window scope intentional — compat SDK needs it)
+      window._inventoryFirebaseCfg = {
+        apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
+        storageBucket: cfg.storageBucket, messagingSenderId: cfg.messagingSenderId, appId: cfg.appId
+      };
+      window._inventoryConfigReady = true;
+      // Trigger inventory init now that config is available
+      if (typeof window._startInventory === 'function') window._startInventory();
+    } catch(e) {
+      console.error("Inventory config load failed:", e.message);
+      window._inventoryConfigReady = false;
+    }
+  });
+</script>
 <!-- Initialize shared arrays before Firebase runs -->
 <script>
 window.inventory = window.inventory || [];
@@ -23,8 +49,21 @@ if(typeof firebase==='undefined'){
     if(ls)ls.innerHTML='<div style="color:#fff;text-align:center;padding:40px;max-width:400px"><h2>Connection Required</h2><p style="margin-top:12px;opacity:.8">This app must be opened from a web server (Vercel) not a local file. Please deploy to Vercel and open the Vercel URL.</p></div>';
   });return;
 }
-var cfg={apiKey:"AIzaSyCC3k6i9ADfkhUOusGv_EvvO5PxcuIFgtc",authDomain:"plessen-inventory.firebaseapp.com",projectId:"plessen-inventory",storageBucket:"plessen-inventory.firebasestorage.app",messagingSenderId:"704212184885",appId:"1:704212184885:web:6e094e9ddd5573850ae67c"};
-if(!firebase.apps.length)firebase.initializeApp(cfg);
+// Firebase config loaded from encrypted config.js via crypto.js module above
+// Hardcoded credentials removed — they live in config.js (encrypted)
+// _startInventory is called once window._inventoryFirebaseCfg is populated
+window._startInventory = function() {
+  var cfg = window._inventoryFirebaseCfg;
+  if (!cfg) { console.error("No inventory config"); return; }
+  if (!firebase.apps.length) firebase.initializeApp(cfg);
+  // Null the config reference immediately after init
+  window._inventoryFirebaseCfg = null;
+  initInventoryApp(); // call the existing init function
+};
+// If config is already ready (unlikely but safe), start immediately
+if (window._inventoryConfigReady && window._inventoryFirebaseCfg) {
+  window._startInventory();
+}
 var db=firebase.firestore();
 var auth=firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
@@ -111,23 +150,42 @@ function fbLoad(){
       }
       var applyP=window.applyConfig?window.applyConfig(cfg):Promise.resolve();
       applyP.then(function(){
-        var email=window._authEmail||'';
-        if(email==='anthony.jolly@plesseneye.com'){
-          if(window.activateRole)window.activateRole('admin',null);
-        } else if(email==='examuser@plesseneye.com'){
-          if(window.activateRole)window.activateRole('tech',null);
-        } else { if(window.activateRole)window.activateRole("tech",null); }
+        // Check allowedUsers collection, fall back to email for compatibility
+        db.doc('allowedUsers/'+(window._authEmail||'')).get().then(function(aSnap){
+          var role='tech';
+          if(aSnap.exists&&aSnap.data()&&aSnap.data().role==='admin') role='admin';
+          else if(!aSnap.exists&&window._authEmail==='anthony.jolly@plesseneye.com') role='admin';
+          if(window.activateRole)window.activateRole(role,null);
+        }).catch(function(){
+          var em=window._authEmail||'';
+          var role=(em==='anthony.jolly@plesseneye.com')?'admin':'tech';
+          if(window.activateRole)window.activateRole(role,null);
+        });
       }).catch(function(){
-        // Config load failed — route by email anyway
-        var em=window._authEmail||'';
-        if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-        else if(em==='examuser@plesseneye.com'){if(window.activateRole)window.activateRole('tech',null);}
+        // Config load failed — check allowedUsers then fall back to email
+        db.doc('allowedUsers/'+(window._authEmail||'')).get().then(function(aSnap){
+          var role='tech';
+          if(aSnap.exists&&aSnap.data()&&aSnap.data().role==='admin') role='admin';
+          else if(!aSnap.exists&&window._authEmail==='anthony.jolly@plesseneye.com') role='admin';
+          if(window.activateRole)window.activateRole(role,null);
+        }).catch(function(){
+          var em=window._authEmail||'';
+          if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
+          else{if(window.activateRole)window.activateRole('tech',null);}
+        });
       });
     }).catch(function(){
-      // Config doc fetch failed — route by email anyway
-      var em=window._authEmail||'';
-      if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-      else if(em==='examuser@plesseneye.com'){if(window.activateRole)window.activateRole('tech',null);}
+      // Config doc fetch failed — check allowedUsers then fall back to email
+      db.doc('allowedUsers/'+(window._authEmail||'')).get().then(function(aSnap){
+        var role='tech';
+        if(aSnap.exists&&aSnap.data()&&aSnap.data().role==='admin') role='admin';
+        else if(!aSnap.exists&&window._authEmail==='anthony.jolly@plesseneye.com') role='admin';
+        if(window.activateRole)window.activateRole(role,null);
+      }).catch(function(){
+        var em=window._authEmail||'';
+        if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
+        else{if(window.activateRole)window.activateRole('tech',null);}
+      });
     });
     // Listeners
     db.doc('plessen/inventory').onSnapshot(function(snap){
@@ -889,6 +947,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
       style="width:100%;padding:11px;background:#1a5fb4;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">
       Sign In
     </button>
+    <a href="../portal/index.html" style="display:block;text-align:center;margin-top:16px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
   </div>
 </div>
 
@@ -908,6 +967,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
     <button class="btn btn-w" id="settingsBtn" onclick="openSettings()" style="display:none" title="Settings">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
+    <a href="../portal/index.html" class="btn btn-w" style="display:flex;align-items:center;gap:5px;text-decoration:none;font-size:12px;font-weight:600">← Portal</a>
     <button class="btn btn-w" id="logoutBtn" onclick="window.doLogout()" style="display:none">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Logout
     </button>
