@@ -18,132 +18,194 @@
       --shadow-lg:0 12px 40px rgba(30,64,175,.16);
     }
     .hidden{display:none!important}
-    /* ── Login ── */
+    /* ── Login ───────────────────────────────────────────────────── */
     #loginScreen{display:flex;min-height:100vh}
-    .login-left{flex:1;display:none;flex-direction:column;justify-content:center;padding:60px;background:linear-gradient(145deg,#1d4ed8 0%,#1e40af 60%,#1e3a8a 100%);position:relative;overflow:hidden}
+    .login-left{flex:1;display:none;flex-direction:column;justify-content:center;padding:60px;
+      background:linear-gradient(145deg,#1d4ed8 0%,#1e40af 60%,#1e3a8a 100%);position:relative;overflow:hidden}
     @media(min-width:900px){.login-left{display:flex}}
-    .login-left::before{content:'';position:absolute;width:500px;height:500px;background:rgba(255,255,255,.06);border-radius:50%;top:-120px;right:-120px}
-    .login-left::after{content:'';position:absolute;width:300px;height:300px;background:rgba(255,255,255,.04);border-radius:50%;bottom:-60px;left:-60px}
+    .login-left::before{content:'';position:absolute;width:500px;height:500px;background:rgba(255,255,255,.06);
+      border-radius:50%;top:-120px;right:-120px}
+    .login-left::after{content:'';position:absolute;width:300px;height:300px;background:rgba(255,255,255,.04);
+      border-radius:50%;bottom:-60px;left:-60px}
     .ll-brand{display:flex;align-items:center;gap:12px;margin-bottom:56px;position:relative;z-index:1}
-    .ll-mark{width:42px;height:42px;background:rgba(255,255,255,.2);border-radius:12px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.3)}
+    .ll-mark{width:42px;height:42px;background:rgba(255,255,255,.2);border-radius:12px;
+      display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.3)}
     .ll-name{font-size:17px;font-weight:800;color:#fff;letter-spacing:-.3px}
-    .ll-title{font-size:34px;font-weight:800;color:#fff;line-height:1.2;letter-spacing:-.5px;margin-bottom:16px;position:relative;z-index:1}
+    .ll-title{font-size:34px;font-weight:800;color:#fff;line-height:1.2;letter-spacing:-.5px;
+      margin-bottom:16px;position:relative;z-index:1}
     .ll-sub{font-size:15px;color:rgba(255,255,255,.7);line-height:1.6;max-width:340px;position:relative;z-index:1}
     .ll-systems{margin-top:48px;display:flex;flex-direction:column;gap:10px;position:relative;z-index:1}
     .ll-sys{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:rgba(255,255,255,.85)}
     .ll-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.5);flex-shrink:0}
-    .login-right{width:100%;max-width:480px;display:flex;align-items:center;justify-content:center;padding:32px 24px;background:#fff;box-shadow:-4px 0 40px rgba(0,0,0,.06)}
+    .login-right{width:100%;max-width:480px;display:flex;align-items:center;justify-content:center;
+      padding:32px 24px;background:#fff;box-shadow:-4px 0 40px rgba(0,0,0,.06)}
     @media(max-width:899px){.login-right{max-width:100%;box-shadow:none}}
     .login-box{width:100%;max-width:380px}
     .login-title{font-size:26px;font-weight:800;color:#0f172a;letter-spacing:-.4px;margin-bottom:6px}
     .login-sub{font-size:14px;color:#64748b;margin-bottom:32px}
-    .field-label{display:block;font-size:12px;font-weight:700;color:#475569;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-    .field-input{width:100%;padding:11px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;color:#0f172a;outline:none;transition:border .15s;margin-bottom:16px}
+    .field-label{display:block;font-size:12px;font-weight:700;color:#475569;margin-bottom:6px;
+      text-transform:uppercase;letter-spacing:.5px}
+    .field-input{width:100%;padding:11px 14px;border:1.5px solid #e2e8f0;border-radius:10px;
+      font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;color:#0f172a;outline:none;
+      transition:border .15s;margin-bottom:16px}
     .field-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
-    .field-select{width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:#0f172a;outline:none;background:#fff;margin-bottom:12px}
-    .err-box{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;color:#dc2626;margin-bottom:16px}
-    .login-btn{width:100%;padding:12px;background:#1d4ed8;color:#fff;border:none;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s}
+    .field-input-sm{padding:9px 12px;font-size:13px;margin-bottom:0;border-radius:9px}
+    .field-select{width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;
+      font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:#0f172a;outline:none;
+      background:#fff;margin-bottom:0}
+    .field-textarea{width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;
+      font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:#0f172a;outline:none;
+      resize:vertical;min-height:60px;margin-bottom:0}
+    .err-box{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;
+      font-size:13px;font-weight:600;color:#dc2626;margin-bottom:16px}
+    .ok-box{background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:10px 14px;
+      font-size:13px;font-weight:600;color:#166534;margin-bottom:14px}
+    .login-btn{width:100%;padding:12px;background:#1d4ed8;color:#fff;border:none;border-radius:10px;
+      font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s}
     .login-btn:hover{background:#1e40af}
     .login-btn:disabled{opacity:.6;cursor:not-allowed}
     .login-footer{margin-top:24px;font-size:11px;color:#94a3b8;text-align:center;line-height:1.5}
-    /* ── Portal ── */
+    /* ── Portal ──────────────────────────────────────────────────── */
     #portalScreen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(29,78,216,.12) 0%,transparent 70%),#f0f4ff;min-height:100vh}
-    .topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 32px;height:64px;background:rgba(255,255,255,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+    .topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;
+      padding:0 32px;height:64px;background:rgba(255,255,255,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
     .brand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;color:var(--navy)}
-    .brand-mark{width:34px;height:34px;background:var(--blue);border-radius:9px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(29,78,216,.35)}
+    .brand-mark{width:34px;height:34px;background:var(--blue);border-radius:9px;
+      display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(29,78,216,.35)}
     .brand-name span{color:var(--blue)}
     .topbar-right{display:flex;align-items:center;gap:12px}
-    .loc-pill{display:flex;align-items:center;gap:6px;background:var(--blue-pale);border:1px solid var(--blue-lt);border-radius:20px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--blue)}
+    .loc-pill{display:flex;align-items:center;gap:6px;background:var(--blue-pale);border:1px solid var(--blue-lt);
+      border-radius:20px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--blue)}
     .loc-dot{width:7px;height:7px;border-radius:50%;background:var(--blue-mid);box-shadow:0 0 5px rgba(37,99,235,.7)}
+    /* ── Gear ────────────────────────────────────────────────────── */
     .gear-wrap{position:relative}
-    .gear-btn{width:38px;height:38px;border-radius:10px;border:1px solid var(--border);background:var(--white);color:var(--slate);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;box-shadow:var(--shadow)}
+    .gear-btn{width:38px;height:38px;border-radius:10px;border:1px solid var(--border);background:var(--white);
+      color:var(--slate);cursor:pointer;display:flex;align-items:center;justify-content:center;
+      transition:all .15s;box-shadow:var(--shadow)}
     .gear-btn:hover,.gear-btn.open{background:var(--blue-pale);border-color:var(--blue-lt);color:var(--blue)}
-    .gear-menu{position:absolute;top:calc(100% + 10px);right:0;background:var(--white);border:1px solid var(--border);border-radius:14px;padding:8px;min-width:220px;box-shadow:var(--shadow-lg);animation:menuIn .15s ease;z-index:200}
+    .gear-menu{position:absolute;top:calc(100% + 10px);right:0;background:var(--white);border:1px solid var(--border);
+      border-radius:14px;padding:8px;min-width:230px;box-shadow:var(--shadow-lg);z-index:200;
+      animation:menuIn .15s ease}
     @keyframes menuIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}
     .gear-user{padding:10px 12px 8px;border-bottom:1px solid var(--border);margin-bottom:6px}
     .gear-user-name{font-size:13px;font-weight:700;color:var(--navy)}
     .gear-user-role{font-size:11px;color:var(--slate-lt);margin-top:2px}
-    .gear-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--slate-lt);padding:6px 10px 4px}
-    .gear-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:8px;border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;color:var(--slate);cursor:pointer;transition:all .12s;text-align:left}
+    .gear-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+      color:var(--slate-lt);padding:6px 10px 4px}
+    .gear-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:8px;
+      border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;
+      font-weight:600;color:var(--slate);cursor:pointer;transition:all .12s;text-align:left}
     .gear-item:hover{background:var(--blue-pale);color:var(--navy)}
     .gear-item.danger:hover{background:#fff1f2;color:#dc2626}
     .gear-div{height:1px;background:var(--border);margin:6px 0}
-    /* ── Hero ── */
-    .hero{padding:48px 32px 32px;max-width:1200px;margin:0 auto}
-    .hero-greeting{font-size:13px;font-weight:600;color:var(--blue-mid);letter-spacing:.3px;margin-bottom:8px}
-    .hero-title{font-size:clamp(24px,4vw,34px);font-weight:800;color:var(--navy);letter-spacing:-.5px;margin-bottom:8px}
-    .hero-sub{font-size:15px;color:var(--slate)}
-    /* ── Cards ── */
-    .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px;padding:0 32px 48px;max-width:1200px;margin:0 auto}
-    .sys-card{background:var(--white);border:1px solid var(--border);border-radius:16px;padding:28px;cursor:pointer;transition:all .2s cubic-bezier(.22,1,.36,1);box-shadow:var(--shadow);display:flex;flex-direction:column;position:relative;overflow:hidden;text-decoration:none}
-    .sys-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--card-accent,#eff6ff) 0%,transparent 60%);opacity:0;transition:opacity .2s;pointer-events:none}
-    .sys-card:hover{border-color:var(--card-color,#1d4ed8);box-shadow:var(--shadow-lg);transform:translateY(-3px)}
+    /* ── Hero ────────────────────────────────────────────────────── */
+    .hero{padding:48px 32px 28px;max-width:1200px;margin:0 auto}
+    .hero-greeting{font-size:13px;font-weight:600;color:var(--blue-mid);letter-spacing:.3px;margin-bottom:6px}
+    .hero-title{font-size:clamp(22px,4vw,32px);font-weight:800;color:var(--navy);letter-spacing:-.5px;margin-bottom:6px}
+    .hero-sub{font-size:14px;color:var(--slate)}
+    /* ── Cards ───────────────────────────────────────────────────── */
+    .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:18px;
+      padding:0 32px 48px;max-width:1200px;margin:0 auto}
+    .sys-card{background:var(--white);border:1px solid var(--border);border-radius:16px;padding:26px;
+      cursor:pointer;transition:all .2s cubic-bezier(.22,1,.36,1);box-shadow:var(--shadow);
+      display:flex;flex-direction:column;position:relative;overflow:hidden}
+    .sys-card::before{content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,var(--card-accent,#eff6ff) 0%,transparent 60%);
+      opacity:0;transition:opacity .2s;pointer-events:none}
+    .sys-card:hover{border-color:var(--card-color,#1d4ed8);box-shadow:var(--shadow-lg);transform:translateY(-2px)}
     .sys-card:hover::before{opacity:1}
     .sys-card:hover .card-arrow{transform:translateX(4px);opacity:1}
     .sys-card:hover .card-icon{background:var(--card-color,#1d4ed8);color:#fff}
     .sys-card.locked{opacity:.5;cursor:not-allowed;pointer-events:none}
-    .sys-card.coming-soon{opacity:.6;cursor:default;pointer-events:none}
-    .card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
-    .card-icon{width:60px;height:60px;border-radius:14px;background:var(--card-accent,#eff6ff);color:var(--card-color,#1d4ed8);display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
-    .card-arrow{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--slate-lt);transition:all .2s;opacity:0;flex-shrink:0}
-    .card-label{font-size:20px;font-weight:800;color:var(--navy);letter-spacing:-.3px;margin-bottom:6px}
-    .card-desc{font-size:13px;color:var(--slate);line-height:1.55;flex:1}
-    .card-footer{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-    .card-status{font-size:11px;font-weight:700;letter-spacing:.3px;color:var(--card-color,#1d4ed8);background:var(--card-accent,#eff6ff);padding:3px 10px;border-radius:20px}
-    /* ── Modals ── */
-    .mo{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(4px);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;animation:fadeIn .15s}
+    .sys-card.coming-soon{opacity:.55;cursor:default;pointer-events:none}
+    .card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}
+    .card-icon{width:56px;height:56px;border-radius:13px;background:var(--card-accent,#eff6ff);
+      color:var(--card-color,#1d4ed8);display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+    .card-arrow{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);
+      display:flex;align-items:center;justify-content:center;color:var(--slate-lt);transition:all .2s;opacity:0;flex-shrink:0}
+    .card-label{font-size:18px;font-weight:800;color:var(--navy);letter-spacing:-.3px;margin-bottom:5px}
+    .card-desc{font-size:13px;color:var(--slate);line-height:1.5;flex:1}
+    .card-footer{margin-top:18px;padding-top:14px;border-top:1px solid var(--border);
+      display:flex;align-items:center;justify-content:space-between}
+    .card-status{font-size:11px;font-weight:700;letter-spacing:.3px;
+      color:var(--card-color,#1d4ed8);background:var(--card-accent,#eff6ff);padding:3px 10px;border-radius:20px}
+    /* ── Modals ──────────────────────────────────────────────────── */
+    .mo{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(4px);z-index:300;
+      display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;animation:fadeIn .15s}
     @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-    .md{background:var(--white);border:1px solid var(--border);border-radius:18px;padding:28px;width:100%;max-width:540px;max-height:92vh;overflow-y:auto;box-shadow:var(--shadow-lg);animation:slideUp .18s cubic-bezier(.22,1,.36,1)}
-    .md-lg{max-width:800px}
+    .md{background:var(--white);border:1px solid var(--border);border-radius:18px;padding:26px;
+      width:100%;max-width:520px;max-height:92vh;overflow-y:auto;
+      box-shadow:var(--shadow-lg);animation:slideUp .18s cubic-bezier(.22,1,.36,1)}
+    .md-lg{max-width:780px}
+    .md-xl{max-width:900px}
     @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-    .md-title{font-size:17px;font-weight:800;color:var(--navy);margin-bottom:5px}
-    .md-sub{font-size:13px;color:var(--slate);margin-bottom:22px}
-    .md-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:22px;padding-top:16px;border-top:1px solid var(--border)}
-    .field-group{margin-bottom:14px}
-    .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:10px;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s}
+    .md-title{font-size:17px;font-weight:800;color:var(--navy);margin-bottom:4px}
+    .md-sub{font-size:13px;color:var(--slate);margin-bottom:20px}
+    .md-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+    .field-group{margin-bottom:12px}
+    .field-hint{font-size:11px;color:var(--slate-lt);margin-top:4px}
+    /* ── Buttons ─────────────────────────────────────────────────── */
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:10px;border:none;
+      font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s}
     .btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:#1e40af}
     .btn-ghost{background:transparent;color:var(--slate);border:1.5px solid var(--border)}.btn-ghost:hover{background:var(--blue-pale);color:var(--navy)}
     .btn-danger{background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca}.btn-danger:hover{background:#fee2e2}
-    .btn-sm{padding:6px 12px;font-size:12px}
-    .btn-xs{padding:3px 8px;font-size:11px;border-radius:6px}
+    .btn-sm{padding:6px 12px;font-size:12px}.btn-xs{padding:3px 8px;font-size:11px;border-radius:6px}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    /* ── Users table ── */
-    .users-table{width:100%;border-collapse:collapse;font-size:13px}
-    .users-table th{background:#f8fafc;padding:9px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:1px solid var(--border)}
-    .users-table td{padding:11px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
-    .users-table tr:hover td{background:#f8faff}
-    .users-table tr:last-child td{border-bottom:none}
+    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    /* ── Users table ─────────────────────────────────────────────── */
+    .data-table{width:100%;border-collapse:collapse;font-size:13px}
+    .data-table th{background:#f8fafc;padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:1px solid var(--border)}
+    .data-table td{padding:10px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+    .data-table tr:hover td{background:#f8faff}
+    .data-table tr:last-child td{border-bottom:none}
     .role-pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.4px}
-    .role-superuser{background:#dbeafe;color:#1e40af}
-    .role-admin{background:#ede9fe;color:#5b21b6}
-    .role-staff{background:#d1fae5;color:#065f46}
-    .role-viewer{background:#fef3c7;color:#92400e}
+    .role-superuser{background:#dbeafe;color:#1e40af}.role-admin{background:#ede9fe;color:#5b21b6}
+    .role-staff{background:#d1fae5;color:#065f46}.role-viewer{background:#fef3c7;color:#92400e}
     .access-dots{display:flex;gap:4px;flex-wrap:wrap}
-    .access-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;cursor:help}
-    /* ── Sync status ── */
-    .sync-row{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;background:#f8faff;border:1px solid var(--border);margin-bottom:6px;font-size:13px}
-    .sync-status{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px}
-    .sync-ok{background:#dcfce7;color:#166534}
-    .sync-err{background:#fee2e2;color:#991b1b}
-    .sync-pending{background:#fef9c3;color:#854d0e}
-    /* ── Checkbox group ── */
-    .cb-group{display:flex;flex-direction:column;gap:6px;margin-top:6px}
-    .cb-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate);cursor:pointer}
+    .access-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;cursor:help}
+    /* ── Section label ───────────────────────────────────────────── */
+    .section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+      color:var(--blue);margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--blue-lt)}
+    /* ── System card (in manager) ────────────────────────────────── */
+    .sys-mgr-card{display:flex;align-items:center;gap:12px;padding:12px 14px;background:#f8faff;
+      border:1px solid var(--border);border-radius:10px;margin-bottom:8px;transition:border .15s}
+    .sys-mgr-card:hover{border-color:rgba(29,78,216,.25)}
+    .sys-color-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+    /* ── Color swatches ──────────────────────────────────────────── */
+    .color-swatches{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .color-swatch{width:28px;height:28px;border-radius:7px;cursor:pointer;border:2px solid transparent;transition:all .15s}
+    .color-swatch:hover,.color-swatch.selected{border-color:var(--navy);transform:scale(1.1)}
+    /* ── Toggle ──────────────────────────────────────────────────── */
+    .toggle-wrap{position:relative;width:40px;height:22px;display:inline-block;flex-shrink:0}
+    .toggle-wrap input{opacity:0;width:0;height:0}
+    .toggle-track{position:absolute;cursor:pointer;inset:0;background:#cbd5e1;border-radius:22px;transition:.3s}
+    .toggle-track::before{content:'';position:absolute;height:16px;width:16px;left:3px;bottom:3px;
+      background:#fff;border-radius:50%;transition:.3s}
+    input:checked+.toggle-track{background:var(--blue)}
+    input:checked+.toggle-track::before{transform:translateX(18px)}
+    /* ── Sync row ────────────────────────────────────────────────── */
+    .sync-row{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;
+      border-radius:8px;background:#f8faff;border:1px solid var(--border);margin-bottom:5px;font-size:13px}
+    .sync-ok{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;background:#dcfce7;color:#166534}
+    .sync-err{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;background:#fee2e2;color:#991b1b}
+    .sync-skip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;background:#f1f5f9;color:#64748b}
+    /* ── Misc ────────────────────────────────────────────────────── */
+    .setup-banner{background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:12px 18px;
+      margin:0 32px 20px;max-width:calc(1200px - 64px);font-size:13px;color:#92400e}
+    .cb-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate);cursor:pointer;margin-bottom:6px}
     .cb-row input{accent-color:var(--blue);width:14px;height:14px;cursor:pointer}
-    .section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--blue);margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--blue-lt)}
-    /* ── Setup banner ── */
-    .setup-banner{background:#fef9c3;border:1px solid #fde68a;border-radius:12px;padding:14px 18px;margin:0 32px 24px;max-width:calc(1200px - 64px);font-size:13px;color:#92400e}
-    .setup-banner strong{font-weight:700}
+    .access-row{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;
+      border-radius:8px;background:#f8faff;border:1px solid var(--border);margin-bottom:6px}
     @media(max-width:600px){
-      .topbar{padding:0 16px}.hero{padding:28px 16px 20px}.cards-grid{padding:0 16px 32px;gap:14px}
+      .topbar{padding:0 16px}.hero{padding:28px 16px 18px}.cards-grid{padding:0 16px 32px;gap:12px}
     }
   </style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     LOGIN SCREEN
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- LOGIN SCREEN ─────────────────────────────────────────────────────────── -->
 <div id="loginScreen">
   <div class="login-left">
     <div class="ll-brand">
@@ -154,12 +216,10 @@
     </div>
     <div class="ll-title">One platform.<br>Every system.</div>
     <div class="ll-sub">A unified management platform for all Plessen Eye Care operations across St. Croix and St. Thomas.</div>
-    <div class="ll-systems">
+    <div class="ll-systems" id="llSystems">
       <div class="ll-sys"><span class="ll-dot"></span>Equipment Management</div>
       <div class="ll-sys"><span class="ll-dot"></span>Inventory</div>
       <div class="ll-sys"><span class="ll-dot"></span>Credentialing</div>
-      <div class="ll-sys"><span class="ll-dot"></span>Procedures</div>
-      <div class="ll-sys"><span class="ll-dot"></span>Ordering</div>
     </div>
   </div>
   <div class="login-right">
@@ -167,7 +227,7 @@
       <div class="login-title">Welcome back</div>
       <div class="login-sub">Sign in to your Plessen account</div>
       <div id="loginErr" class="err-box hidden"></div>
-      <label class="field-label">Username / Email</label>
+      <label class="field-label">Email</label>
       <input type="email" id="loginEmail" class="field-input" placeholder="Enter email">
       <label class="field-label">Password</label>
       <input type="password" id="loginPass" class="field-input" placeholder="Enter password">
@@ -177,11 +237,8 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     PORTAL SCREEN
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- PORTAL SCREEN ───────────────────────────────────────────────────────── -->
 <div id="portalScreen" class="hidden">
-  <!-- Topbar -->
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark">
@@ -210,6 +267,9 @@
             <button class="gear-item" onclick="openUserMgmt()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>User Management
             </button>
+            <button class="gear-item" id="systemMgrBtn" onclick="openSystemMgr()" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>System Manager
+            </button>
           </div>
           <div class="gear-div"></div>
           <button class="gear-item danger" onclick="doSignOut()">
@@ -219,32 +279,24 @@
       </div>
     </div>
   </header>
-
-  <!-- Setup banner (shown if no allowedUsers written yet) -->
   <div id="setupBanner" class="setup-banner hidden">
-    <strong>First-time setup:</strong> You're logged in as superuser. Add users and configure system access from <strong>User Management</strong> in the gear menu.
+    <strong>First-time setup:</strong> Systems have been seeded. Open <strong>User Management</strong> in the gear menu to add users and configure access. Use <strong>System Manager</strong> to add or modify systems.
   </div>
-
-  <!-- Hero -->
   <div class="hero">
     <div class="hero-greeting" id="heroGreeting">Good morning</div>
-    <div class="hero-title" id="heroTitle">Plessen Management System</div>
+    <div class="hero-title">Plessen Management System</div>
     <div class="hero-sub">Select a system to get started.</div>
   </div>
-
-  <!-- System Cards -->
-  <div class="cards-grid" id="cardsGrid"></div>
+  <div class="cards-grid" id="cardsGrid"><div style="color:#94a3b8;padding:20px">Loading systems...</div></div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     MODAL: CHANGE PASSWORD
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: CHANGE PASSWORD ──────────────────────────────────────────────── -->
 <div class="mo hidden" id="changePwModal" onclick="if(event.target===this)closeChangePw()">
   <div class="md">
     <div class="md-title">Change Password</div>
     <div class="md-sub">Must be at least 8 characters.</div>
     <div id="pwErr" class="err-box hidden"></div>
-    <div id="pwSuccess" class="hidden" style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:12px 14px;font-size:13px;font-weight:600;color:#166534;margin-bottom:14px">Password changed successfully.</div>
+    <div id="pwOk"  class="ok-box hidden">Password changed successfully.</div>
     <div class="field-group"><label class="field-label">Current Password</label><input type="password" id="pwCurrent" class="field-input"></div>
     <div class="field-group"><label class="field-label">New Password</label><input type="password" id="pwNew" class="field-input"></div>
     <div class="field-group"><label class="field-label">Confirm New Password</label><input type="password" id="pwConfirm" class="field-input"></div>
@@ -255,54 +307,39 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     MODAL: USER MANAGEMENT
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: USER MANAGEMENT ─────────────────────────────────────────────── -->
 <div class="mo hidden" id="userMgmtModal" onclick="if(event.target===this)closeUserMgmt()">
   <div class="md md-lg">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
-      <div>
-        <div class="md-title">User Management</div>
-        <div style="font-size:13px;color:#64748b">Manage access across all systems</div>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="openAddUser()">+ Add User</button>
+      <div><div class="md-title">User Management</div><div style="font-size:13px;color:#64748b">Manage access across all systems</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openUserForm()">+ Add User</button>
     </div>
     <div style="overflow-x:auto">
-      <table class="users-table">
-        <thead>
-          <tr>
-            <th>Name</th><th>Email</th><th>Role</th><th>Access</th><th>Status</th><th></th>
-          </tr>
-        </thead>
-        <tbody id="usersTableBody">
-          <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Loading...</td></tr>
-        </tbody>
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>System Access</th><th>Status</th><th></th></tr></thead>
+        <tbody id="usersTableBody"><tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Loading...</td></tr></tbody>
       </table>
     </div>
-    <div class="md-actions">
-      <button class="btn btn-ghost" onclick="closeUserMgmt()">Close</button>
-    </div>
+    <div class="md-actions"><button class="btn btn-ghost" onclick="closeUserMgmt()">Close</button></div>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     MODAL: ADD / EDIT USER
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: ADD / EDIT USER ─────────────────────────────────────────────── -->
 <div class="mo hidden" id="userFormModal" onclick="if(event.target===this)closeUserForm()">
   <div class="md">
     <div class="md-title" id="userFormTitle">Add User</div>
-    <div class="md-sub">User will be created in all assigned systems.</div>
+    <div class="md-sub">Account will be created and synced to assigned systems.</div>
     <div id="userFormErr" class="err-box hidden"></div>
     <input type="hidden" id="editUserId">
     <div class="grid2">
-      <div class="field-group"><label class="field-label">Display Name *</label><input type="text" id="uName" class="field-input" placeholder="Full name"></div>
-      <div class="field-group"><label class="field-label">Email *</label><input type="email" id="uEmail" class="field-input" placeholder="email@plesseneye.com"></div>
+      <div class="field-group"><label class="field-label">Display Name *</label><input type="text" id="uName" class="field-input field-input-sm" placeholder="Full name"></div>
+      <div class="field-group"><label class="field-label">Email *</label><input type="email" id="uEmail" class="field-input field-input-sm" placeholder="email@plesseneye.com"></div>
     </div>
     <div class="grid2">
       <div class="field-group">
         <label class="field-label">Password *</label>
-        <input type="password" id="uPass" class="field-input" placeholder="Min 8 characters">
-        <div style="font-size:11px;color:#94a3b8;margin-top:-10px;margin-bottom:10px" id="passHint">Required for new users</div>
+        <input type="password" id="uPass" class="field-input field-input-sm">
+        <div class="field-hint" id="passHint">Required for new users</div>
       </div>
       <div class="field-group">
         <label class="field-label">Role *</label>
@@ -316,15 +353,15 @@
     </div>
     <div class="field-group">
       <label class="field-label">Locations</label>
-      <div class="cb-group">
+      <div style="display:flex;gap:20px;margin-top:6px">
         <label class="cb-row"><input type="checkbox" id="locSTX" checked> STX — St. Croix</label>
         <label class="cb-row"><input type="checkbox" id="locSTT"> STT — St. Thomas</label>
       </div>
     </div>
     <div class="section-label">System Access</div>
-    <div id="systemAccessFields"></div>
-    <div class="section-label" style="margin-top:16px">Sync to Systems</div>
-    <div id="syncStatusDiv" style="font-size:12px;color:#64748b">Status will appear here after saving.</div>
+    <div id="systemAccessFields"><div style="font-size:13px;color:#94a3b8">Loading systems...</div></div>
+    <div class="section-label" style="margin-top:14px">Sync Results</div>
+    <div id="syncResultsDiv"><div style="font-size:12px;color:#94a3b8">Results will appear here after saving.</div></div>
     <div class="md-actions">
       <button class="btn btn-ghost" onclick="closeUserForm()">Cancel</button>
       <button class="btn btn-primary" id="userFormSaveBtn" onclick="saveUser()">Create User</button>
@@ -332,613 +369,734 @@
   </div>
 </div>
 
+<!-- MODAL: SYSTEM MANAGER ──────────────────────────────────────────────── -->
+<div class="mo hidden" id="systemMgrModal" onclick="if(event.target===this)closeSystemMgr()">
+  <div class="md md-lg">
+    <div id="sysMgrList">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <div><div class="md-title">System Manager</div><div style="font-size:13px;color:#64748b">Add and configure systems. Changes take effect immediately.</div></div>
+        <button class="btn btn-primary btn-sm" onclick="openSystemForm()">+ Add System</button>
+      </div>
+      <div id="systemsList"></div>
+      <div class="md-actions"><button class="btn btn-ghost" onclick="closeSystemMgr()">Close</button></div>
+    </div>
+    <div id="sysMgrForm" class="hidden">
+      <div class="md-title" id="sysFormTitle">Add System</div>
+      <div class="md-sub">Enter the Firebase project config and display settings.</div>
+      <div id="sysFormErr" class="err-box hidden"></div>
+      <input type="hidden" id="editSysKey">
+      <div class="section-label">Display Settings</div>
+      <div class="grid2">
+        <div class="field-group">
+          <label class="field-label">System Key * <span style="font-weight:400;text-transform:none;letter-spacing:0">(no spaces, e.g. procedures)</span></label>
+          <input type="text" id="sysKey" class="field-input field-input-sm" placeholder="procedures">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Display Label *</label>
+          <input type="text" id="sysLabel" class="field-input field-input-sm" placeholder="Procedures">
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Description</label>
+        <textarea id="sysDesc" class="field-textarea" placeholder="Brief description of this system"></textarea>
+      </div>
+      <div class="grid2">
+        <div class="field-group">
+          <label class="field-label">File Path (relative HTML)</label>
+          <input type="text" id="sysPath" class="field-input field-input-sm" placeholder="../procedures/index.html">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Display Order</label>
+          <input type="number" id="sysOrder" class="field-input field-input-sm" placeholder="4" min="1">
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Color</label>
+        <div class="color-swatches" id="colorSwatches"></div>
+        <input type="hidden" id="sysColor" value="#1d4ed8">
+        <input type="hidden" id="sysAccent" value="#dbeafe">
+      </div>
+      <div class="field-group" style="display:flex;align-items:center;gap:10px;margin-top:4px">
+        <label class="toggle-wrap">
+          <input type="checkbox" id="sysEnabled" checked>
+          <span class="toggle-track"></span>
+        </label>
+        <span style="font-size:13px;font-weight:600;color:var(--navy)">System Enabled</span>
+      </div>
+      <div class="section-label">Firebase Configuration</div>
+      <div class="grid2">
+        <div class="field-group"><label class="field-label">API Key *</label><input type="text" id="sysApiKey" class="field-input field-input-sm" placeholder="AIzaSy..."></div>
+        <div class="field-group"><label class="field-label">Auth Domain *</label><input type="text" id="sysAuthDomain" class="field-input field-input-sm" placeholder="project.firebaseapp.com"></div>
+        <div class="field-group"><label class="field-label">Project ID *</label><input type="text" id="sysProjectId" class="field-input field-input-sm" placeholder="my-project"></div>
+        <div class="field-group"><label class="field-label">Storage Bucket</label><input type="text" id="sysStorageBucket" class="field-input field-input-sm" placeholder="project.firebasestorage.app"></div>
+        <div class="field-group"><label class="field-label">Messaging Sender ID</label><input type="text" id="sysMsgSenderId" class="field-input field-input-sm" placeholder="123456789"></div>
+        <div class="field-group"><label class="field-label">App ID *</label><input type="text" id="sysAppId" class="field-input field-input-sm" placeholder="1:123:web:abc"></div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Measurement ID <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional, Analytics)</span></label>
+        <input type="text" id="sysMeasurementId" class="field-input field-input-sm" placeholder="G-XXXXXXXXXX">
+      </div>
+      <div class="md-actions">
+        <button class="btn btn-ghost" onclick="backToSystemsList()">← Back</button>
+        <button class="btn btn-primary" id="sysFormSaveBtn" onclick="saveSystem()">Save System</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script type="module">
-// ═══════════════════════════════════════════════════════════════════════════
-// FIREBASE CONFIG
-// ═══════════════════════════════════════════════════════════════════════════
-import { initializeApp }                                  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getAuth, signInWithEmailAndPassword, signOut,
-         onAuthStateChanged, updatePassword,
-         EmailAuthProvider, reauthenticateWithCredential,
-         createUserWithEmailAndPassword }                 from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc, getDocs,
-         collection, updateDoc, deleteDoc, query,
-         orderBy }                                        from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+// ════════════════════════════════════════════════════════════════════════════
+// FIREBASE IMPORTS
+// ════════════════════════════════════════════════════════════════════════════
+// Firebase modules imported above via crypto.js
 
-const PORTAL_CFG = {
-  apiKey:            "AIzaSyAeboC3xoZR_jyUs1yqBpqK4LgFkBnXEwQ",
-  authDomain:        "plessen-auth.firebaseapp.com",
-  projectId:         "plessen-auth",
-  storageBucket:     "plessen-auth.firebasestorage.app",
-  messagingSenderId: "813046971813",
-  appId:             "1:813046971813:web:9237ad554a7eeb1a4c7c4c"
-};
+// ════════════════════════════════════════════════════════════════════════════
+// PORTAL CONFIG  (only this project is hardcoded)
+// ════════════════════════════════════════════════════════════════════════════
+// Portal config removed — lives in crypto.js only
 
-// Sub-project configurations for auth sync
-const SUB_PROJECTS = {
-  equipment: {
-    key:       "equipment",
-    label:     "Equipment Management",
-    apiKey:    "AIzaSyBUZg65JYsT5BtZMhG9CClJQZJCpsdGK-E",
-    projectId: "plessen-repair",
-    color:     "#1d4ed8",
-    accent:    "#dbeafe",
-    path:      "../equipment/index.html",
-    desc:      "Track, service, and manage all clinic equipment",
-  },
-  inventory: {
-    key:       "inventory",
-    label:     "Inventory",
-    apiKey:    "AIzaSyCC3k6i9ADfkhUOusGv_EvvO5PxcuIFgtc",
-    projectId: "plessen-inventory",
-    color:     "#0369a1",
-    accent:    "#e0f2fe",
-    path:      "../inventory/index.html",
-    desc:      "Monitor stock levels, medications, and medical supplies",
-  },
-  credentialing: {
-    key:       "credentialing",
-    label:     "Credentialing",
-    apiKey:    "AIzaSyCjMKkNunk0NoMLUX4SMLOd67BT_Z-0nDs",
-    projectId: "plessen-credentials",
-    color:     "#075985",
-    accent:    "#f0f9ff",
-    path:      "../credentialing/index.html",
-    desc:      "Manage staff licenses, certifications, and credentials",
-  },
-};
-
-const COMING_SOON = [
-  { label:"Procedures", desc:"Log and schedule all in-office procedures", color:"#1d4ed8", accent:"#eff6ff" },
-  { label:"Ordering",   desc:"Request and approve medication and supply orders", color:"#0369a1", accent:"#f0f9ff" },
+// Systems to seed into Firestore on first run
+const SEED_SYSTEMS = [
+  { key:"equipment",     label:"Equipment Management", order:1, enabled:true,
+    description:"Track, service, and manage all clinic equipment",
+    color:"#1d4ed8", accent:"#dbeafe", path:"../equipment/index.html",
+    apiKey:"AIzaSyBUZg65JYsT5BtZMhG9CClJQZJCpsdGK-E",
+    authDomain:"plessen-repair.firebaseapp.com", projectId:"plessen-repair",
+    storageBucket:"plessen-repair.firebasestorage.app",
+    messagingSenderId:"110845803408",
+    appId:"1:110845803408:web:41e3789f02f335ff361115", measurementId:"" },
+  { key:"inventory",     label:"Inventory", order:2, enabled:true,
+    description:"Monitor stock levels, medications, and medical supplies",
+    color:"#0369a1", accent:"#e0f2fe", path:"../inventory/index.html",
+    apiKey:"AIzaSyCC3k6i9ADfkhUOusGv_EvvO5PxcuIFgtc",
+    authDomain:"plessen-inventory.firebaseapp.com", projectId:"plessen-inventory",
+    storageBucket:"plessen-inventory.firebasestorage.app",
+    messagingSenderId:"704212184885",
+    appId:"1:704212184885:web:6e094e9ddd5573850ae67c", measurementId:"" },
+  { key:"credentialing", label:"Credentialing", order:3, enabled:true,
+    description:"Manage staff licenses, certifications, and credentials",
+    color:"#075985", accent:"#f0f9ff", path:"../credentialing/index.html",
+    apiKey:"AIzaSyCjMKkNunk0NoMLUX4SMLOd67BT_Z-0nDs",
+    authDomain:"plessen-credentials.firebaseapp.com", projectId:"plessen-credentials",
+    storageBucket:"plessen-credentials.firebasestorage.app",
+    messagingSenderId:"508688741805",
+    appId:"1:508688741805:web:e4fd46383bcfb63d8add24", measurementId:"G-PTVTN0NGSG" },
 ];
 
-// ── Firebase init ─────────────────────────────────────────────────────────────
-const portalApp  = initializeApp(PORTAL_CFG, "portal");
-const auth       = getAuth(portalApp);
-const db         = getFirestore(portalApp);
+const COLOR_PALETTE = [
+  { color:"#1d4ed8", accent:"#dbeafe", label:"Blue"       },
+  { color:"#0369a1", accent:"#e0f2fe", label:"Sky"        },
+  { color:"#075985", accent:"#f0f9ff", label:"Teal-Blue"  },
+  { color:"#0f766e", accent:"#ccfbf1", label:"Teal"       },
+  { color:"#15803d", accent:"#dcfce7", label:"Green"      },
+  { color:"#7e22ce", accent:"#f3e8ff", label:"Purple"     },
+  { color:"#be185d", accent:"#fce7f3", label:"Pink"       },
+  { color:"#b45309", accent:"#fef3c7", label:"Amber"      },
+  { color:"#dc2626", accent:"#fee2e2", label:"Red"        },
+  { color:"#0f172a", accent:"#f1f5f9", label:"Navy"       },
+];
 
-// ── Session state ─────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════════════════
 let currentUser    = null;
 let currentProfile = null;
-let sessionPass    = "";   // stored from login for sub-project admin sync
+let sessionPass    = "";
 let sessionEmail   = "";
+let loadedSystems  = [];   // populated from Firestore systemConfigs
+let allUsers       = [];
 
-// ── Expose to global for onclick handlers ─────────────────────────────────────
-window.doLogin       = doLogin;
-window.doSignOut     = doSignOut;
-window.toggleGear    = toggleGear;
-window.openChangePw  = openChangePw;
-window.closeChangePw = closeChangePw;
-window.doChangePw    = doChangePw;
-window.openUserMgmt  = openUserMgmt;
-window.closeUserMgmt = closeUserMgmt;
-window.openAddUser   = openAddUser;
-window.closeUserForm = closeUserForm;
-window.saveUser      = saveUser;
-window.editUser      = editUser;
-window.deleteUser    = deleteUser;
+// auth + db come from crypto.js import
 
-// ═══════════════════════════════════════════════════════════════════════════
+// Expose global handlers
+const G = window;
+G.doLogin=doLogin; G.doSignOut=doSignOut; G.toggleGear=toggleGear;
+G.openChangePw=openChangePw; G.closeChangePw=closeChangePw; G.doChangePw=doChangePw;
+G.openUserMgmt=openUserMgmt; G.closeUserMgmt=closeUserMgmt;
+G.openUserForm=openUserForm; G.closeUserForm=closeUserForm;
+G.saveUser=saveUser; G.editUser=editUser; G.deleteUser=deleteUser;
+G.openSystemMgr=openSystemMgr; G.closeSystemMgr=closeSystemMgr;
+G.openSystemForm=openSystemForm; G.backToSystemsList=backToSystemsList;
+G.saveSystem=saveSystem; G.editSystem=editSystem; G.deleteSystem=deleteSystem;
+G.toggleSystemEnabled=toggleSystemEnabled;
+
+// ════════════════════════════════════════════════════════════════════════════
 // REST API HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-const AUTH_REST = "https://identitytoolkit.googleapis.com/v1/accounts";
-const FS_REST   = "https://firestore.googleapis.com/v1/projects";
-
+// ════════════════════════════════════════════════════════════════════════════
 async function restPost(url, body) {
   const res  = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   return data;
 }
-
-// Sign in to a sub-project — returns idToken
 async function restSignIn(apiKey, email, password) {
-  return restPost(`${AUTH_REST}:signInWithPassword?key=${apiKey}`, { email, password, returnSecureToken:true });
+  return restPost(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+    { email, password, returnSecureToken:true });
 }
-
-// Create a user in a sub-project — returns idToken
 async function restCreateUser(apiKey, email, password) {
-  return restPost(`${AUTH_REST}:signUp?key=${apiKey}`, { email, password, returnSecureToken:true });
+  return restPost(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
+    { email, password, returnSecureToken:true });
 }
-
-// Convert JS value → Firestore REST field format
 function toFSVal(v) {
-  if (v === null || v === undefined) return { nullValue: null };
-  if (typeof v === "boolean")        return { booleanValue: v };
-  if (typeof v === "number")         return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
-  if (typeof v === "string")         return { stringValue: v };
-  if (Array.isArray(v))              return { arrayValue: { values: v.map(toFSVal) } };
-  if (typeof v === "object")         return { mapValue: { fields: toFSFields(v) } };
-  return { stringValue: String(v) };
+  if (v===null||v===undefined) return { nullValue:null };
+  if (typeof v==="boolean")    return { booleanValue:v };
+  if (typeof v==="number")     return Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v};
+  if (typeof v==="string")     return { stringValue:v };
+  if (Array.isArray(v))        return { arrayValue:{ values:v.map(toFSVal) } };
+  if (typeof v==="object")     return { mapValue:{ fields:toFSFields(v) } };
+  return { stringValue:String(v) };
 }
 function toFSFields(obj) {
-  const f = {};
-  for (const [k, v] of Object.entries(obj)) f[k] = toFSVal(v);
+  const f={};
+  for (const [k,v] of Object.entries(obj)) f[k]=toFSVal(v);
   return f;
 }
-
-// Write a Firestore doc in a sub-project via REST API
 async function restWriteDoc(projectId, colPath, docId, data, idToken) {
-  const url = `${FS_REST}/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
-  const res = await fetch(url, {
-    method:  "PATCH",
-    headers: { "Content-Type":"application/json", "Authorization":`Bearer ${idToken}` },
-    body:    JSON.stringify({ fields: toFSFields(data) }),
-  });
-  const result = await res.json();
+  const url=`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
+  const res=await fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json","Authorization":`Bearer ${idToken}`},body:JSON.stringify({fields:toFSFields(data)})});
+  const result=await res.json();
   if (result.error) throw new Error(result.error.message);
   return result;
 }
-
-// Delete a Firestore doc in a sub-project via REST API
 async function restDeleteDoc(projectId, colPath, docId, idToken) {
-  const url = `${FS_REST}/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
-  const res = await fetch(url, { method:"DELETE", headers:{ "Authorization":`Bearer ${idToken}` } });
+  const url=`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
+  const res=await fetch(url,{method:"DELETE",headers:{"Authorization":`Bearer ${idToken}`}});
   return res.ok;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SYNC USER TO SUB-PROJECTS
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// SYSTEM CONFIGS — load display settings from Firestore + credentials from
+// encrypted config.js via crypto.js. Merge into loadedSystems at runtime.
+// ════════════════════════════════════════════════════════════════════════════
+async function loadSystems() {
+  // Load display settings from Firestore
+  const snap = await getDocs(query(collection(db,"systemConfigs"), orderBy("order")));
+
+  // Load Firebase credentials from encrypted config.js
+  let credentials = {};
+  try {
+    const configs = await loadConfig();
+    credentials = configs || {};
+  } catch(e) {
+    console.warn("Could not load encrypted config:", e.message);
+  }
+
+  if (snap.empty) {
+    // First run — config-tool hasn't been run yet, show placeholder cards
+    loadedSystems = SEED_SYSTEMS.map(s => ({
+      ...s,
+      ...(credentials[s.key] || {})
+    }));
+    return true;
+  }
+
+  // Merge: Firestore display settings + decrypted Firebase credentials
+  loadedSystems = snap.docs.map(d => {
+    const display = { id:d.id, ...d.data() };
+    const creds   = credentials[d.data().key] || {};
+    return { ...display, ...creds };
+  });
+  return false;
+}
+
+// Update left panel system list from loaded systems
+function updateLoginPanel() {
+  const el = document.getElementById("llSystems");
+  if (!el) return;
+  el.innerHTML = loadedSystems.filter(s=>s.enabled).map(s=>
+    `<div class="ll-sys"><span class="ll-dot"></span>${s.label}</div>`
+  ).join("");
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// USER ↔ SYSTEM SYNC
+// ════════════════════════════════════════════════════════════════════════════
 async function syncUserToSystem(sys, userEmail, userPassword, role, accessLevel) {
   try {
-    // Create user in sub-project — or sign in if they already exist
-    let userToken;
-    try {
-      const created = await restCreateUser(sys.apiKey, userEmail, userPassword);
-      userToken = created.idToken;
-    } catch(e) {
-      if (!e.message.includes("EMAIL_EXISTS")) throw e;
-      // Already exists — sign in as that user to get their token
-      const signedIn = await restSignIn(sys.apiKey, userEmail, userPassword);
-      userToken = signedIn.idToken;
-    }
-    // Use the user's OWN token to write their allowedUsers doc
+    try { await restCreateUser(sys.apiKey, userEmail, userPassword); }
+    catch(e) { if (!e.message.includes("EMAIL_EXISTS")) throw e; }
+    const adminAuth = await restSignIn(sys.apiKey, sessionEmail, sessionPass);
     await restWriteDoc(sys.projectId, "allowedUsers", userEmail, {
-      email:      userEmail,
-      role:       role,
-      access:     accessLevel,
-      active:     true,
-      syncedAt:   new Date().toISOString(),
-      syncedFrom: "portal"
-    }, userToken);
+      email:userEmail, role, access:accessLevel, active:true,
+      syncedAt:new Date().toISOString(), syncedFrom:"portal"
+    }, adminAuth.idToken);
     return { ok:true };
-  } catch(e) {
-    return { ok:false, msg:e.message };
-  }
+  } catch(e) { return { ok:false, msg:e.message }; }
 }
 
-async function removeUserFromSystem(systemKey, userEmail) {
-  const proj = SUB_PROJECTS[systemKey];
-  if (!proj) return { ok:false };
+async function removeUserFromSystem(sys, userEmail) {
   try {
-    const adminAuth = await restSignIn(proj.apiKey, sessionEmail, sessionPass);
-    await restDeleteDoc(proj.projectId, "allowedUsers", userEmail, adminAuth.idToken);
+    const adminAuth = await restSignIn(sys.apiKey, sessionEmail, sessionPass);
+    await restDeleteDoc(sys.projectId, "allowedUsers", userEmail, adminAuth.idToken);
     return { ok:true };
-  } catch(e) {
-    return { ok:false, msg: e.message };
-  }
+  } catch(e) { return { ok:false, msg:e.message }; }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 // AUTH STATE
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 onAuthStateChanged(auth, async (fbUser) => {
   if (!fbUser) { showLogin(); return; }
-  sessionEmail = fbUser.email;
-  // Load user profile from Firestore
-  const snap = await getDoc(doc(db, "users", fbUser.uid));
-
+  const snap = await getDoc(doc(db,"users",fbUser.uid));
   if (!snap.exists()) {
-    // First time: if this is the known admin email, create their profile
-    if (fbUser.email === "anthony.jolly@plesseneye.com") {
-      const profile = {
-        uid:         fbUser.uid,
-        email:       fbUser.email,
-        displayName: "Anthony Jolly",
-        role:        "superuser",
-        locations:   ["STX","STT"],
-        access:      { equipment:"editor", inventory:"editor", credentialing:"editor", procedures:"editor", ordering:"editor" },
-        active:      true,
-        createdAt:   new Date().toISOString(),
-      };
-      await setDoc(doc(db, "users", fbUser.uid), profile);
-      currentUser    = fbUser;
-      currentProfile = profile;
-      showPortal(true);
+    if (fbUser.email==="anthony.jolly@plesseneye.com") {
+      const profile={ uid:fbUser.uid, email:fbUser.email, displayName:"Anthony Jolly",
+        role:"superuser", locations:["STX","STT"],
+        access:{ equipment:"editor", inventory:"editor", credentialing:"editor" },
+        active:true, createdAt:new Date().toISOString() };
+      await setDoc(doc(db,"users",fbUser.uid), profile);
+      currentUser=fbUser; currentProfile=profile;
+      const firstRun = await loadSystems();
+      showPortal(firstRun);
     } else {
       await signOut(auth);
       showLoginErr("Your account has not been configured. Contact your administrator.");
     }
     return;
   }
-
   const profile = snap.data();
   if (!profile.active) { await signOut(auth); showLoginErr("Your account has been deactivated."); return; }
-
-  currentUser    = fbUser;
-  currentProfile = profile;
-  showPortal(false);
+  currentUser=fbUser; currentProfile=profile;
+  const firstRun = await loadSystems();
+  showPortal(firstRun);
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// LOGIN
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// LOGIN / LOGOUT
+// ════════════════════════════════════════════════════════════════════════════
 async function doLogin() {
   const email = document.getElementById("loginEmail").value.trim();
   const pass  = document.getElementById("loginPass").value;
-  if (!email || !pass) { showLoginErr("Both fields are required."); return; }
-  const btn = document.getElementById("loginBtn");
-  btn.disabled = true; btn.textContent = "Signing in...";
+  if (!email||!pass) { showLoginErr("Both fields are required."); return; }
+  const btn=document.getElementById("loginBtn");
+  btn.disabled=true; btn.textContent="Signing in...";
   hideEl("loginErr");
   try {
     await signInWithEmailAndPassword(auth, email, pass);
-    sessionEmail = email;
-    sessionPass  = pass; // store for sub-project admin sync
+    sessionEmail=email; sessionPass=pass;
   } catch(e) {
-    const msgs = { "auth/wrong-password":"Incorrect password.", "auth/user-not-found":"No account found with that email.", "auth/invalid-credential":"Invalid email or password.", "auth/too-many-requests":"Too many attempts. Please wait a moment." };
-    showLoginErr(msgs[e.code] || e.message);
-    btn.disabled = false; btn.textContent = "Sign In";
+    const msgs={"auth/wrong-password":"Incorrect password.","auth/user-not-found":"No account found.","auth/invalid-credential":"Invalid email or password.","auth/too-many-requests":"Too many attempts. Please wait."};
+    showLoginErr(msgs[e.code]||e.message);
+    btn.disabled=false; btn.textContent="Sign In";
   }
 }
+document.getElementById("loginPass").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
+document.getElementById("loginEmail").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("loginPass").focus();});
 
-document.getElementById("loginPass").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
-document.getElementById("loginEmail").addEventListener("keydown", e => { if(e.key==="Enter") document.getElementById("loginPass").focus(); });
+async function doSignOut() { sessionPass=""; sessionEmail=""; await signOut(auth); }
 
-async function doSignOut() {
-  sessionPass = ""; sessionEmail = "";
-  await signOut(auth);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// SHOW/HIDE SCREENS
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// SHOW SCREENS
+// ════════════════════════════════════════════════════════════════════════════
 function showLogin() {
   showEl("loginScreen"); hideEl("portalScreen");
-  document.getElementById("loginBtn").disabled = false;
-  document.getElementById("loginBtn").textContent = "Sign In";
+  document.getElementById("loginBtn").disabled=false;
+  document.getElementById("loginBtn").textContent="Sign In";
 }
-function showLoginErr(msg) { showEl("loginErr"); document.getElementById("loginErr").textContent = msg; }
-function showPortal(isFirstTime) {
+function showLoginErr(msg) { showEl("loginErr"); document.getElementById("loginErr").textContent=msg; }
+
+function showPortal(isFirstRun) {
   hideEl("loginScreen"); showEl("portalScreen");
-  const p = currentProfile;
-  // Greeting
-  const h = new Date().getHours();
-  const g = h<12?"Good morning":h<17?"Good afternoon":"Good evening";
-  const fn = (p.displayName||"").split(" ")[0] || "there";
-  document.getElementById("heroGreeting").textContent = `${g}, ${fn}`;
-  document.getElementById("heroTitle").textContent    = "Plessen Management System";
-  // Gear user info
-  document.getElementById("gearName").textContent = p.displayName || p.email;
-  document.getElementById("gearRole").textContent = `${p.role} · ${(p.locations||[]).join(", ")}`;
-  // Admin-only gear items
-  if (p.role==="superuser"||p.role==="admin") showEl("adminGearItems"); else hideEl("adminGearItems");
-  // First time setup banner
-  if (isFirstTime) showEl("setupBanner"); else hideEl("setupBanner");
-  // Render cards
+  const p=currentProfile;
+  const h=new Date().getHours();
+  document.getElementById("heroGreeting").textContent=
+    `${h<12?"Good morning":h<17?"Good afternoon":"Good evening"}, ${(p.displayName||"").split(" ")[0]||"there"}`;
+  document.getElementById("gearName").textContent=p.displayName||p.email;
+  document.getElementById("gearRole").textContent=`${p.role} · ${(p.locations||[]).join(", ")}`;
+  const isPriv=["superuser","admin"].includes(p.role);
+  if (isPriv) { showEl("adminGearItems"); }
+  if (p.role==="superuser") { document.getElementById("systemMgrBtn").style.display=""; }
+  if (isFirstRun) showEl("setupBanner"); else hideEl("setupBanner");
+  updateLoginPanel();
   renderCards();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// RENDER SYSTEM CARDS
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// CARDS
+// ════════════════════════════════════════════════════════════════════════════
+const DEFAULT_SVG = `<svg width="48" height="48" viewBox="0 0 56 56" fill="none"><rect x="8" y="8" width="40" height="40" rx="5" stroke="currentColor" stroke-width="2.5" fill="none"/><line x1="8" y1="20" x2="48" y2="20" stroke="currentColor" stroke-width="2" stroke-opacity=".4"/><rect x="14" y="28" width="12" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="14" y="34" width="18" height="3" rx="1.5" fill="currentColor" fill-opacity=".3"/></svg>`;
+const SYS_SVG={
+  equipment:`<svg width="48" height="48" viewBox="0 0 56 56" fill="none"><rect x="4" y="8" width="48" height="30" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="8" y="12" width="40" height="22" rx="2" fill="currentColor" fill-opacity=".07"/><rect x="18" y="38" width="20" height="5" fill="currentColor" fill-opacity=".3"/><rect x="14" y="42" width="28" height="3" rx="1.5" fill="currentColor" fill-opacity=".2"/></svg>`,
+  inventory:`<svg width="48" height="48" viewBox="0 0 56 56" fill="none"><rect x="6" y="13" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="6" y="25" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="6" y="37" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="10" y="16" width="14" height="2" rx="1" fill="currentColor" fill-opacity=".4"/><rect x="10" y="28" width="10" height="2" rx="1" fill="currentColor" fill-opacity=".4"/><rect x="10" y="40" width="16" height="2" rx="1" fill="currentColor" fill-opacity=".4"/></svg>`,
+  credentialing:`<svg width="48" height="48" viewBox="0 0 56 56" fill="none"><rect x="10" y="6" width="36" height="46" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="15" y="14" width="26" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="15" y="20" width="18" height="3" rx="1.5" fill="currentColor" fill-opacity=".3"/><circle cx="28" cy="34" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M25 34l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  procedures:`<svg width="48" height="48" viewBox="0 0 56 56" fill="none"><rect x="8" y="8" width="40" height="40" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><line x1="8" y1="20" x2="48" y2="20" stroke="currentColor" stroke-width="2" stroke-opacity=".3"/><rect x="16" y="4" width="4" height="12" rx="2" fill="currentColor" fill-opacity=".5"/><rect x="36" y="4" width="4" height="12" rx="2" fill="currentColor" fill-opacity=".5"/></svg>`,
+  ordering:`<svg width="48" height="48" viewBox="0 0 56 56" fill="none"><path d="M8 12h4l6 22h20l6-16H18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="26" cy="44" r="3" stroke="currentColor" stroke-width="2.5"/><circle cx="38" cy="44" r="3" stroke="currentColor" stroke-width="2.5"/><path d="M34 18h8M38 14v8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+};
+const ARROW_SVG=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
+
 function renderCards() {
-  const p    = currentProfile;
-  const grid = document.getElementById("cardsGrid");
-  const isPriv = p.role==="superuser"||p.role==="admin";
-
-  const svgMap = {
-    equipment:    `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="4" y="8" width="48" height="32" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="8" y="12" width="40" height="24" rx="2" fill="currentColor" fill-opacity=".07"/><rect x="18" y="40" width="20" height="5" fill="currentColor" fill-opacity=".3"/><rect x="14" y="44" width="28" height="3" rx="1.5" fill="currentColor" fill-opacity=".2"/><circle cx="28" cy="24" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M25 24l4-2.5v5L25 24z" fill="currentColor" fill-opacity=".6"/></svg>`,
-    inventory:    `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="6" y="14" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="6" y="26" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="6" y="38" width="44" height="8" rx="3" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="10" y="16.5" width="14" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="10" y="28.5" width="10" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="10" y="40.5" width="16" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/></svg>`,
-    credentialing:`<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="10" y="8" width="36" height="44" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><rect x="14" y="14" width="28" height="3" rx="1.5" fill="currentColor" fill-opacity=".4"/><rect x="14" y="20" width="20" height="3" rx="1.5" fill="currentColor" fill-opacity=".3"/><circle cx="28" cy="34" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M25 33l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-    procedures:   `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><rect x="8" y="10" width="40" height="40" rx="4" stroke="currentColor" stroke-width="2.5" fill="none"/><line x1="8" y1="22" x2="48" y2="22" stroke="currentColor" stroke-width="2" stroke-opacity=".3"/><rect x="16" y="6" width="4" height="12" rx="2" fill="currentColor" fill-opacity=".5"/><rect x="36" y="6" width="4" height="12" rx="2" fill="currentColor" fill-opacity=".5"/></svg>`,
-    ordering:     `<svg width="52" height="52" viewBox="0 0 56 56" fill="none"><path d="M8 12h4l6 22h20l6-16H18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="26" cy="44" r="3" stroke="currentColor" stroke-width="2.5"/><circle cx="38" cy="44" r="3" stroke="currentColor" stroke-width="2.5"/></svg>`,
-  };
-
-  const arrow = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
-
-  let html = "";
-
-  // Active systems
-  for (const [key, proj] of Object.entries(SUB_PROJECTS)) {
-    const userAccess = p.access?.[key] || "none";
-    const hasAccess  = isPriv || (userAccess !== "none");
-    const locked     = !hasAccess;
-    html += `
-      <div class="sys-card${locked?" locked":""}" style="--card-color:${proj.color};--card-accent:${proj.accent}"
-           onclick="${locked?"":`window.location.href='${proj.path}'`}">
-        <div class="card-top">
-          <div class="card-icon">${svgMap[key]||svgMap.equipment}</div>
-          <div class="card-arrow">${arrow}</div>
-        </div>
-        <div class="card-label">${proj.label}</div>
-        <div class="card-desc">${proj.desc}</div>
-        <div class="card-footer">
-          <span class="card-status">${locked?"No Access":"Open"}</span>
-          ${isPriv&&userAccess!=="none"?`<span style="font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace">${userAccess}</span>`:""}
-        </div>
+  const p=currentProfile;
+  const isPriv=["superuser","admin"].includes(p.role);
+  const grid=document.getElementById("cardsGrid");
+  let html="";
+  for (const sys of loadedSystems) {
+    const userAccess=p.access?.[sys.key]||"none";
+    const hasAccess=isPriv||(userAccess!=="none");
+    const locked=!hasAccess;
+    const icon=SYS_SVG[sys.key]||DEFAULT_SVG;
+    if (!sys.enabled) {
+      html+=`<div class="sys-card coming-soon" style="--card-color:${sys.color};--card-accent:${sys.accent}">
+        <div class="card-top"><div class="card-icon">${icon}</div>
+        <span style="font-size:10px;font-weight:700;background:#f1f5f9;color:#94a3b8;padding:3px 8px;border-radius:10px;letter-spacing:.5px">DISABLED</span></div>
+        <div class="card-label">${sys.label}</div><div class="card-desc">${sys.description||""}</div>
+        <div class="card-footer"><span class="card-status" style="color:#94a3b8;background:#f1f5f9">Disabled</span></div>
       </div>`;
+      continue;
+    }
+    html+=`<div class="sys-card${locked?" locked":""}" style="--card-color:${sys.color};--card-accent:${sys.accent};cursor:${locked?"not-allowed":"pointer"}"
+        onclick="${locked?"":"window.location.href='"+sys.path+"'"}">
+      <div class="card-top"><div class="card-icon">${icon}</div><div class="card-arrow">${ARROW_SVG}</div></div>
+      <div class="card-label">${sys.label}</div>
+      <div class="card-desc">${sys.description||""}</div>
+      <div class="card-footer">
+        <span class="card-status">${locked?"No Access":"Open"}</span>
+        ${isPriv?`<span style="font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace">${userAccess}</span>`:""}
+      </div>
+    </div>`;
   }
-
-  // Coming soon
-  for (const cs of COMING_SOON) {
-    html += `
-      <div class="sys-card coming-soon" style="--card-color:${cs.color};--card-accent:${cs.accent}">
-        <div class="card-top">
-          <div class="card-icon">${svgMap.procedures}</div>
-          <div style="font-size:10px;font-weight:700;background:#f1f5f9;color:#94a3b8;padding:3px 8px;border-radius:10px;letter-spacing:.5px">COMING SOON</div>
-        </div>
-        <div class="card-label">${cs.label}</div>
-        <div class="card-desc">${cs.desc}</div>
-        <div class="card-footer"><span class="card-status" style="color:#94a3b8;background:#f1f5f9">In Development</span></div>
-      </div>`;
-  }
-
-  grid.innerHTML = html;
+  grid.innerHTML=html||`<div style="color:#94a3b8;padding:20px">No systems configured.</div>`;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 // GEAR MENU
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 function toggleGear() {
-  const menu = document.getElementById("gearMenu");
-  const btn  = document.getElementById("gearBtn");
-  const open = menu.classList.contains("hidden");
-  if (open) { showEl("gearMenu"); btn.classList.add("open"); }
-  else       { hideEl("gearMenu"); btn.classList.remove("open"); }
+  const m=document.getElementById("gearMenu");
+  const b=document.getElementById("gearBtn");
+  if (m.classList.contains("hidden")) { showEl("gearMenu"); b.classList.add("open"); }
+  else { hideEl("gearMenu"); b.classList.remove("open"); }
 }
-document.addEventListener("click", e => {
+document.addEventListener("click",e=>{
   if (!document.getElementById("gearWrap")?.contains(e.target)) {
     hideEl("gearMenu"); document.getElementById("gearBtn")?.classList.remove("open");
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 // CHANGE PASSWORD
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 function openChangePw() {
-  hideEl("gearMenu"); document.getElementById("gearBtn")?.classList.remove("open");
-  document.getElementById("pwCurrent").value = "";
-  document.getElementById("pwNew").value     = "";
-  document.getElementById("pwConfirm").value = "";
-  hideEl("pwErr"); hideEl("pwSuccess");
-  showEl("changePwModal");
+  closeGear();
+  ["pwCurrent","pwNew","pwConfirm"].forEach(id=>document.getElementById(id).value="");
+  hideEl("pwErr"); hideEl("pwOk"); showEl("changePwModal");
 }
 function closeChangePw() { hideEl("changePwModal"); }
-
 async function doChangePw() {
-  const cur  = document.getElementById("pwCurrent").value;
-  const nw   = document.getElementById("pwNew").value;
-  const conf = document.getElementById("pwConfirm").value;
-  hideEl("pwErr"); hideEl("pwSuccess");
-  if (!cur||!nw)     { showEl("pwErr"); document.getElementById("pwErr").textContent = "All fields required."; return; }
-  if (nw !== conf)   { showEl("pwErr"); document.getElementById("pwErr").textContent = "New passwords do not match."; return; }
-  if (nw.length < 8) { showEl("pwErr"); document.getElementById("pwErr").textContent = "Password must be at least 8 characters."; return; }
+  const cur=document.getElementById("pwCurrent").value;
+  const nw=document.getElementById("pwNew").value;
+  const conf=document.getElementById("pwConfirm").value;
+  hideEl("pwErr"); hideEl("pwOk");
+  if (!cur||!nw) { showEl("pwErr"); document.getElementById("pwErr").textContent="All fields required."; return; }
+  if (nw!==conf) { showEl("pwErr"); document.getElementById("pwErr").textContent="Passwords do not match."; return; }
+  if (nw.length<8) { showEl("pwErr"); document.getElementById("pwErr").textContent="Min 8 characters."; return; }
   try {
-    const cred = EmailAuthProvider.credential(currentUser.email, cur);
-    await reauthenticateWithCredential(currentUser, cred);
+    await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, cur));
     await updatePassword(currentUser, nw);
-    sessionPass = nw;
-    showEl("pwSuccess");
-    setTimeout(closeChangePw, 2000);
+    sessionPass=nw; showEl("pwOk"); setTimeout(closeChangePw,2000);
   } catch(e) {
     showEl("pwErr");
-    document.getElementById("pwErr").textContent = e.code==="auth/wrong-password" ? "Current password is incorrect." : e.message;
+    document.getElementById("pwErr").textContent=e.code==="auth/wrong-password"?"Current password incorrect.":e.message;
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 // USER MANAGEMENT
-// ═══════════════════════════════════════════════════════════════════════════
-let allUsers = [];
-
+// ════════════════════════════════════════════════════════════════════════════
 async function openUserMgmt() {
-  hideEl("gearMenu"); document.getElementById("gearBtn")?.classList.remove("open");
-  showEl("userMgmtModal");
+  closeGear(); showEl("userMgmtModal");
   await loadUsers();
 }
 function closeUserMgmt() { hideEl("userMgmtModal"); }
 
 async function loadUsers() {
   try {
-    const snap = await getDocs(collection(db, "users"));
-    allUsers   = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    const snap=await getDocs(collection(db,"users"));
+    allUsers=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderUsersTable();
   } catch(e) {
-    document.getElementById("usersTableBody").innerHTML = `<tr><td colspan="6" style="color:#dc2626;padding:16px">${e.message}</td></tr>`;
+    document.getElementById("usersTableBody").innerHTML=`<tr><td colspan="6" style="color:#dc2626;padding:16px">${e.message}</td></tr>`;
   }
 }
 
 function renderUsersTable() {
-  const rolePills = { superuser:"role-superuser", admin:"role-admin", staff:"role-staff", viewer:"role-viewer" };
-  const sysDots   = Object.entries(SUB_PROJECTS).map(([k,p]) => ({ key:k, color:p.color, label:p.label }));
-
-  const rows = allUsers.map(u => {
-    const dots = sysDots.map(s => {
-      const acc = u.access?.[s.key]||"none";
-      const col = acc==="none"?"#e2e8f0":acc==="editor"?s.color:"#93c5fd";
-      return `<span class="access-dot" style="background:${col}" title="${s.label}: ${acc}"></span>`;
+  const rp={"superuser":"role-superuser","admin":"role-admin","staff":"role-staff","viewer":"role-viewer"};
+  const rows=allUsers.map(u=>{
+    const dots=loadedSystems.map(s=>{
+      const a=u.access?.[s.key]||"none";
+      const col=a==="none"?"#e2e8f0":a==="editor"?s.color:"#93c5fd";
+      return `<span class="access-dot" style="background:${col}" title="${s.label}: ${a}"></span>`;
     }).join("");
     return `<tr>
       <td style="font-weight:600">${u.displayName||"—"}</td>
       <td style="font-family:'DM Mono',monospace;font-size:11px">${u.email}</td>
-      <td><span class="role-pill ${rolePills[u.role]||"role-staff"}">${u.role}</span></td>
+      <td><span class="role-pill ${rp[u.role]||"role-staff"}">${u.role}</span></td>
       <td><div class="access-dots">${dots}</div></td>
       <td><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;${u.active?"background:#dcfce7;color:#166534":"background:#fee2e2;color:#991b1b"}">${u.active?"Active":"Inactive"}</span></td>
-      <td>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-xs" onclick="editUser('${u.id}')">Edit</button>
-          ${u.email!==currentUser.email?`<button class="btn btn-danger btn-xs" onclick="deleteUser('${u.id}','${u.email}')">Remove</button>`:""}
-        </div>
-      </td>
+      <td><div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-xs" onclick="editUser('${u.id}')">Edit</button>
+        ${u.email!==currentUser.email?`<button class="btn btn-danger btn-xs" onclick="deleteUser('${u.id}','${u.email}')">Remove</button>`:""}
+      </div></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">No users found.</td></tr>`;
-
-  document.getElementById("usersTableBody").innerHTML = rows;
+  }).join("")||`<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">No users found.</td></tr>`;
+  document.getElementById("usersTableBody").innerHTML=rows;
 }
 
 function buildAccessFields(currentAccess) {
-  return Object.entries(SUB_PROJECTS).map(([key, proj]) => {
-    const cur = currentAccess?.[key] || "none";
-    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;background:#f8faff;border:1px solid #e2e8f0;margin-bottom:6px">
+  return loadedSystems.filter(s=>s.enabled).map(s=>`
+    <div class="access-row">
       <div style="display:flex;align-items:center;gap:8px">
-        <div style="width:10px;height:10px;border-radius:50%;background:${proj.color}"></div>
-        <span style="font-size:13px;font-weight:600;color:#0f172a">${proj.label}</span>
+        <div style="width:10px;height:10px;border-radius:50%;background:${s.color}"></div>
+        <span style="font-size:13px;font-weight:600;color:#0f172a">${s.label}</span>
       </div>
-      <select id="access_${key}" style="padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:#0f172a;background:#fff;outline:none">
-        <option value="none"    ${cur==="none"?"selected":""}>No Access</option>
-        <option value="viewer"  ${cur==="viewer"?"selected":""}>Viewer</option>
-        <option value="editor"  ${cur==="editor"?"selected":""}>Editor</option>
+      <select id="access_${s.key}" style="padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:#0f172a;background:#fff;outline:none">
+        <option value="none"   ${(currentAccess?.[s.key]||"none")==="none"?"selected":""}>No Access</option>
+        <option value="viewer" ${(currentAccess?.[s.key]||"")==="viewer"?"selected":""}>Viewer</option>
+        <option value="editor" ${(currentAccess?.[s.key]||"")==="editor"?"selected":""}>Editor</option>
       </select>
-    </div>`;
-  }).join("");
+    </div>`).join("");
 }
 
-function openAddUser() {
-  document.getElementById("editUserId").value      = "";
-  document.getElementById("userFormTitle").textContent = "Add User";
-  document.getElementById("userFormSaveBtn").textContent = "Create User";
-  document.getElementById("uName").value  = "";
-  document.getElementById("uEmail").value = "";
-  document.getElementById("uPass").value  = "";
-  document.getElementById("uRole").value  = "staff";
-  document.getElementById("locSTX").checked = true;
-  document.getElementById("locSTT").checked = false;
-  document.getElementById("passHint").textContent = "Required for new users";
-  document.getElementById("systemAccessFields").innerHTML = buildAccessFields({});
-  document.getElementById("syncStatusDiv").innerHTML = "<span style='color:#94a3b8;font-size:12px'>Sync status will appear here after saving.</span>";
-  hideEl("userFormErr");
-  showEl("userFormModal");
+function openUserForm(uid) {
+  if (!uid) {
+    document.getElementById("editUserId").value="";
+    document.getElementById("userFormTitle").textContent="Add User";
+    document.getElementById("userFormSaveBtn").textContent="Create User";
+    ["uName","uEmail","uPass"].forEach(id=>document.getElementById(id).value="");
+    document.getElementById("uRole").value="staff";
+    document.getElementById("locSTX").checked=true;
+    document.getElementById("locSTT").checked=false;
+    document.getElementById("passHint").textContent="Required for new users";
+    document.getElementById("systemAccessFields").innerHTML=buildAccessFields({});
+  }
+  document.getElementById("syncResultsDiv").innerHTML=`<div style="font-size:12px;color:#94a3b8">Results will appear after saving.</div>`;
+  hideEl("userFormErr"); showEl("userFormModal");
 }
 
 function editUser(uid) {
-  const u = allUsers.find(x => x.id===uid);
+  const u=allUsers.find(x=>x.id===uid);
   if (!u) return;
-  document.getElementById("editUserId").value          = uid;
-  document.getElementById("userFormTitle").textContent = "Edit User";
-  document.getElementById("userFormSaveBtn").textContent = "Save Changes";
-  document.getElementById("uName").value  = u.displayName||"";
-  document.getElementById("uEmail").value = u.email;
-  document.getElementById("uPass").value  = "";
-  document.getElementById("uRole").value  = u.role||"staff";
-  document.getElementById("locSTX").checked = (u.locations||[]).includes("STX");
-  document.getElementById("locSTT").checked = (u.locations||[]).includes("STT");
-  document.getElementById("passHint").textContent = "Leave blank to keep current password";
-  document.getElementById("systemAccessFields").innerHTML = buildAccessFields(u.access||{});
-  document.getElementById("syncStatusDiv").innerHTML = "<span style='color:#94a3b8;font-size:12px'>Click Save to re-sync access to systems.</span>";
-  hideEl("userFormErr");
-  showEl("userFormModal");
+  document.getElementById("editUserId").value=uid;
+  document.getElementById("userFormTitle").textContent="Edit User";
+  document.getElementById("userFormSaveBtn").textContent="Save Changes";
+  document.getElementById("uName").value=u.displayName||"";
+  document.getElementById("uEmail").value=u.email;
+  document.getElementById("uPass").value="";
+  document.getElementById("uRole").value=u.role||"staff";
+  document.getElementById("locSTX").checked=(u.locations||[]).includes("STX");
+  document.getElementById("locSTT").checked=(u.locations||[]).includes("STT");
+  document.getElementById("passHint").textContent="Leave blank to keep current password";
+  document.getElementById("systemAccessFields").innerHTML=buildAccessFields(u.access||{});
+  document.getElementById("syncResultsDiv").innerHTML=`<div style="font-size:12px;color:#94a3b8">Click Save to re-sync access.</div>`;
+  hideEl("userFormErr"); showEl("userFormModal");
 }
 
 async function deleteUser(uid, email) {
-  if (!confirm(`Remove ${email}? This will revoke their portal access. Their accounts in each system will also be deactivated.`)) return;
+  if (!confirm(`Remove ${email}? This will revoke portal access and remove them from all systems.`)) return;
   try {
-    // Mark inactive in portal
-    await updateDoc(doc(db, "users", uid), { active:false });
-    // Remove from each sub-project allowedUsers
-    const results = await Promise.all(Object.keys(SUB_PROJECTS).map(k => removeUserFromSystem(k, email)));
+    await updateDoc(doc(db,"users",uid), { active:false });
+    await Promise.all(loadedSystems.map(s=>removeUserFromSystem(s, email)));
     await loadUsers();
-  } catch(e) {
-    alert("Error: " + e.message);
-  }
+  } catch(e) { alert("Error: "+e.message); }
 }
 
 function closeUserForm() { hideEl("userFormModal"); }
 
 async function saveUser() {
-  const uid   = document.getElementById("editUserId").value;
-  const name  = document.getElementById("uName").value.trim();
-  const email = document.getElementById("uEmail").value.trim();
-  const pass  = document.getElementById("uPass").value;
-  const role  = document.getElementById("uRole").value;
-  const locs  = ["STX","STT"].filter(l => document.getElementById(`loc${l}`).checked);
+  const uid=document.getElementById("editUserId").value;
+  const name=document.getElementById("uName").value.trim();
+  const email=document.getElementById("uEmail").value.trim();
+  const pass=document.getElementById("uPass").value;
+  const role=document.getElementById("uRole").value;
+  const locs=["STX","STT"].filter(l=>document.getElementById("loc"+l).checked);
   hideEl("userFormErr");
-
-  if (!name||!email)     { showUserFormErr("Name and email are required."); return; }
-  if (!uid && !pass)     { showUserFormErr("Password is required for new users."); return; }
-  if (pass && pass.length<8) { showUserFormErr("Password must be at least 8 characters."); return; }
-
-  const access = {};
-  for (const key of Object.keys(SUB_PROJECTS)) access[key] = document.getElementById(`access_${key}`)?.value || "none";
-
-  const saveBtn = document.getElementById("userFormSaveBtn");
-  saveBtn.disabled = true; saveBtn.textContent = "Saving...";
-
+  if (!name||!email) { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Name and email required."; return; }
+  if (!uid&&!pass)   { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Password required for new users."; return; }
+  if (pass&&pass.length<8) { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Min 8 characters."; return; }
+  const access={};
+  for (const s of loadedSystems) access[s.key]=document.getElementById("access_"+s.key)?.value||"none";
+  const btn=document.getElementById("userFormSaveBtn");
+  btn.disabled=true; btn.textContent="Saving...";
   try {
-    let fbUid = uid;
-
+    let fbUid=uid;
     if (!uid) {
-      // Create new Firebase Auth user in portal
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      // Need to re-sign in as admin since createUser signs in as new user
+      const cred=await createUserWithEmailAndPassword(auth, email, pass);
+      fbUid=cred.user.uid;
       await signInWithEmailAndPassword(auth, sessionEmail, sessionPass);
-      fbUid = cred.user.uid;
     }
-
-    // Write/update portal Firestore profile
-    const profile = {
-      uid:         fbUid,
-      email,
-      displayName: name,
-      role,
-      locations:   locs,
-      access,
-      active:      true,
-      updatedAt:   new Date().toISOString(),
-      ...(uid ? {} : { createdAt: new Date().toISOString() }),
-    };
-    await setDoc(doc(db, "users", fbUid), profile, { merge:true });
-
+    await setDoc(doc(db,"users",fbUid),{
+      uid:fbUid, email, displayName:name, role, locations:locs, access, active:true,
+      updatedAt:new Date().toISOString(), ...(uid?{}:{createdAt:new Date().toISOString()})
+    },{merge:true});
     // Sync to sub-projects
-    if (!sessionPass) {
-      const entered = window.prompt("Enter your admin password to sync this user to other systems:");
-      if (!entered) { btn.textContent=uid?"Save Changes":"Create User"; btn.disabled=false; return; }
-      sessionPass = entered;
-    }
-    const syncResults = {};
-    const syncDiv = document.getElementById("syncStatusDiv");
-    syncDiv.innerHTML = "<span style='color:#64748b;font-size:12px'>Syncing to systems...</span>";
-
-    for (const [key] of Object.entries(SUB_PROJECTS)) {
-      if (access[key] !== "none") {
-        const effectivePass = pass || sessionPass; // use entered pass or admin pass as fallback for new user
-        const result = await syncUserToSystem(key, email, pass || "plessen2024", role, access[key]);
-        syncResults[key] = result;
+    const results={};
+    document.getElementById("syncResultsDiv").innerHTML=`<span style="font-size:12px;color:#64748b">Syncing...</span>`;
+    for (const s of loadedSystems.filter(s=>s.enabled)) {
+      if (access[s.key]!=="none") {
+        results[s.key]=await syncUserToSystem(s, email, pass||"plessen2024", role, access[s.key]);
       } else {
-        // Remove from system if access set to none
-        const result = await removeUserFromSystem(key, email);
-        syncResults[key] = { ok:result.ok, msg: result.ok?"Removed":"Could not remove" };
+        const r=await removeUserFromSystem(s, email);
+        results[s.key]={ok:r.ok, removed:true};
       }
     }
-
-    // Show sync results
-    syncDiv.innerHTML = Object.entries(syncResults).map(([k, r]) =>
-      `<div class="sync-row">
-        <span style="font-weight:600">${SUB_PROJECTS[k]?.label||k}</span>
-        <span class="sync-status ${r.ok?"sync-ok":"sync-err"}">${r.ok?(access[k]==="none"?"Removed":"Synced"):"Failed: "+r.msg}</span>
-      </div>`
-    ).join("");
-
-    saveBtn.textContent = "✓ Saved";
+    document.getElementById("syncResultsDiv").innerHTML=loadedSystems.filter(s=>s.enabled).map(s=>{
+      const r=results[s.key]||{ok:false,msg:"Not attempted"};
+      const cls=r.ok?"sync-ok":"sync-err";
+      const lbl=r.ok?(r.removed?"Removed":"Synced"):"Failed: "+(r.msg||"error");
+      return `<div class="sync-row"><span style="font-weight:600">${s.label}</span><span class="${cls}">${lbl}</span></div>`;
+    }).join("");
+    btn.textContent="✓ Saved";
     await loadUsers();
-    setTimeout(() => { saveBtn.disabled=false; saveBtn.textContent = uid?"Save Changes":"Create User"; }, 2000);
-
+    setTimeout(()=>{ btn.disabled=false; btn.textContent=uid?"Save Changes":"Create User"; },2000);
   } catch(e) {
-    showUserFormErr(e.message);
-    saveBtn.disabled = false; saveBtn.textContent = uid?"Save Changes":"Create User";
+    showEl("userFormErr"); document.getElementById("userFormErr").textContent=e.message;
+    btn.disabled=false; btn.textContent=uid?"Save Changes":"Create User";
   }
 }
 
-function showUserFormErr(msg) {
-  showEl("userFormErr"); document.getElementById("userFormErr").textContent = msg;
+// ════════════════════════════════════════════════════════════════════════════
+// SYSTEM MANAGER
+// ════════════════════════════════════════════════════════════════════════════
+function openSystemMgr() {
+  closeGear(); renderSystemsList();
+  showEl("sysMgrList"); hideEl("sysMgrForm");
+  showEl("systemMgrModal");
+}
+function closeSystemMgr() { hideEl("systemMgrModal"); }
+function backToSystemsList() {
+  renderSystemsList(); showEl("sysMgrList"); hideEl("sysMgrForm");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+function renderSystemsList() {
+  document.getElementById("systemsList").innerHTML=loadedSystems.map(s=>`
+    <div class="sys-mgr-card">
+      <div class="sys-color-dot" style="background:${s.color}"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:#0f172a">${s.label}
+          <span style="font-size:10px;font-family:'DM Mono',monospace;color:#94a3b8;margin-left:6px">${s.key}</span>
+        </div>
+        <div style="font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.projectId||"—"}</div>
+      </div>
+      <label class="toggle-wrap" title="${s.enabled?"Disable":"Enable"} system">
+        <input type="checkbox" ${s.enabled?"checked":""} onchange="toggleSystemEnabled('${s.key}',this.checked)">
+        <span class="toggle-track"></span>
+      </label>
+      <button class="btn btn-ghost btn-xs" onclick="editSystem('${s.key}')">Edit</button>
+      <button class="btn btn-danger btn-xs" onclick="deleteSystem('${s.key}')">Delete</button>
+    </div>`).join("")||`<div style="color:#94a3b8;font-size:13px;padding:16px">No systems configured.</div>`;
+}
+
+function buildColorSwatches(selected) {
+  return COLOR_PALETTE.map(c=>`
+    <div class="color-swatch${c.color===selected?" selected":""}"
+         style="background:${c.color}"
+         title="${c.label}"
+         onclick="selectColor('${c.color}','${c.accent}')"></div>`
+  ).join("");
+}
+
+window.selectColor = function(color, accent) {
+  document.getElementById("sysColor").value=color;
+  document.getElementById("sysAccent").value=accent;
+  document.querySelectorAll(".color-swatch").forEach(el=>{
+    el.classList.toggle("selected", el.style.background===color||el.style.background===color.toLowerCase());
+  });
+};
+
+function openSystemForm(sys) {
+  document.getElementById("editSysKey").value=sys?.key||"";
+  document.getElementById("sysFormTitle").textContent=sys?"Edit System":"Add System";
+  document.getElementById("sysFormSaveBtn").textContent=sys?"Save Changes":"Add System";
+  document.getElementById("sysKey").value=sys?.key||"";
+  document.getElementById("sysKey").disabled=!!sys;
+  document.getElementById("sysLabel").value=sys?.label||"";
+  document.getElementById("sysDesc").value=sys?.description||"";
+  document.getElementById("sysPath").value=sys?.path||"";
+  document.getElementById("sysOrder").value=sys?.order||loadedSystems.length+1;
+  document.getElementById("sysEnabled").checked=sys?.enabled!==false;
+  document.getElementById("sysApiKey").value=sys?.apiKey||"";
+  document.getElementById("sysAuthDomain").value=sys?.authDomain||"";
+  document.getElementById("sysProjectId").value=sys?.projectId||"";
+  document.getElementById("sysStorageBucket").value=sys?.storageBucket||"";
+  document.getElementById("sysMsgSenderId").value=sys?.messagingSenderId||"";
+  document.getElementById("sysAppId").value=sys?.appId||"";
+  document.getElementById("sysMeasurementId").value=sys?.measurementId||"";
+  document.getElementById("sysColor").value=sys?.color||"#1d4ed8";
+  document.getElementById("sysAccent").value=sys?.accent||"#dbeafe";
+  document.getElementById("colorSwatches").innerHTML=buildColorSwatches(sys?.color||"#1d4ed8");
+  hideEl("sysFormErr"); hideEl("sysMgrList"); showEl("sysMgrForm");
+}
+
+function editSystem(key) {
+  const sys=loadedSystems.find(s=>s.key===key);
+  if (sys) openSystemForm(sys);
+}
+
+async function toggleSystemEnabled(key, enabled) {
+  try {
+    await setDoc(doc(db,"systemConfigs",key), { enabled }, { merge:true });
+    const idx=loadedSystems.findIndex(s=>s.key===key);
+    if (idx>-1) loadedSystems[idx].enabled=enabled;
+    renderCards();
+  } catch(e) { alert("Could not update: "+e.message); }
+}
+
+async function deleteSystem(key) {
+  if (!confirm(`Delete system "${key}"? This removes it from the portal. The Firebase project itself is not affected.`)) return;
+  try {
+    await deleteDoc(doc(db,"systemConfigs",key));
+    loadedSystems=loadedSystems.filter(s=>s.key!==key);
+    renderSystemsList(); renderCards();
+  } catch(e) { alert("Error: "+e.message); }
+}
+
+async function saveSystem() {
+  const existingKey=document.getElementById("editSysKey").value;
+  const key=(existingKey||document.getElementById("sysKey").value).trim().toLowerCase().replace(/\s+/g,"_");
+  const label=document.getElementById("sysLabel").value.trim();
+  const apiKey=document.getElementById("sysApiKey").value.trim();
+  const projectId=document.getElementById("sysProjectId").value.trim();
+  const appId=document.getElementById("sysAppId").value.trim();
+  hideEl("sysFormErr");
+  if (!key||!label||!apiKey||!projectId||!appId) {
+    showEl("sysFormErr"); document.getElementById("sysFormErr").textContent="Key, Label, API Key, Project ID, and App ID are required."; return;
+  }
+  const btn=document.getElementById("sysFormSaveBtn");
+  btn.disabled=true; btn.textContent="Saving...";
+  try {
+    const sysData={
+      key, label, description:document.getElementById("sysDesc").value.trim(),
+      path:document.getElementById("sysPath").value.trim()||`../${key}/index.html`,
+      order:parseInt(document.getElementById("sysOrder").value)||loadedSystems.length+1,
+      enabled:document.getElementById("sysEnabled").checked,
+      color:document.getElementById("sysColor").value||"#1d4ed8",
+      accent:document.getElementById("sysAccent").value||"#dbeafe",
+      apiKey, authDomain:document.getElementById("sysAuthDomain").value.trim(),
+      projectId, storageBucket:document.getElementById("sysStorageBucket").value.trim(),
+      messagingSenderId:document.getElementById("sysMsgSenderId").value.trim(),
+      appId, measurementId:document.getElementById("sysMeasurementId").value.trim(),
+      updatedAt:new Date().toISOString(),
+      ...(existingKey?{}:{createdAt:new Date().toISOString()})
+    };
+    await setDoc(doc(db,"systemConfigs",key), sysData, { merge:true });
+    // Update local cache
+    const idx=loadedSystems.findIndex(s=>s.key===key);
+    if (idx>-1) loadedSystems[idx]={...loadedSystems[idx],...sysData};
+    else loadedSystems.push(sysData);
+    loadedSystems.sort((a,b)=>a.order-b.order);
+    renderCards(); backToSystemsList();
+    btn.disabled=false; btn.textContent=existingKey?"Save Changes":"Add System";
+  } catch(e) {
+    showEl("sysFormErr"); document.getElementById("sysFormErr").textContent=e.message;
+    btn.disabled=false; btn.textContent=existingKey?"Save Changes":"Add System";
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // UTILS
-// ═══════════════════════════════════════════════════════════════════════════
-function showEl(id) { document.getElementById(id)?.classList.remove("hidden"); }
-function hideEl(id) { document.getElementById(id)?.classList.add("hidden"); }
+// ════════════════════════════════════════════════════════════════════════════
+function showEl(id){ document.getElementById(id)?.classList.remove("hidden"); }
+function hideEl(id){ document.getElementById(id)?.classList.add("hidden"); }
+function closeGear(){ hideEl("gearMenu"); document.getElementById("gearBtn")?.classList.remove("open"); }
 </script>
 </body>
 </html>
