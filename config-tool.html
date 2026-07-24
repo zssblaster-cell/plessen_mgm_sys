@@ -50,6 +50,7 @@
     .step-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;font-size:13px;color:#94a3b8}
     .mono{font-family:'DM Mono',monospace;font-size:11px;background:#0a0a1a;padding:2px 6px;border-radius:4px;color:#a5b4fc}
     .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -106,20 +107,69 @@
       <div class="step-row"><span class="step-badge">4</span>Vercel redeploys automatically — done</div>
     </div>
 
+    <!-- GitHub Settings -->
+    <div class="card" id="githubCard">
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>GitHub Auto-Push</span>
+        <span id="githubStatusBadge" style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;background:#1e2035;color:#64748b">Not configured</span>
+      </div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:14px">
+        After generating config.js it will be pushed directly to your GitHub repo — Vercel redeploys automatically.
+      </div>
+      <div class="grid2">
+        <div>
+          <label class="fl">GitHub Owner *</label>
+          <input class="fi" id="ghOwner" placeholder="your-github-username">
+        </div>
+        <div>
+          <label class="fl">Repository Name *</label>
+          <input class="fi" id="ghRepo" placeholder="plessen-mgm-sys">
+        </div>
+        <div>
+          <label class="fl">Branch</label>
+          <input class="fi" id="ghBranch" placeholder="main" value="main">
+        </div>
+        <div>
+          <label class="fl">config.js path in repo</label>
+          <input class="fi" id="ghPath" placeholder="config.js" value="config.js">
+        </div>
+      </div>
+      <div>
+        <label class="fl">Personal Access Token * <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#4a4a7a">(repo scope — stored in Firestore, superuser only)</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="password" class="fi" id="ghToken" placeholder="ghp_xxxxxxxxxxxx" style="flex:1;margin-bottom:0">
+          <button class="btn btn-ghost" onclick="toggleTokenVisibility()" style="flex-shrink:0;padding:8px 12px">👁</button>
+        </div>
+        <div style="font-size:11px;color:#4a4a7a;margin-top:5px">
+          Generate at: GitHub → Settings → Developer settings → Personal access tokens → repo scope
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-primary btn-sm" onclick="saveGithubConfig()">Save GitHub Settings</button>
+        <button class="btn btn-ghost btn-sm" onclick="testGithubConnection()">Test Connection</button>
+      </div>
+      <div id="githubConfigMsg" style="font-size:12px;margin-top:8px"></div>
+    </div>
+
     <!-- Systems -->
     <div id="systemsContainer"></div>
 
-    <!-- Download area (shown after generate) -->
+    <!-- Result area (shown after generate) -->
     <div id="downloadArea" class="hidden card">
-      <div class="card-title">✅ Config Generated</div>
-      <div class="download-area">
-        <div style="font-size:13px;color:#94a3b8;margin-bottom:12px">New <span class="mono">config.js</span> is ready. Download and push to GitHub.</div>
-        <button class="btn btn-success" onclick="downloadConfig()">⬇ Download config.js</button>
+      <div class="card-title" id="resultTitle">✅ Config Generated</div>
+      <div id="pushStatusArea">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px;background:#0a0a1a;border:1px solid #2e2060;border-radius:9px;margin-bottom:14px">
+          <div id="pushSpinner" style="width:16px;height:16px;border:2px solid #4a4a7a;border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0"></div>
+          <div id="pushStatusMsg" style="font-size:13px;color:#94a3b8">Pushing to GitHub...</div>
+        </div>
       </div>
-      <div style="margin-top:14px">
+      <div style="margin-top:4px">
         <div class="step-row"><span class="step-badge" style="background:#22c55e">✓</span>Encryption key written to Firestore <span class="mono">system/keyFragment</span></div>
         <div class="step-row"><span class="step-badge" style="background:#22c55e">✓</span>Crypto script written to Firestore <span class="mono">system/crypto</span></div>
-        <div class="step-row"><span class="step-badge">3</span>Replace <span class="mono">config.js</span> in repo → push to GitHub → Vercel deploys</div>
+        <div class="step-row" id="pushResultRow"><span class="step-badge" id="pushStepBadge">3</span><span id="pushResultMsg">Pushing config.js to GitHub...</span></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="downloadConfig()">⬇ Download config.js (backup)</button>
       </div>
     </div>
   </div>
@@ -161,10 +211,13 @@ const COLORS = [
   { color:"#0f172a", accent:"#f1f5f9" },
 ];
 
+// DEFAULT_SYSTEMS intentionally has no hardcoded Firebase credentials.
+// On first run the form is empty — enter credentials manually from Firebase Console.
+// Subsequent runs pre-populate from the existing decrypted config.js.
 const DEFAULT_SYSTEMS = [
-  { key:"equipment",     label:"Equipment Management",  description:"Track, service, and manage all clinic equipment",      path:"/equipment",     color:"#1d4ed8", accent:"#dbeafe", order:1, enabled:true, apiKey:"AIzaSyBUZg65JYsT5BtZMhG9CClJQZJCpsdGK-E", authDomain:"plessen-repair.firebaseapp.com",       projectId:"plessen-repair",       storageBucket:"plessen-repair.firebasestorage.app",       messagingSenderId:"110845803408", appId:"1:110845803408:web:41e3789f02f335ff361115", measurementId:"" },
-  { key:"inventory",     label:"Inventory",             description:"Monitor stock levels, medications, and medical supplies", path:"/inventory",   color:"#0369a1", accent:"#e0f2fe", order:2, enabled:true, apiKey:"AIzaSyCC3k6i9ADfkhUOusGv_EvvO5PxcuIFgtc", authDomain:"plessen-inventory.firebaseapp.com",   projectId:"plessen-inventory",    storageBucket:"plessen-inventory.firebasestorage.app",    messagingSenderId:"704212184885", appId:"1:704212184885:web:6e094e9ddd5573850ae67c", measurementId:"" },
-  { key:"credentialing", label:"Credentialing",         description:"Manage staff licenses, certifications, and credentials", path:"/credentialing", color:"#075985", accent:"#f0f9ff", order:3, enabled:true, apiKey:"AIzaSyCjMKkNunk0NoMLUX4SMLOd67BT_Z-0nDs", authDomain:"plessen-credentials.firebaseapp.com", projectId:"plessen-credentials",  storageBucket:"plessen-credentials.firebasestorage.app",  messagingSenderId:"508688741805", appId:"1:508688741805:web:e4fd46383bcfb63d8add24", measurementId:"G-PTVTN0NGSG" },
+  { key:"equipment",     label:"Equipment Management",  description:"Track, service, and manage all clinic equipment",      path:"/equipment",     color:"#1d4ed8", accent:"#dbeafe", order:1, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" },
+  { key:"inventory",     label:"Inventory",             description:"Monitor stock levels, medications, and medical supplies", path:"/inventory",   color:"#0369a1", accent:"#e0f2fe", order:2, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" },
+  { key:"credentialing", label:"Credentialing",         description:"Manage staff licenses, certifications, and credentials", path:"/credentialing", color:"#075985", accent:"#f0f9ff", order:3, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" },
 ];
 
 // Expose globals
@@ -186,7 +239,7 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   hideEl("loginSection"); showEl("mainSection");
   document.getElementById("welcomeMsg").textContent = "Welcome, " + (snap.data().displayName || user.email);
-  await loadExistingConfig();
+  await Promise.all([ loadExistingConfig(), loadGithubConfig() ]);
 });
 
 async function doLogin() {
@@ -411,7 +464,35 @@ async function generateConfig() {
     }
 
     showEl("downloadArea");
-    showGlobalOk("✅ Encryption key written to Firestore. Download config.js and push to GitHub.");
+
+    // Auto-push to GitHub
+    const pushMsgEl  = document.getElementById("pushStatusMsg");
+    const pushRowEl  = document.getElementById("pushResultMsg");
+    const pushBadge  = document.getElementById("pushStepBadge");
+    const pushSpin   = document.getElementById("pushSpinner");
+
+    try {
+      pushMsgEl.textContent = "Pushing config.js to GitHub...";
+      pushSpin.style.display = "block";
+      const result = await pushToGitHub(generatedBlob);
+      // Success
+      pushSpin.style.display = "none";
+      pushMsgEl.style.color  = "#86efac";
+      pushMsgEl.textContent  = "✓ Pushed to GitHub — Vercel is redeploying now.";
+      pushBadge.style.background = "#22c55e";
+      pushBadge.textContent = "✓";
+      pushRowEl.textContent = "config.js pushed → Vercel deploying (30–60 seconds)";
+      document.getElementById("resultTitle").textContent = "✅ Config Generated & Deployed";
+      showGlobalOk("✅ Done — config.js encrypted, pushed to GitHub, Vercel redeploying.");
+    } catch(pushErr) {
+      // Push failed — fall back to download
+      pushSpin.style.display = "none";
+      pushMsgEl.style.color  = "#fca5a5";
+      pushMsgEl.textContent  = "✗ GitHub push failed: " + pushErr.message;
+      pushBadge.textContent  = "3";
+      pushRowEl.textContent  = "Auto-push failed — download config.js below and push manually.";
+      showGlobalOk("✅ Config generated (Firestore updated). Push config.js to GitHub manually.");
+    }
 
   } catch(e) {
     showGlobalErr("Generation failed: " + e.message);
@@ -424,6 +505,151 @@ function downloadConfig() {
   a.href = "data:text/javascript;charset=utf-8," + encodeURIComponent(generatedBlob);
   a.download = "config.js";
   a.click();
+}
+
+// ── GitHub Integration ────────────────────────────────────────────────────────
+let githubCfg = null; // loaded from Firestore
+
+async function loadGithubConfig() {
+  try {
+    const snap = await getDoc(doc(db, "system", "githubConfig"));
+    if (!snap.exists()) return;
+    const data = snap.data();
+    githubCfg = data;
+    document.getElementById("ghOwner").value  = data.owner  || "";
+    document.getElementById("ghRepo").value   = data.repo   || "";
+    document.getElementById("ghBranch").value = data.branch || "main";
+    document.getElementById("ghPath").value   = data.path   || "config.js";
+    document.getElementById("ghToken").value  = data.token  || "";
+    updateGithubStatusBadge(!!data.token && !!data.owner && !!data.repo);
+  } catch(e) {
+    console.warn("Could not load GitHub config:", e.message);
+  }
+}
+
+async function saveGithubConfig() {
+  const owner  = document.getElementById("ghOwner").value.trim();
+  const repo   = document.getElementById("ghRepo").value.trim();
+  const branch = document.getElementById("ghBranch").value.trim() || "main";
+  const path   = document.getElementById("ghPath").value.trim()   || "config.js";
+  const token  = document.getElementById("ghToken").value.trim();
+  const msgEl  = document.getElementById("githubConfigMsg");
+
+  if (!owner || !repo || !token) {
+    msgEl.style.color = "#fca5a5";
+    msgEl.textContent = "Owner, repo, and token are required.";
+    return;
+  }
+  try {
+    await setDoc(doc(db, "system", "githubConfig"), {
+      owner, repo, branch, path, token,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser.email
+    });
+    githubCfg = { owner, repo, branch, path, token };
+    msgEl.style.color = "#86efac";
+    msgEl.textContent = "✓ GitHub settings saved.";
+    updateGithubStatusBadge(true);
+  } catch(e) {
+    msgEl.style.color = "#fca5a5";
+    msgEl.textContent = "Save failed: " + e.message;
+  }
+}
+
+async function testGithubConnection() {
+  const msgEl = document.getElementById("githubConfigMsg");
+  const owner  = document.getElementById("ghOwner").value.trim();
+  const repo   = document.getElementById("ghRepo").value.trim();
+  const token  = document.getElementById("ghToken").value.trim();
+  if (!owner || !repo || !token) { msgEl.style.color="#fca5a5"; msgEl.textContent="Fill in owner, repo, and token first."; return; }
+  msgEl.style.color = "#94a3b8"; msgEl.textContent = "Testing...";
+  try {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github.v3+json" }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      msgEl.style.color = "#86efac";
+      msgEl.textContent = `✓ Connected — ${data.full_name} (${data.default_branch})`;
+      updateGithubStatusBadge(true);
+    } else {
+      msgEl.style.color = "#fca5a5";
+      msgEl.textContent = `✗ Failed (${res.status}) — check token and repo name.`;
+    }
+  } catch(e) {
+    msgEl.style.color = "#fca5a5";
+    msgEl.textContent = "Connection error: " + e.message;
+  }
+}
+
+function updateGithubStatusBadge(configured) {
+  const badge = document.getElementById("githubStatusBadge");
+  if (!badge) return;
+  if (configured) {
+    badge.style.background = "#14532d22";
+    badge.style.color      = "#86efac";
+    badge.textContent      = "✓ Configured";
+  } else {
+    badge.style.background = "#1e2035";
+    badge.style.color      = "#64748b";
+    badge.textContent      = "Not configured";
+  }
+}
+
+// Get current SHA of a file in the repo (required for updates)
+async function getFileSha(token, owner, repo, branch, filePath) {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`,
+    { headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github.v3+json" } }
+  );
+  if (res.status === 404) return null; // file doesn't exist yet — first push
+  if (!res.ok) throw new Error(`Could not get file SHA: ${res.status}`);
+  const data = await res.json();
+  return data.sha;
+}
+
+// Push content to GitHub via Contents API
+async function pushToGitHub(content) {
+  // Load latest GitHub config from Firestore in case it changed
+  const snap = await getDoc(doc(db, "system", "githubConfig"));
+  if (!snap.exists()) throw new Error("GitHub not configured — save GitHub settings first.");
+  const { owner, repo, branch, path: filePath, token } = snap.data();
+  if (!token || !owner || !repo) throw new Error("GitHub settings incomplete — check owner, repo, and token.");
+
+  // Get current file SHA (needed for updates, null for first push)
+  const sha = await getFileSha(token, owner, repo, branch, filePath);
+
+  // Push
+  const body = {
+    message:  `Update ${filePath} via Plessen config-tool — ${new Date().toISOString().split("T")[0]}`,
+    content:  btoa(unescape(encodeURIComponent(content))), // base64, handles unicode
+    branch,
+    ...(sha ? { sha } : {})
+  };
+
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
+    {
+      method:  "PUT",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept":        "application/vnd.github.v3+json",
+        "Content-Type":  "application/json"
+      },
+      body: JSON.stringify(body)
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API error ${res.status}`);
+  }
+  return res.json();
+}
+
+function toggleTokenVisibility() {
+  const inp = document.getElementById("ghToken");
+  inp.type  = inp.type === "password" ? "text" : "password";
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
