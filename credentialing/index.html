@@ -11,9 +11,35 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, getDocs, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { portalAuth, loadConfig, initSystemApp } from "/crypto.js";
+import { onAuthStateChanged as portalAuthState } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-const firebaseConfig={apiKey:"AIzaSyCjMKkNunk0NoMLUX4SMLOd67BT_Z-0nDs",authDomain:"plessen-credentials.firebaseapp.com",projectId:"plessen-credentials",storageBucket:"plessen-credentials.firebasestorage.app",messagingSenderId:"508688741805",appId:"1:508688741805:web:e4fd46383bcfb63d8add24",measurementId:"G-PTVTN0NGSG"};
-const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
+// Firebase config loaded from encrypted config.js — no credentials in this file
+let auth = null;
+let db   = null;
+
+async function initCredentialingFirebase() {
+  return new Promise((resolve) => {
+    const unsub = portalAuthState(portalAuth, async (portalUser) => {
+      unsub();
+      if (!portalUser) { resolve(false); return; }
+      try {
+        let cfg = null;
+        const configs = await loadConfig();
+        cfg = configs?.credentialing;
+        if (!cfg) throw new Error("Credentialing config not found");
+        const crdApp = initSystemApp(cfg, "plessen-credentials");
+        cfg = null; // null immediately
+        auth = getAuth(crdApp);
+        db   = getFirestore(crdApp);
+        resolve(true);
+      } catch(e) {
+        console.error("Credentialing config load failed:", e.message);
+        resolve(false);
+      }
+    });
+  });
+}
 
 // ── MASTER KEY (Option C) ──────────────────────────────────────────────────────
 // This key encrypts the admin-set file encryption passphrase stored in Firestore.
@@ -401,7 +427,15 @@ function recordFail(){loginAttempts++;if(loginAttempts>=LOCK_LIMIT){lockUntil=Da
 function resetAttempts(){loginAttempts=0;lockUntil=0;}
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
-onAuthStateChanged(auth,async user=>{
+// Boot: init Firebase from config, then start auth
+(async()=>{
+  const ready = await initCredentialingFirebase();
+  if (!ready) { document.getElementById('auth-screen')?.classList.remove('hidden'); return; }
+  startCredApp();
+})();
+
+function startCredApp() {
+  onAuthStateChanged(auth,async user=>{
   currentUser=user;
   if(user){
     try{
@@ -426,7 +460,8 @@ onAuthStateChanged(auth,async user=>{
     FILE_ENC_KEY='';encKeyReady=false;
     hide('app-screen');show('auth-screen');
   }
-});
+  }); // end onAuthStateChanged
+} // end startCredApp
 window.doSignIn=async()=>{
   clrAE();if(!checkRateLimit())return;
   const e=$('a-email').value.trim(),p=$('a-pass').value;
@@ -1235,6 +1270,7 @@ input:focus,select:focus{border-color:var(--bm)}
     <div id="auth-error"></div>
     <button class="abtn" onclick="doSignIn()">Sign in</button>
     <button class="alink" onclick="doReset()">Forgot password?</button>
+    <a href="../portal/index.html" style="display:block;text-align:center;margin-top:12px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
     <div class="auth-note">🔒 Access restricted to authorized Plessen Ophthalmology staff only.</div>
   </div>
 </div>
@@ -1251,6 +1287,7 @@ input:focus,select:focus{border-color:var(--bm)}
       <button class="hbtn" onclick="openExportModal()">⬇ Export</button>
       <button class="hbtn" onclick="openReminderModal()">📧 Reminder</button>
       <button class="hbtn hbtn-p" id="header-add-btn" onclick="openAddModal()">+ Add record</button>
+      <a href="../portal/index.html" class="hbtn" style="text-decoration:none">← Portal</a>
       <button class="hbtn" onclick="doSignOut()" title="Sign out" style="padding:8px 11px">↩</button>
     </div>
   </header>
