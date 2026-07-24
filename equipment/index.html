@@ -353,25 +353,48 @@
 // ════════════════════════════════════════════════════════════════════════
 // FIREBASE IMPORTS
 // ════════════════════════════════════════════════════════════════════════
-import { initializeApp }
-  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { portalAuth, loadConfig, initSystemApp }
+  from '/crypto.js';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
-         getDoc, onSnapshot, query, orderBy, serverTimestamp }
+         getDoc, onSnapshot, query, orderBy }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // ════════════════════════════════════════════════════════════════════════
-// CONFIG
+// CONFIG — loaded from encrypted config.js via crypto.js
+// Firebase config for plessen-repair is NOT stored in this file
 // ════════════════════════════════════════════════════════════════════════
-const FB_CFG = {
-  apiKey:            "AIzaSyBUZg65JYsT5BtZMhG9CClJQZJCpsdGK-E",
-  authDomain:        "plessen-repair.firebaseapp.com",
-  projectId:         "plessen-repair",
-  storageBucket:     "plessen-repair.firebasestorage.app",
-  messagingSenderId: "110845803408",
-  appId:             "1:110845803408:web:41e3789f02f335ff361115"
-};
+let auth = null;
+let db   = null;
+
+async function initFirebase() {
+  // Check portal auth session first (persists across pages)
+  return new Promise((resolve) => {
+    const unsub = onAuthStateChanged(portalAuth, async (portalUser) => {
+      unsub();
+      if (!portalUser) { resolve(false); return; }
+      try {
+        // Decrypt config → get plessen-repair credentials
+        let cfg = null;
+        const configs = await loadConfig();
+        cfg = configs?.equipment || null;
+        if (!cfg) throw new Error("Equipment config not found");
+
+        // Init plessen-repair Firebase
+        const eqApp = initSystemApp(cfg, "plessen-repair");
+        cfg = null; // null immediately after use
+
+        auth = getAuth(eqApp);
+        db   = getFirestore(eqApp);
+        resolve(true);
+      } catch(e) {
+        console.error("Config load failed:", e.message);
+        resolve(false);
+      }
+    });
+  });
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -410,9 +433,7 @@ let unsubEq       = null;
 let unsubRpts     = null;
 const pingCache   = {};  // id -> { online, time }
 
-const app  = initializeApp(FB_CFG);
-const auth = getAuth(app);
-const db   = getFirestore(app);
+// auth + db initialised in initFirebase() above
 
 // ════════════════════════════════════════════════════════════════════════
 // EXPOSE GLOBALS
@@ -434,7 +455,15 @@ W.setFilter=setFilter; W.setSearch=setSearch; W.setReportsTab=setReportsTab;
 // ════════════════════════════════════════════════════════════════════════
 // AUTH
 // ════════════════════════════════════════════════════════════════════════
-onAuthStateChanged(auth, async fbUser => {
+// ── Boot sequence: init Firebase from encrypted config, then check auth ──
+(async () => {
+  const ready = await initFirebase();
+  if (!ready) { showLogin(); return; }
+  startAuth();
+})();
+
+function startAuth() {
+  onAuthStateChanged(auth, async fbUser => {
   if (!fbUser) { showLogin(); return; }
   // Check allowedUsers
   try {
@@ -451,7 +480,8 @@ onAuthStateChanged(auth, async fbUser => {
   }
   showApp();
   startListeners();
-});
+  }); // end onAuthStateChanged
+} // end startAuth
 
 async function doLogin() {
   const email = document.getElementById('loginEmail').value.trim();
