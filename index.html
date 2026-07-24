@@ -446,41 +446,31 @@
 
 <script type="module">
 // ════════════════════════════════════════════════════════════════════════════
-// FIREBASE IMPORTS
-// ════════════════════════════════════════════════════════════════════════════
-// Firebase modules imported above via crypto.js
+// IMPORTS — only plessen-auth credentials exposed (in crypto.js)
+// All sub-system credentials live in encrypted config.js
+import { portalAuth, portalDb, loadConfig }
+  from '/crypto.js';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged,
+         updatePassword, EmailAuthProvider, reauthenticateWithCredential,
+         createUserWithEmailAndPassword }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { doc, getDoc, setDoc, getDocs, collection,
+         updateDoc, deleteDoc, query, orderBy, writeBatch }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-// ════════════════════════════════════════════════════════════════════════════
-// PORTAL CONFIG  (only this project is hardcoded)
-// ════════════════════════════════════════════════════════════════════════════
-// Portal config removed — lives in crypto.js only
+const auth = portalAuth;
+const db   = portalDb;
 
-// Systems to seed into Firestore on first run
 const SEED_SYSTEMS = [
   { key:"equipment",     label:"Equipment Management", order:1, enabled:true,
     description:"Track, service, and manage all clinic equipment",
-    color:"#1d4ed8", accent:"#dbeafe", path:"../equipment/index.html",
-    apiKey:"AIzaSyBUZg65JYsT5BtZMhG9CClJQZJCpsdGK-E",
-    authDomain:"plessen-repair.firebaseapp.com", projectId:"plessen-repair",
-    storageBucket:"plessen-repair.firebasestorage.app",
-    messagingSenderId:"110845803408",
-    appId:"1:110845803408:web:41e3789f02f335ff361115", measurementId:"" },
+    color:"#1d4ed8", accent:"#dbeafe", path:"/equipment" },
   { key:"inventory",     label:"Inventory", order:2, enabled:true,
     description:"Monitor stock levels, medications, and medical supplies",
-    color:"#0369a1", accent:"#e0f2fe", path:"../inventory/index.html",
-    apiKey:"AIzaSyCC3k6i9ADfkhUOusGv_EvvO5PxcuIFgtc",
-    authDomain:"plessen-inventory.firebaseapp.com", projectId:"plessen-inventory",
-    storageBucket:"plessen-inventory.firebasestorage.app",
-    messagingSenderId:"704212184885",
-    appId:"1:704212184885:web:6e094e9ddd5573850ae67c", measurementId:"" },
+    color:"#0369a1", accent:"#e0f2fe", path:"/inventory" },
   { key:"credentialing", label:"Credentialing", order:3, enabled:true,
     description:"Manage staff licenses, certifications, and credentials",
-    color:"#075985", accent:"#f0f9ff", path:"../credentialing/index.html",
-    apiKey:"AIzaSyCjMKkNunk0NoMLUX4SMLOd67BT_Z-0nDs",
-    authDomain:"plessen-credentials.firebaseapp.com", projectId:"plessen-credentials",
-    storageBucket:"plessen-credentials.firebasestorage.app",
-    messagingSenderId:"508688741805",
-    appId:"1:508688741805:web:e4fd46383bcfb63d8add24", measurementId:"G-PTVTN0NGSG" },
+    color:"#075985", accent:"#f0f9ff", path:"/credentialing" },
 ];
 
 const COLOR_PALETTE = [
