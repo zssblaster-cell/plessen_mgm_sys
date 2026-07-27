@@ -197,9 +197,71 @@
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
     .divider{height:1px;background:#1e2035;margin:14px 0}
     .chip{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700}
+
+    /* ── Portal access overlay ──────────────────────────────── */
+    #portalOverlay{position:fixed;inset:0;background:#0d0d1a;z-index:9999;
+      display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;
+      transition:opacity .3s}
+    .po-spinner{width:38px;height:38px;border:3px solid #1e2035;border-top-color:#6366f1;
+      border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 14px}
+    #poLoading{text-align:center;color:#4a4a7a;font-size:13px}
+    #poBlocked{text-align:center;max-width:420px;padding:40px;background:#13132a;
+      border:1px solid #2e2060;border-radius:16px;box-shadow:0 24px 64px #00000099}
+    .po-lock{font-size:44px;margin-bottom:16px}
+    .po-title{font-size:19px;font-weight:800;color:#e2e8f0;margin-bottom:10px}
+    .po-sub{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:20px}
+    .po-countdown{font-size:12px;color:#4a4a7a;font-family:'DM Mono',monospace;margin-bottom:22px}
+    .po-btn{display:inline-flex;align-items:center;gap:7px;padding:11px 22px;
+      background:#6366f1;color:#fff;border-radius:10px;text-decoration:none;
+      font-weight:700;font-size:14px;transition:background .15s}
+    .po-btn:hover{background:#4f46e5}
+    /* ── Migration tool ──────────────────────────────────────── */
+    .mig-tabs{display:flex;gap:2px;background:#0a0a1a;border-radius:8px;padding:3px;
+      width:fit-content;margin-bottom:18px}
+    .mig-tab{padding:7px 16px;border-radius:6px;border:none;background:transparent;
+      font-family:'Syne',sans-serif;font-size:13px;font-weight:600;color:#64748b;cursor:pointer;transition:all .15s}
+    .mig-tab.on{background:#13132a;color:#e2e8f0;box-shadow:0 1px 3px #00000044}
+    .drop-zone{border:2px dashed #1e2035;border-radius:10px;padding:26px;text-align:center;
+      cursor:pointer;transition:all .2s;position:relative;margin-bottom:14px;background:#0a0a1a}
+    .drop-zone:hover,.drop-zone.over{border-color:#6366f1;background:#6366f110}
+    .drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+    .mig-or{display:flex;align-items:center;gap:10px;margin:10px 0;
+      font-size:11px;color:#4a4a7a;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+    .mig-or::before,.mig-or::after{content:'';flex:1;height:1px;background:#1e2035}
+    .map-row{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;
+      border-radius:7px;background:#0a0a1a;border:1px solid #1e2035;margin-bottom:5px}
+    .map-lbl{font-size:12px;color:#94a3b8;font-weight:600;flex:1}
+    .map-req{color:#ef4444;margin-left:2px}
+    .map-sel{background:#13132a;border:1px solid #1e2035;border-radius:5px;color:#e2e8f0;
+      font-family:'DM Mono',monospace;font-size:11px;padding:4px 8px;outline:none;min-width:150px}
+    .preview-wrap{max-height:180px;overflow:auto;border:1px solid #1e2035;border-radius:8px;margin-top:10px}
+    .preview-table{width:100%;border-collapse:collapse;font-size:11px}
+    .preview-table th{background:#0a0a1a;padding:6px 8px;text-align:left;
+      color:#6366f1;font-weight:700;white-space:nowrap;border-bottom:1px solid #1e2035;position:sticky;top:0}
+    .preview-table td{padding:5px 8px;color:#94a3b8;border-bottom:1px solid #13132a;
+      max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .mig-prog{height:5px;background:#1e2035;border-radius:3px;overflow:hidden;margin:12px 0}
+    .mig-prog-fill{height:100%;background:#6366f1;border-radius:3px;transition:width .2s;width:0%}
+    .sec-title-sm{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+      color:#4a4a7a;margin:12px 0 6px}
   </style>
 </head>
 <body>
+
+<!-- PORTAL ACCESS OVERLAY — visible immediately, removed only when authenticated -->
+<div id="portalOverlay">
+  <div id="poLoading">
+    <div class="po-spinner"></div>
+    <div>Verifying portal session...</div>
+  </div>
+  <div id="poBlocked" class="hidden">
+    <div class="po-lock">🔒</div>
+    <div class="po-title">Portal Sign-In Required</div>
+    <div class="po-sub">This system can only be accessed through the Plessen Management Portal. Please sign in there first.</div>
+    <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
+    <a href="/" class="po-btn">← Return to Portal</a>
+  </div>
+</div>
 
 <!-- ══ LOGIN ══════════════════════════════════════════════════════════ -->
 <div id="loginScreen">
@@ -217,14 +279,14 @@
       <label class="l-label">Password</label>
       <input type="password" id="loginPass" class="l-input" placeholder="Enter password">
       <button class="l-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
-      <a href="../portal/index.html" class="l-back">← Return to Portal</a>
+      <a href="/" class="l-back">← Return to Portal</a>
   </div>
 </div>
 
 <!-- ══ APP ════════════════════════════════════════════════════════════ -->
 <div id="appScreen" class="hidden">
   <header class="topbar">
-    <a href="../portal/index.html" class="brand" style="text-decoration:none">
+    <a href="/" class="brand" style="text-decoration:none">
       <div class="brand-mark">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       </div>
@@ -237,6 +299,10 @@
       </button>
     </div>
     <div class="topbar-right" id="topbarRight">
+      <a href="/" class="btn btn-ghost btn-sm" style="text-decoration:none;gap:5px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+        Portal
+      </a>
       <div id="detailActions" class="hidden" style="display:flex;gap:6px"></div>
       <button id="addEqBtn" class="btn btn-primary btn-sm" onclick="setView('addEquipment')">+ Add Equipment</button>
       <div class="gear-wrap" id="gearWrap">
@@ -254,6 +320,12 @@
           <button class="gear-item" onclick="openExportModal()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Export Data
+          </button>
+          <div class="gear-div"></div>
+          <div class="gear-section-lbl">Advanced</div>
+          <button class="gear-item" onclick="openMigrationTool()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Migration Tool
           </button>
           <div class="gear-div"></div>
           <button class="gear-item" onclick="doSignOut()" style="color:#fca5a5">
@@ -358,7 +430,7 @@ import { portalAuth, loadConfig, initSystemApp }
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
-         getDoc, onSnapshot, query, orderBy }
+         getDoc, getDocs, onSnapshot, query, orderBy }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // ════════════════════════════════════════════════════════════════════════
@@ -373,13 +445,18 @@ async function initFirebase() {
   return new Promise((resolve) => {
     const unsub = onAuthStateChanged(portalAuth, async (portalUser) => {
       unsub();
-      if (!portalUser) { resolve(false); return; }
+      if (!portalUser) {
+        // No portal session — show blocked overlay with countdown
+        showPortalBlocked();
+        resolve(false);
+        return;
+      }
       try {
         // Decrypt config → get plessen-repair credentials
         let cfg = null;
         const configs = await loadConfig();
         cfg = configs?.equipment || null;
-        if (!cfg) throw new Error("Equipment config not found");
+        if (!cfg) throw new Error("Equipment config not initialised — run /config-tool first.");
 
         // Init plessen-repair Firebase
         const eqApp = initSystemApp(cfg, "plessen-repair");
@@ -389,7 +466,11 @@ async function initFirebase() {
         db   = getFirestore(eqApp);
         resolve(true);
       } catch(e) {
-        console.error("Config load failed:", e.message);
+        // Config failed — show error on login screen instead of crashing
+        showLogin();
+        showLoginErr(e.message.includes("config-tool")
+          ? e.message
+          : "Could not load system config. Contact your administrator. (" + e.message + ")");
         resolve(false);
       }
     });
@@ -451,6 +532,11 @@ W.selectEquipment=selectEquipment; W.startEdit=startEdit; W.cancelEdit=cancelEdi
 W.setEditField=setEditField; W.saveNewEquipment=saveNewEquipment;
 W.updateRepairField=updateRepairField; W.handleRepairStatusChange=handleRepairStatusChange;
 W.setFilter=setFilter; W.setSearch=setSearch; W.setReportsTab=setReportsTab;
+W.openMigrationTool=openMigrationTool; W.closeMigrationTool=closeMigrationTool;
+W.switchMigTab=switchMigTab; W.handleMigDrop=handleMigDrop; W.handleMigFile=handleMigFile;
+W.parseMigJSON=parseMigJSON; W.resetMigration=resetMigration; W.runMigration=runMigration;
+W.renderMigPreview=renderMigPreview;
+W.toggleActive=toggleActive;
 
 // ════════════════════════════════════════════════════════════════════════
 // AUTH
@@ -458,7 +544,8 @@ W.setFilter=setFilter; W.setSearch=setSearch; W.setReportsTab=setReportsTab;
 // ── Boot sequence: init Firebase from encrypted config, then check auth ──
 (async () => {
   const ready = await initFirebase();
-  if (!ready) { showLogin(); return; }
+  if (!ready) return; // initFirebase already handled overlay (blocked or error)
+  removePortalOverlay(); // authenticated — dismiss overlay smoothly
   startAuth();
 })();
 
@@ -484,6 +571,11 @@ function startAuth() {
 } // end startAuth
 
 async function doLogin() {
+  // Guard: auth is null if initFirebase() failed (config not set up yet)
+  if (!auth) {
+    showLoginErr("System not ready — config may not be initialised. Visit /config-tool first.");
+    return;
+  }
   const email = document.getElementById('loginEmail').value.trim();
   const pass  = document.getElementById('loginPass').value;
   if (!email||!pass) { showLoginErr("Both fields are required."); return; }
@@ -1111,6 +1203,339 @@ function hideEl(id){document.getElementById(id)?.classList.add('hidden')}
 function showLogin(){showEl('loginScreen');hideEl('appScreen')}
 function showLoginErr(msg){showEl('loginErr');document.getElementById('loginErr').textContent=msg}
 function showApp(){hideEl('loginScreen');showEl('appScreen');render()}
+
+// ════════════════════════════════════════════════════════════════════════
+// PORTAL OVERLAY
+// ════════════════════════════════════════════════════════════════════════
+function showPortalBlocked() {
+  const loading   = document.getElementById('poLoading');
+  const blocked   = document.getElementById('poBlocked');
+  const countdown = document.getElementById('poCountdown');
+  if (loading) loading.style.display = 'none';
+  if (blocked) blocked.classList.remove('hidden');
+  let secs = 5;
+  const iv = setInterval(() => {
+    secs--;
+    if (countdown) countdown.textContent = 'Redirecting in ' + secs + ' second' + (secs!==1?'s':'') + '...';
+    if (secs <= 0) { clearInterval(iv); window.location.href = '/'; }
+  }, 1000);
+}
+function removePortalOverlay() {
+  const overlay = document.getElementById('portalOverlay');
+  if (!overlay) return;
+  overlay.style.opacity = '0';
+  setTimeout(() => overlay.remove(), 320);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// MIGRATION TOOL
+// ════════════════════════════════════════════════════════════════════════
+let migTab = 'equipment';
+let migRows = [];
+let migHeaders = [];
+
+const EQ_FIELDS = [
+  { key:'name',           label:'Equipment Name', req:true,  hints:['name','equipment','equipment name','item'] },
+  { key:'equipType',      label:'Type',           req:false, hints:['type','equipment type','category','kind'] },
+  { key:'brand',          label:'Brand',          req:false, hints:['brand','manufacturer','make'] },
+  { key:'model',          label:'Model',          req:false, hints:['model','model number','model no'] },
+  { key:'sn',             label:'Serial Number',  req:false, hints:['sn','serial','serial number','s/n'] },
+  { key:'location',       label:'Location',       req:false, hints:['location','room','area','department'] },
+  { key:'startDate',      label:'Start Date',     req:false, hints:['start date','purchase date','date','acquired'] },
+  { key:'price',          label:'Price ($)',       req:false, hints:['price','cost','purchase price'] },
+  { key:'ip',             label:'IP Address',     req:false, hints:['ip','ip address'] },
+  { key:'repairFacility', label:'Repair Facility',req:false, hints:['repair facility','service provider','vendor'] },
+  { key:'repairAddress',  label:'Repair Address', req:false, hints:['repair address','address'] },
+];
+
+const RPT_FIELDS = [
+  { key:'equipName',   label:'Equipment Name', req:true,  hints:['equipment','equipment name','name','asset'] },
+  { key:'title',       label:'Issue Title',    req:true,  hints:['title','issue','problem','fault'] },
+  { key:'description', label:'Description',    req:false, hints:['description','details','notes','comments'] },
+  { key:'priority',    label:'Priority',       req:false, hints:['priority','urgency','severity'] },
+  { key:'openedBy',    label:'Opened By',      req:false, hints:['opened by','reported by','technician'] },
+  { key:'date',        label:'Date Opened',    req:false, hints:['date','open date','reported date'] },
+  { key:'closeReason', label:'Close Reason',   req:false, hints:['close reason','resolution','fix'] },
+  { key:'closeDate',   label:'Date Closed',    req:false, hints:['close date','resolved date'] },
+  { key:'closedBy',    label:'Closed By',      req:false, hints:['closed by','resolved by'] },
+  { key:'cost',        label:'Repair Cost ($)',req:false, hints:['cost','repair cost','amount'] },
+  { key:'invoice',     label:'Invoice #',      req:false, hints:['invoice','invoice number'] },
+];
+
+function openMigrationTool() { closeGear(); resetMigration(); showEl('migrationModal'); }
+function closeMigrationTool() { hideEl('migrationModal'); }
+
+function switchMigTab(tab) {
+  migTab = tab;
+  document.getElementById('migTabEq').classList.toggle('on', tab==='equipment');
+  document.getElementById('migTabRpt').classList.toggle('on', tab==='repair');
+  if (migRows.length) renderMigMapping();
+}
+
+function handleMigDrop(e) {
+  e.preventDefault();
+  document.getElementById('migDropZone').classList.remove('over');
+  if (e.dataTransfer.files[0]) handleMigFile(e.dataTransfer.files[0]);
+}
+
+function handleMigFile(file) {
+  if (!file) return;
+  clearMigErr();
+  const ext = file.name.split('.').pop().toLowerCase();
+  const reader = new FileReader();
+  if (ext === 'json') {
+    reader.onload = e => parseMigJSONStr(e.target.result);
+    reader.readAsText(file);
+  } else if (ext==='xlsx'||ext==='xls') {
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        migRows    = XLSX.utils.sheet_to_json(ws, {defval:''});
+        migHeaders = migRows.length ? Object.keys(migRows[0]) : [];
+        if (!migRows.length) { showMigErr('No data rows found.'); return; }
+        renderMigMapping();
+      } catch(err) { showMigErr('Could not read file: ' + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  } else { showMigErr('Unsupported file type. Use .xlsx, .xls, or .json'); }
+}
+
+function parseMigJSON() { parseMigJSONStr(document.getElementById('migJsonPaste').value.trim()); }
+function parseMigJSONStr(str) {
+  clearMigErr();
+  try {
+    const p = JSON.parse(str);
+    migRows    = Array.isArray(p) ? p : [p];
+    migHeaders = migRows.length ? Object.keys(migRows[0]) : [];
+    if (!migRows.length) { showMigErr('No records found.'); return; }
+    renderMigMapping();
+  } catch(e) { showMigErr('Invalid JSON: ' + e.message); }
+}
+
+function autoDetectCol(hints, headers) {
+  const lh = headers.map(h => (h||'').toLowerCase().trim());
+  for (const hint of hints) {
+    const idx = lh.findIndex(h => h===hint || h.includes(hint) || hint.includes(h));
+    if (idx !== -1) return headers[idx];
+  }
+  return '(skip)';
+}
+
+function renderMigMapping() {
+  const fields = migTab==='equipment' ? EQ_FIELDS : RPT_FIELDS;
+  const cols   = ['(skip)', ...migHeaders];
+  document.getElementById('migMappingRows').innerHTML = fields.map(f => {
+    const auto = autoDetectCol(f.hints, migHeaders);
+    const opts = cols.map(c => `<option value="${c}"${c===auto?' selected':''}>${c}</option>`).join('');
+    return `<div class="map-row">
+      <div class="map-lbl">${f.label}${f.req?'<span class="map-req">*</span>':''}</div>
+      <select class="map-sel" id="map_${f.key}" onchange="renderMigPreview()">${opts}</select>
+    </div>`;
+  }).join('');
+  document.getElementById('migPreviewCount').textContent = '(first ' + Math.min(migRows.length,5) + ' of ' + migRows.length + ')';
+  renderMigPreview();
+  showEl('migMappingSection');
+  const btn=document.getElementById('migImportBtn');
+  btn.disabled=false; btn.style.opacity='1'; btn.style.cursor='pointer';
+  btn.textContent='Import ' + migRows.length + ' Record' + (migRows.length!==1?'s':'');
+}
+
+function renderMigPreview() {
+  const fields  = migTab==='equipment' ? EQ_FIELDS : RPT_FIELDS;
+  const preview = migRows.slice(0,5);
+  const thead   = '<tr>' + fields.map(f=>`<th>${f.label}</th>`).join('') + '</tr>';
+  const tbody   = preview.map(row => {
+    const cells = fields.map(f => {
+      const sel = document.getElementById('map_'+f.key);
+      const col = sel ? sel.value : '';
+      return `<td title="${col&&col!=='(skip)'?row[col]||'':''}">${col&&col!=='(skip)'?(row[col]||'—'):'—'}</td>`;
+    }).join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+  document.getElementById('migPreviewTable').innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
+}
+
+function getMigMapping(fields) {
+  const m = {};
+  fields.forEach(f => { const el=document.getElementById('map_'+f.key); m[f.key]=el?el.value:'(skip)'; });
+  return m;
+}
+
+async function runMigration() {
+  const fields  = migTab==='equipment' ? EQ_FIELDS : RPT_FIELDS;
+  const mapping = getMigMapping(fields);
+  const missing = fields.filter(f => f.req && (!mapping[f.key]||mapping[f.key]==='(skip)'));
+  if (missing.length) { showMigErr('Required fields not mapped: '+missing.map(f=>f.label).join(', ')); return; }
+  showEl('migProgressSection'); hideEl('migResult'); clearMigErr();
+  document.getElementById('migImportBtn').disabled = true;
+  if (migTab==='equipment') await importEquipmentRows(mapping);
+  else                       await importRepairRows(mapping);
+}
+
+async function importEquipmentRows(mapping) {
+  let done=0,skipped=0,errors=[];
+  const fill=document.getElementById('migProgFill');
+  const msg=document.getElementById('migProgressMsg');
+  for (let i=0;i<migRows.length;i++) {
+    const row  = migRows[i];
+    const name = getCol(row,mapping.name);
+    if (!name) { skipped++; continue; }
+    try {
+      await addDoc(collection(db,'equipment'), {
+        name,
+        equipType:      getCol(row,mapping.equipType)||'Other',
+        brand:          getCol(row,mapping.brand),
+        model:          getCol(row,mapping.model),
+        sn:             getCol(row,mapping.sn),
+        location:       getCol(row,mapping.location),
+        startDate:      fmtDateCol(getCol(row,mapping.startDate)),
+        price:          getCol(row,mapping.price),
+        ip:             getCol(row,mapping.ip),
+        repairFacility: getCol(row,mapping.repairFacility),
+        repairAddress:  getCol(row,mapping.repairAddress),
+        status:'active', active:true, statusLog:[], createdAt:today(), importedAt:today()
+      });
+      done++;
+    } catch(e) { errors.push(name+': '+e.message); }
+    fill.style.width=Math.round(((i+1)/migRows.length)*100)+'%';
+    msg.textContent='Importing '+done+' of '+migRows.length+'...';
+  }
+  showMigResult(done,skipped,errors,'equipment records');
+}
+
+async function importRepairRows(mapping) {
+  const eqSnap = await getDocs(collection(db,'equipment'));
+  const eqMap  = {};
+  eqSnap.docs.forEach(d => { if(d.data().name) eqMap[d.data().name.toLowerCase().trim()]=d.id; });
+  let done=0,skipped=0,unlinked=0,errors=[];
+  const fill=document.getElementById('migProgFill');
+  const msg=document.getElementById('migProgressMsg');
+  for (let i=0;i<migRows.length;i++) {
+    const row       = migRows[i];
+    const equipName = getCol(row,mapping.equipName);
+    const title     = getCol(row,mapping.title);
+    if (!equipName||!title) { skipped++; continue; }
+    const equipId = eqMap[equipName.toLowerCase().trim()]||null;
+    if (!equipId) unlinked++;
+    const rawClose  = getCol(row,mapping.closeDate);
+    const isClosed  = !!(rawClose||getCol(row,mapping.closeReason));
+    try {
+      await addDoc(collection(db,'reports'), {
+        equipId:equipId||'', equipName, title,
+        description:getCol(row,mapping.description),
+        priority:(getCol(row,mapping.priority)||'medium').toLowerCase(),
+        openedBy:getCol(row,mapping.openedBy),
+        date:fmtDateCol(getCol(row,mapping.date))||today(),
+        lastUpdated:today(),
+        status:isClosed?'inactive':'active',
+        repairStatus:'pending', usable:true,
+        closeReason:getCol(row,mapping.closeReason),
+        closeDate:fmtDateCol(rawClose),
+        closedBy:getCol(row,mapping.closedBy),
+        cost:getCol(row,mapping.cost),
+        invoice:getCol(row,mapping.invoice),
+        importedAt:today()
+      });
+      done++;
+    } catch(e) { errors.push(title+': '+e.message); }
+    fill.style.width=Math.round(((i+1)/migRows.length)*100)+'%';
+    msg.textContent='Importing '+done+' of '+migRows.length+'...';
+  }
+  const extra = unlinked ? unlinked+' record'+(unlinked!==1?'s':'')+' saved without equipment link (no match found by name).' : '';
+  showMigResult(done,skipped,errors,'repair records',extra);
+}
+
+function getCol(row,col) { if(!col||col==='(skip)')return''; return String(row[col]||'').trim(); }
+function fmtDateCol(val) {
+  if (!val) return '';
+  if (typeof val==='number'&&val>10000) { const d=new Date(Math.round((val-25569)*86400*1000)); return d.toISOString().split('T')[0]; }
+  const d=new Date(val); return isNaN(d.getTime())?'':d.toISOString().split('T')[0];
+}
+function showMigResult(done,skipped,errors,noun,extra) {
+  hideEl('migProgressSection');
+  const el=document.getElementById('migResult');
+  el.className='mig-result '+(errors.length?'err':'ok');
+  el.innerHTML='<strong>✓ '+done+' '+noun+' imported.</strong>'
+    +(skipped?' '+skipped+' rows skipped (missing required fields).':'')
+    +(extra?'<br><span style="font-weight:400">'+extra+'</span>':'')
+    +(errors.length?'<br>Errors: '+errors.slice(0,3).join('; ')+(errors.length>3?'...':''):'');
+  showEl('migResult');
+  document.getElementById('migImportBtn').disabled=false;
+}
+function resetMigration() {
+  migRows=[]; migHeaders=[];
+  ['migMappingSection','migProgressSection','migResult'].forEach(id=>hideEl(id));
+  clearMigErr();
+  const fi=document.getElementById('migFileInput'); if(fi) fi.value='';
+  const jp=document.getElementById('migJsonPaste'); if(jp) jp.value='';
+  const pf=document.getElementById('migProgFill'); if(pf) pf.style.width='0%';
+  const btn=document.getElementById('migImportBtn');
+  if(btn){btn.disabled=true;btn.style.opacity='.5';btn.style.cursor='not-allowed';btn.textContent='Import Records';}
+}
+function showMigErr(msg){showEl('migErr');document.getElementById('migErr').textContent=msg;}
+function clearMigErr(){hideEl('migErr');}
 </script>
+
+<!-- ══ MODAL: MIGRATION TOOL ══════════════════════════════════════════ -->
+<div class="mo hidden" id="migrationModal" onclick="if(event.target===this)closeMigrationTool()">
+  <div class="md" style="max-width:640px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="md-title">Migration Tool</div>
+      <button class="btn btn-ghost btn-xs" onclick="closeMigrationTool()">✕</button>
+    </div>
+    <div class="md-sub">Import existing equipment records and repair history into the system.</div>
+
+    <!-- Tabs -->
+    <div class="mig-tabs">
+      <button class="mig-tab on" id="migTabEq"    onclick="switchMigTab('equipment')">Equipment List</button>
+      <button class="mig-tab"    id="migTabRpt"   onclick="switchMigTab('repair')">Repair Log</button>
+    </div>
+
+    <!-- File upload -->
+    <div class="drop-zone" id="migDropZone"
+         ondragover="event.preventDefault();this.classList.add('over')"
+         ondragleave="this.classList.remove('over')"
+         ondrop="handleMigDrop(event)">
+      <input type="file" id="migFileInput" accept=".xlsx,.xls,.json"
+             onchange="handleMigFile(this.files[0])">
+      <div style="font-size:26px;margin-bottom:8px">📊</div>
+      <div style="font-size:13px;color:#94a3b8;margin-bottom:4px">Drop Excel file here or click to browse</div>
+      <div style="font-size:11px;color:#4a4a7a">.xlsx and .xls supported · JSON also accepted</div>
+    </div>
+
+    <div class="mig-or">or paste JSON</div>
+    <textarea id="migJsonPaste" class="fta" style="min-height:50px;font-family:'DM Mono',monospace;font-size:11px"
+      placeholder='[{"Name":"IOL Master","Brand":"Zeiss","Model":"700",...}]'></textarea>
+    <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="parseMigJSON()">Parse JSON →</button>
+
+    <!-- Column mapping (shown after parse) -->
+    <div id="migMappingSection" class="hidden">
+      <div class="sec-title-sm" style="margin-top:16px">Column Mapping</div>
+      <div id="migMappingRows"></div>
+      <div class="sec-title-sm" style="margin-top:14px">Preview <span id="migPreviewCount" style="color:#4a4a7a;font-weight:400"></span></div>
+      <div class="preview-wrap"><table class="preview-table" id="migPreviewTable"></table></div>
+    </div>
+
+    <!-- Progress -->
+    <div id="migProgressSection" class="hidden" style="margin-top:14px">
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:6px" id="migProgressMsg">Importing...</div>
+      <div class="mig-prog"><div class="mig-prog-fill" id="migProgFill"></div></div>
+    </div>
+
+    <!-- Result -->
+    <div id="migResult" class="hidden" style="margin-top:10px"></div>
+
+    <div id="migErr" class="hidden" style="font-size:12px;font-weight:600;color:#fca5a5;margin-top:8px"></div>
+
+    <div class="md-actions">
+      <button class="btn btn-ghost" onclick="closeMigrationTool()">Close</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetMigration()">Reset</button>
+      <button class="btn btn-primary" id="migImportBtn" onclick="runMigration()" disabled
+              style="opacity:.5;cursor:not-allowed">Import Records</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
