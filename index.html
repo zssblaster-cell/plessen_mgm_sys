@@ -424,17 +424,20 @@
         <span style="font-size:13px;font-weight:600;color:var(--navy)">System Enabled</span>
       </div>
       <div class="section-label">Firebase Configuration</div>
-      <div class="grid2">
-        <div class="field-group"><label class="field-label">API Key *</label><input type="text" id="sysApiKey" class="field-input field-input-sm" placeholder="AIzaSy..."></div>
-        <div class="field-group"><label class="field-label">Auth Domain *</label><input type="text" id="sysAuthDomain" class="field-input field-input-sm" placeholder="project.firebaseapp.com"></div>
-        <div class="field-group"><label class="field-label">Project ID *</label><input type="text" id="sysProjectId" class="field-input field-input-sm" placeholder="my-project"></div>
-        <div class="field-group"><label class="field-label">Storage Bucket</label><input type="text" id="sysStorageBucket" class="field-input field-input-sm" placeholder="project.firebasestorage.app"></div>
-        <div class="field-group"><label class="field-label">Messaging Sender ID</label><input type="text" id="sysMsgSenderId" class="field-input field-input-sm" placeholder="123456789"></div>
-        <div class="field-group"><label class="field-label">App ID *</label><input type="text" id="sysAppId" class="field-input field-input-sm" placeholder="1:123:web:abc"></div>
-      </div>
-      <div class="field-group">
-        <label class="field-label">Measurement ID <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional, Analytics)</span></label>
-        <input type="text" id="sysMeasurementId" class="field-input field-input-sm" placeholder="G-XXXXXXXXXX">
+      <div style="background:#0d0d1a;border:1px solid #2e2060;border-radius:9px;padding:14px 16px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a5b4fc" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span style="font-size:12px;font-weight:700;color:#a5b4fc">Firebase credentials are managed via Config Tool</span>
+        </div>
+        <div style="font-size:12px;color:#64748b;line-height:1.6">
+          API keys, project IDs, and app credentials are stored encrypted in <code style="background:#1e2035;padding:1px 5px;border-radius:4px;color:#a5b4fc">config.js</code>.
+          To add or update Firebase credentials for this system, open
+          <a href="/config-tool" style="color:#6366f1;font-weight:700">/config-tool</a>
+          and re-generate <code style="background:#1e2035;padding:1px 5px;border-radius:4px;color:#a5b4fc">config.js</code>.
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:#475569">
+          Current project ID: <span id="sysProjectIdDisplay" style="font-family:'DM Mono',monospace;color:#a5b4fc">—</span>
+        </div>
       </div>
       <div class="md-actions">
         <button class="btn btn-ghost" onclick="backToSystemsList()">← Back</button>
@@ -573,17 +576,27 @@ async function loadSystems() {
 
   if (snap.empty) {
     // First run — config-tool hasn't been run yet, show placeholder cards
-    loadedSystems = SEED_SYSTEMS.map(s => ({
-      ...s,
-      ...(credentials[s.key] || {})
-    }));
+    const CRED_FIELDS_FR = ['apiKey','authDomain','storageBucket','messagingSenderId','appId','measurementId'];
+    loadedSystems = SEED_SYSTEMS.map(s => {
+      const display = Object.fromEntries(Object.entries(s).filter(([k]) => !CRED_FIELDS_FR.includes(k)));
+      return { ...display, ...(credentials[s.key] || {}) };
+    });
     return true;
   }
 
-  // Merge: Firestore display settings + decrypted Firebase credentials
+  // Credential fields must ONLY come from decrypted config.js
+  // Strip them from Firestore data defensively — even if old seeding left them there
+  const CRED_FIELDS = ['apiKey','authDomain','storageBucket','messagingSenderId','appId','measurementId'];
+
   loadedSystems = snap.docs.map(d => {
-    const display = { id:d.id, ...d.data() };
-    const creds   = credentials[d.data().key] || {};
+    const raw     = d.data();
+    const display = { id:d.id };
+    // Copy only non-credential fields from Firestore
+    for (const [k,v] of Object.entries(raw)) {
+      if (!CRED_FIELDS.includes(k)) display[k] = v;
+    }
+    // Credentials come exclusively from decrypted config.js
+    const creds = credentials[raw.key] || {};
     return { ...display, ...creds };
   });
   return false;
@@ -1003,13 +1016,9 @@ function openSystemForm(sys) {
   document.getElementById("sysPath").value=sys?.path||"";
   document.getElementById("sysOrder").value=sys?.order||loadedSystems.length+1;
   document.getElementById("sysEnabled").checked=sys?.enabled!==false;
-  document.getElementById("sysApiKey").value=sys?.apiKey||"";
-  document.getElementById("sysAuthDomain").value=sys?.authDomain||"";
-  document.getElementById("sysProjectId").value=sys?.projectId||"";
-  document.getElementById("sysStorageBucket").value=sys?.storageBucket||"";
-  document.getElementById("sysMsgSenderId").value=sys?.messagingSenderId||"";
-  document.getElementById("sysAppId").value=sys?.appId||"";
-  document.getElementById("sysMeasurementId").value=sys?.measurementId||"";
+  // Show project ID from decrypted config (read-only — edit via config-tool)
+  const projDisplay = document.getElementById("sysProjectIdDisplay");
+  if (projDisplay) projDisplay.textContent = sys?.projectId || "Not yet configured — run config-tool";
   document.getElementById("sysColor").value=sys?.color||"#1d4ed8";
   document.getElementById("sysAccent").value=sys?.accent||"#dbeafe";
   document.getElementById("colorSwatches").innerHTML=buildColorSwatches(sys?.color||"#1d4ed8");
@@ -1043,27 +1052,22 @@ async function saveSystem() {
   const existingKey=document.getElementById("editSysKey").value;
   const key=(existingKey||document.getElementById("sysKey").value).trim().toLowerCase().replace(/\s+/g,"_");
   const label=document.getElementById("sysLabel").value.trim();
-  const apiKey=document.getElementById("sysApiKey").value.trim();
-  const projectId=document.getElementById("sysProjectId").value.trim();
-  const appId=document.getElementById("sysAppId").value.trim();
   hideEl("sysFormErr");
-  if (!key||!label||!apiKey||!projectId||!appId) {
-    showEl("sysFormErr"); document.getElementById("sysFormErr").textContent="Key, Label, API Key, Project ID, and App ID are required."; return;
+  if (!key||!label) {
+    showEl("sysFormErr"); document.getElementById("sysFormErr").textContent="Key and Label are required."; return;
   }
   const btn=document.getElementById("sysFormSaveBtn");
   btn.disabled=true; btn.textContent="Saving...";
   try {
+    // Only display settings saved to Firestore — NO Firebase credentials
+    // Credentials live exclusively in encrypted config.js (manage via /config-tool)
     const sysData={
       key, label, description:document.getElementById("sysDesc").value.trim(),
-      path:document.getElementById("sysPath").value.trim()||`../${key}/index.html`,
+      path:document.getElementById("sysPath").value.trim()||`/${key}`,
       order:parseInt(document.getElementById("sysOrder").value)||loadedSystems.length+1,
       enabled:document.getElementById("sysEnabled").checked,
       color:document.getElementById("sysColor").value||"#1d4ed8",
       accent:document.getElementById("sysAccent").value||"#dbeafe",
-      apiKey, authDomain:document.getElementById("sysAuthDomain").value.trim(),
-      projectId, storageBucket:document.getElementById("sysStorageBucket").value.trim(),
-      messagingSenderId:document.getElementById("sysMsgSenderId").value.trim(),
-      appId, measurementId:document.getElementById("sysMeasurementId").value.trim(),
       updatedAt:new Date().toISOString(),
       ...(existingKey?{}:{createdAt:new Date().toISOString()})
     };
