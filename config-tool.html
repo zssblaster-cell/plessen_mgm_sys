@@ -460,6 +460,23 @@ function selectColor(idx, color, accent) {
   updateSaveStatus();
 }
 
+// ── Sync DOM values into systems[] ───────────────────────────────────────────
+// Called before any renderSystems() or generateConfig() to capture typed values
+// that oninput may have missed (e.g. rapid clicks)
+function syncFromDOM() {
+  systems.forEach((sys, idx) => {
+    const card = document.getElementById("syscard_" + idx);
+    if (!card) return;
+    card.querySelectorAll("input.fi, textarea.fi").forEach(el => {
+      const oc    = el.getAttribute("oninput") || "";
+      const match = oc.match(/systems\[\d+\]\.(\w+)=this\.value/);
+      if (match) systems[idx][match[1]] = el.value.trim ? el.value.trim() : el.value;
+    });
+    const cb = card.querySelector("input[type=\"checkbox\"]");
+    if (cb) systems[idx].enabled = cb.checked;
+  });
+}
+
 // ── Dirty tracking + save status ──────────────────────────────────────────────
 function markDirty() {
   isDirty = true;
@@ -538,24 +555,7 @@ async function generateConfig() {
   hideEl("globalErr"); hideEl("globalOk"); hideEl("downloadArea");
 
   // Sync DOM → systems array before validating
-  // onchange only fires on blur — if user clicks Generate without tabbing out,
-  // the last-typed value would otherwise be missed
-  systems.forEach((sys, idx) => {
-    const card = document.getElementById(`syscard_${idx}`);
-    if (!card) return;
-    // Read every input/textarea in the card and match to known field names
-    card.querySelectorAll('input.fi, textarea.fi').forEach(el => {
-      const oc = el.getAttribute('oninput') || '';
-      const match = oc.match(/systems\[\d+\]\.(\w+)=this\.value/);
-      if (match) {
-        const field = match[1];
-        systems[idx][field] = el.value.trim ? el.value.trim() : el.value;
-      }
-    });
-    // Also sync checkboxes (enabled toggle)
-    const cb = card.querySelector('input[type="checkbox"]');
-    if (cb) systems[idx].enabled = cb.checked;
-  });
+  syncFromDOM();
 
   // Validate
   for (const sys of systems) {
