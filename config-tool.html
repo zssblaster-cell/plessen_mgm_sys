@@ -89,7 +89,11 @@
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost" onclick="addSystem()">+ Add System</button>
-          <button class="btn btn-primary" onclick="generateConfig()">⚡ Generate config.js</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div id="saveStatus" style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;background:#1e2035;color:#64748b">No changes</div>
+            <button class="btn btn-ghost" id="saveBtn" onclick="saveDisplaySettings()">💾 Save Settings</button>
+            <button class="btn btn-primary" onclick="generateConfig()">⚡ Generate config.js</button>
+          </div>
           <button class="btn btn-danger" onclick="doSignOut()">Sign Out</button>
         </div>
       </div>
@@ -194,9 +198,11 @@ const auth = getAuth(app);
 const db   = getFirestore(app);
 
 // ── State ──────────────────────────────────────────────────────────────────
-let currentUser  = null;
-let systems      = [];   // array of system config objects
-let generatedBlob = null; // the generated config.js content
+let currentUser   = null;
+let systems       = [];      // array of system config objects
+let generatedBlob = null;    // the generated config.js content
+let isDirty       = false;   // unsaved changes flag
+let lastSaved     = null;    // HH:MM of last save
 
 const COLORS = [
   { color:"#1d4ed8", accent:"#dbeafe" },
@@ -228,6 +234,8 @@ window.selectColor=selectColor;
 window.saveGithubConfig=saveGithubConfig;
 window.testGithubConnection=testGithubConnection;
 window.toggleTokenVisibility=toggleTokenVisibility;
+window.saveDisplaySettings=saveDisplaySettings;
+window.markDirty=markDirty;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
@@ -318,7 +326,7 @@ function renderSystemCard(sys, idx) {
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <label class="toggle-wrap">
-          <input type="checkbox" ${sys.enabled?"checked":""} onchange="systems[${idx}].enabled=this.checked">
+          <input type="checkbox" ${sys.enabled?"checked":""} onchange="systems[${idx}].enabled=this.checked;markDirty()">
           <span class="toggle-track"></span>
         </label>
         <button class="btn btn-danger btn-sm" onclick="removeSystem(${idx})" style="padding:4px 10px;font-size:11px">Remove</button>
@@ -329,24 +337,24 @@ function renderSystemCard(sys, idx) {
     <div class="grid2" style="margin-bottom:10px">
       <div>
         <label class="fl">System Key *</label>
-        <input class="fi" value="${sys.key||""}" placeholder="equipment" onchange="systems[${idx}].key=this.value.trim().toLowerCase().replace(/\\s+/g,'_')" ${idx<3?"style=\"opacity:.6\" title=\"Key cannot be changed for built-in systems\"":""}>
+        <input class="fi" value="${sys.key||""}" placeholder="equipment" oninput="systems[${idx}].key=this.value.trim().toLowerCase().replace(/\s+/g,'_');markDirty()" ${idx<3?"style=\"opacity:.6\" title=\"Key cannot be changed for built-in systems\"":""}>
       </div>
       <div>
         <label class="fl">Label *</label>
-        <input class="fi" value="${sys.label||""}" placeholder="Equipment Management" onchange="systems[${idx}].label=this.value">
+        <input class="fi" value="${sys.label||""}" placeholder="Equipment Management" oninput="systems[${idx}].label=this.value;markDirty()">
       </div>
       <div>
         <label class="fl">Path</label>
-        <input class="fi" value="${sys.path||""}" placeholder="/equipment" onchange="systems[${idx}].path=this.value">
+        <input class="fi" value="${sys.path||""}" placeholder="/equipment" oninput="systems[${idx}].path=this.value;markDirty()">
       </div>
       <div>
         <label class="fl">Order</label>
-        <input class="fi" type="number" value="${sys.order||idx+1}" min="1" onchange="systems[${idx}].order=parseInt(this.value)||${idx+1}">
+        <input class="fi" type="number" value="${sys.order||idx+1}" min="1" oninput="systems[${idx}].order=parseInt(this.value)||${idx+1};markDirty()">
       </div>
     </div>
     <div style="margin-bottom:10px">
       <label class="fl">Description</label>
-      <input class="fi" value="${sys.description||""}" placeholder="Brief description" onchange="systems[${idx}].description=this.value">
+      <input class="fi" value="${sys.description||""}" placeholder="Brief description" oninput="systems[${idx}].description=this.value;markDirty()">
     </div>
     <div style="margin-bottom:14px">
       <label class="fl">Color</label>
@@ -358,59 +366,143 @@ function renderSystemCard(sys, idx) {
     <div class="grid2">
       <div>
         <label class="fl">API Key *</label>
-        <input class="fi" value="${sys.apiKey||""}" placeholder="AIzaSy..." onchange="systems[${idx}].apiKey=this.value.trim()">
+        <input class="fi" value="${sys.apiKey||""}" placeholder="AIzaSy..." oninput="systems[${idx}].apiKey=this.value.trim();markDirty()">
       </div>
       <div>
         <label class="fl">Auth Domain *</label>
-        <input class="fi" value="${sys.authDomain||""}" placeholder="project.firebaseapp.com" onchange="systems[${idx}].authDomain=this.value.trim()">
+        <input class="fi" value="${sys.authDomain||""}" placeholder="project.firebaseapp.com" oninput="systems[${idx}].authDomain=this.value.trim();markDirty()">
       </div>
       <div>
         <label class="fl">Project ID *</label>
-        <input class="fi" value="${sys.projectId||""}" placeholder="my-project" onchange="systems[${idx}].projectId=this.value.trim()">
+        <input class="fi" value="${sys.projectId||""}" placeholder="my-project" oninput="systems[${idx}].projectId=this.value.trim();markDirty()">
       </div>
       <div>
         <label class="fl">Storage Bucket</label>
-        <input class="fi" value="${sys.storageBucket||""}" placeholder="project.firebasestorage.app" onchange="systems[${idx}].storageBucket=this.value.trim()">
+        <input class="fi" value="${sys.storageBucket||""}" placeholder="project.firebasestorage.app" oninput="systems[${idx}].storageBucket=this.value.trim();markDirty()">
       </div>
       <div>
         <label class="fl">Messaging Sender ID</label>
-        <input class="fi" value="${sys.messagingSenderId||""}" placeholder="123456789" onchange="systems[${idx}].messagingSenderId=this.value.trim()">
+        <input class="fi" value="${sys.messagingSenderId||""}" placeholder="123456789" oninput="systems[${idx}].messagingSenderId=this.value.trim();markDirty()">
       </div>
       <div>
         <label class="fl">App ID *</label>
-        <input class="fi" value="${sys.appId||""}" placeholder="1:123:web:abc" onchange="systems[${idx}].appId=this.value.trim()">
+        <input class="fi" value="${sys.appId||""}" placeholder="1:123:web:abc" oninput="systems[${idx}].appId=this.value.trim();markDirty()">
       </div>
     </div>
     <div>
       <label class="fl">Measurement ID (optional)</label>
-      <input class="fi" value="${sys.measurementId||""}" placeholder="G-XXXXXXXXXX" onchange="systems[${idx}].measurementId=this.value.trim()">
+      <input class="fi" value="${sys.measurementId||""}" placeholder="G-XXXXXXXXXX" oninput="systems[${idx}].measurementId=this.value.trim();markDirty()">
     </div>
   </div>`;
 }
 
 function addSystem() {
+  syncFromDOM();          // preserve existing cards' values before re-render
   systems.push({ key:"", label:"", description:"", path:"", color:"#1d4ed8", accent:"#dbeafe",
     order:systems.length+1, enabled:true, apiKey:"", authDomain:"", projectId:"",
     storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" });
+  isDirty = true;
   renderSystems();
+  updateSaveStatus();
   window.scrollTo({ top: document.body.scrollHeight, behavior:"smooth" });
 }
 
 function removeSystem(idx) {
   if (!confirm(`Remove "${systems[idx].label||systems[idx].key}"?`)) return;
+  syncFromDOM();          // preserve other cards' values before re-render
   systems.splice(idx, 1);
+  isDirty = true;
   renderSystems();
+  updateSaveStatus();
 }
 
 function selectColor(idx, color, accent) {
+  syncFromDOM();          // preserve all typed values before re-render
   systems[idx].color  = color;
   systems[idx].accent = accent;
+  isDirty = true;
   renderSystems();
+  updateSaveStatus();
+}
+
+// ── Dirty tracking + save status ──────────────────────────────────────────────
+function markDirty() {
+  isDirty = true;
+  updateSaveStatus();
+}
+
+function updateSaveStatus() {
+  const el = document.getElementById("saveStatus");
+  if (!el) return;
+  if (isDirty) {
+    el.style.background = "#78350f";
+    el.style.color      = "#fcd34d";
+    el.textContent      = "● Unsaved changes";
+  } else if (lastSaved) {
+    el.style.background = "#14532d22";
+    el.style.color      = "#86efac";
+    el.textContent      = "✓ Saved " + lastSaved;
+  } else {
+    el.style.background = "#1e2035";
+    el.style.color      = "#64748b";
+    el.textContent      = "No changes";
+  }
+}
+
+// Save display settings to Firestore (NOT credentials — those need Generate)
+async function saveDisplaySettings() {
+  syncFromDOM();
+  const btn = document.getElementById("saveBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving..."; }
+  try {
+    for (const sys of systems) {
+      if (!sys.key) continue;
+      await setDoc(doc(db, "systemConfigs", sys.key), {
+        key:         sys.key,
+        label:       sys.label       || "",
+        description: sys.description || "",
+        path:        sys.path        || "/" + sys.key,
+        color:       sys.color       || "#1d4ed8",
+        accent:      sys.accent      || "#dbeafe",
+        order:       sys.order       || 1,
+        enabled:     sys.enabled     !== false,
+        updatedAt:   new Date().toISOString()
+      }, { merge: true });
+    }
+    const now = new Date();
+    lastSaved = now.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+    isDirty   = false;
+    updateSaveStatus();
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Save Settings"; }
+  } catch(e) {
+    showGlobalErr("Save failed: " + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Save Settings"; }
+  }
 }
 
 // ── Generate encrypted config.js ──────────────────────────────────────────────
 async function generateConfig() {
   hideEl("globalErr"); hideEl("globalOk"); hideEl("downloadArea");
+
+  // Sync DOM → systems array before validating
+  // onchange only fires on blur — if user clicks Generate without tabbing out,
+  // the last-typed value would otherwise be missed
+  systems.forEach((sys, idx) => {
+    const card = document.getElementById(`syscard_${idx}`);
+    if (!card) return;
+    // Read every input/textarea in the card and match to known field names
+    card.querySelectorAll('input.fi, textarea.fi').forEach(el => {
+      const oc = el.getAttribute('oninput') || '';
+      const match = oc.match(/systems\[\d+\]\.(\w+)=this\.value/);
+      if (match) {
+        const field = match[1];
+        systems[idx][field] = el.value.trim ? el.value.trim() : el.value;
+      }
+    });
+    // Also sync checkboxes (enabled toggle)
+    const cb = card.querySelector('input[type="checkbox"]');
+    if (cb) systems[idx].enabled = cb.checked;
+  });
 
   // Validate
   for (const sys of systems) {
