@@ -266,43 +266,78 @@ async function doSignOut() { await signOut(auth); }
 // ── Load existing config (to pre-populate fields) ─────────────────────────────
 async function loadExistingConfig() {
   const statusEl = document.getElementById("configStatus");
+  statusEl.innerHTML = '<span class="status-dot" style="background:#6366f1;animation:pulse 1s infinite"></span>Loading...';
+
+  // ── Step 1: Load display settings from Firestore systemConfigs ────────────
+  // This is what "Save Settings" writes to. Always checked first.
+  let displaySystems = [];
+  try {
+    const snap = await getDocs(collection(db, "systemConfigs"));
+    if (!snap.empty) {
+      displaySystems = snap.docs
+        .map(d => ({ key: d.id, ...d.data() }))
+        .sort((a, b) => (a.order||99) - (b.order||99));
+    }
+  } catch(e) {
+    console.warn("Could not read systemConfigs:", e.message);
+  }
+
+  // ── Step 2: Load Firebase credentials from encrypted config.js ────────────
+  // This is what "Generate config.js" writes. Merged on top of display settings.
+  let credentials = {};
+  let credSource  = "none";
   try {
     const [cryptoSnap, keySnap] = await Promise.all([
       getDoc(doc(db, "system", "crypto")),
       getDoc(doc(db, "system", "keyFragment"))
     ]);
-
-    if (!cryptoSnap.exists() || !keySnap.exists()) {
-      statusEl.innerHTML = '<span class="status-dot" style="background:#eab308"></span>First-time setup — defaults loaded below';
-      systems = JSON.parse(JSON.stringify(DEFAULT_SYSTEMS));
-      renderSystems();
-      return;
+    if (cryptoSnap.exists() && keySnap.exists()) {
+      const res = await fetch("/config.js?v=" + Date.now());
+      if (res.ok) {
+        const blob = await res.text();
+        if (!blob.includes("PLACEHOLDER")) {
+          const decryptFn = (new Function("return (" + cryptoSnap.data().script + ")"))();
+          credentials = await decryptFn(blob, keySnap.data()) || {};
+          credSource  = "config.js";
+        } else {
+          credSource = "placeholder";
+        }
+      }
     }
-
-    // Try to decrypt existing config.js
-    const res = await fetch("/config.js?v=" + Date.now());
-    if (!res.ok || (await res.clone().text()).includes("PLACEHOLDER")) {
-      statusEl.innerHTML = '<span class="status-dot" style="background:#eab308"></span>Key exists in Firestore but config.js not yet generated — defaults loaded';
-      systems = JSON.parse(JSON.stringify(DEFAULT_SYSTEMS));
-      renderSystems();
-      return;
-    }
-
-    const blob = await res.text();
-    const script  = cryptoSnap.data().script;
-    const keyData = keySnap.data();
-    const decryptFn = (new Function("return (" + script + ")"))();
-    const configs = await decryptFn(blob, keyData);
-
-    systems = Object.entries(configs).map(([key, val]) => ({ key, ...val }));
-    systems.sort((a,b) => (a.order||99)-(b.order||99));
-    statusEl.innerHTML = '<span class="status-dot" style="background:#22c55e"></span>Loaded from existing config.js — ' + systems.length + ' systems';
-    renderSystems();
   } catch(e) {
-    statusEl.innerHTML = '<span class="status-dot" style="background:#ef4444"></span>Could not load existing config — defaults loaded (' + e.message + ')';
-    systems = JSON.parse(JSON.stringify(DEFAULT_SYSTEMS));
-    renderSystems();
+    console.warn("Could not decrypt config.js (ok if first run):", e.message);
   }
+
+  // ── Step 3: Merge and render ───────────────────────────────────────────────
+  if (displaySystems.length > 0) {
+    // Merge Firestore display settings + decrypted credentials
+    systems = displaySystems.map(sys => ({
+      ...sys,
+      ...(credentials[sys.key] || {})
+    }));
+    const credMsg = credSource === "config.js"
+      ? " + credentials from config.js"
+      : credSource === "placeholder"
+        ? " — run Generate to add credentials"
+        : " — credentials not yet generated";
+    statusEl.innerHTML = '<span class="status-dot" style="background:#22c55e"></span>'
+      + systems.length + ' systems loaded from Firestore' + credMsg;
+  } else if (Object.keys(credentials).length > 0) {
+    // Have credentials but display settings never saved — load from config.js
+    systems = Object.entries(credentials).map(([key, val]) => ({ key, ...val }));
+    systems.sort((a,b) => (a.order||99)-(b.order||99));
+    statusEl.innerHTML = '<span class="status-dot" style="background:#eab308"></span>'
+      + 'Loaded from config.js — click Save Settings to persist display settings to Firestore';
+  } else {
+    // Nothing saved yet — start with default structure, empty credential fields
+    systems = JSON.parse(JSON.stringify(DEFAULT_SYSTEMS));
+    statusEl.innerHTML = '<span class="status-dot" style="background:#64748b"></span>'
+      + 'First-time setup — fill in Firebase credentials below then Generate';
+  }
+
+  renderSystems();
+  isDirty = false;
+  updateSaveStatus();
 }
 
 // ── Render systems ─────────────────────────────────────────────────────────────
@@ -454,9 +489,22 @@ async function saveDisplaySettings() {
   syncFromDOM();
   const btn = document.getElementById("saveBtn");
   if (btn) { btn.disabled = true; btn.textContent = "Saving..."; }
+  hideEl("globalErr"); hideEl("globalOk");
+
+  // Validate — need at least a key for each system
+  const incomplete = systems.filter(s => !s.key);
+  if (incomplete.length > 0) {
+    showGlobalErr("One or more systems is missing a Key — fill in the Key field before saving.");
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Save Settings"; }
+    return;
+  }
+
   try {
+    // Save each system's display settings to Firestore systemConfigs
+    // NOTE: Firebase credentials (apiKey etc.) are NOT saved here — those
+    // are encrypted into config.js by Generate. Only display fields saved.
     for (const sys of systems) {
-      if (!sys.key) continue;
+      console.log("Saving system:", sys.key, sys.label);
       await setDoc(doc(db, "systemConfigs", sys.key), {
         key:         sys.key,
         label:       sys.label       || "",
@@ -464,18 +512,23 @@ async function saveDisplaySettings() {
         path:        sys.path        || "/" + sys.key,
         color:       sys.color       || "#1d4ed8",
         accent:      sys.accent      || "#dbeafe",
-        order:       sys.order       || 1,
+        order:       Number(sys.order) || 1,
         enabled:     sys.enabled     !== false,
         updatedAt:   new Date().toISOString()
       }, { merge: true });
+      console.log("Saved:", sys.key);
     }
     const now = new Date();
     lastSaved = now.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
     isDirty   = false;
     updateSaveStatus();
+    showGlobalOk("✓ Settings saved to Firestore at " + lastSaved + " — " + systems.length + " systems");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     if (btn) { btn.disabled = false; btn.textContent = "💾 Save Settings"; }
   } catch(e) {
-    showGlobalErr("Save failed: " + e.message);
+    console.error("saveDisplaySettings failed:", e);
+    showGlobalErr("Save failed: " + e.message
+      + (e.code === "permission-denied" ? " — check Firestore rules for systemConfigs collection." : ""));
     if (btn) { btn.disabled = false; btn.textContent = "💾 Save Settings"; }
   }
 }
