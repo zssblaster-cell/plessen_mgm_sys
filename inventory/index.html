@@ -8,7 +8,25 @@
 <!-- Firebase compat SDKs - official CDN -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js">
+function showPortalBlocked() {
+  const loading=document.getElementById('poLoading');
+  const blocked=document.getElementById('poBlocked');
+  const countdown=document.getElementById('poCountdown');
+  if(loading)loading.style.display='none';
+  if(blocked)blocked.style.display='block';
+  let secs=5;
+  const iv=setInterval(()=>{
+    secs--;
+    if(countdown)countdown.textContent='Redirecting in '+secs+' second'+(secs!==1?'s':'')+'...';
+    if(secs<=0){clearInterval(iv);window.location.href='/';}
+  },1000);
+}
+function removePortalOverlay() {
+  const o=document.getElementById('portalOverlay');
+  if(!o)return; o.style.opacity='0'; setTimeout(()=>o.remove(),320);
+}
+</script>
 <!-- Config loader: decrypts Firebase credentials from config.js at runtime -->
 <script type="module">
   import { portalAuth, loadConfig } from '/crypto.js';
@@ -16,7 +34,7 @@
   // Wait for portal auth session, then decrypt config and init inventory Firebase
   const unsub = onAuthStateChanged(portalAuth, async (portalUser) => {
     unsub();
-    if (!portalUser) { window._inventoryConfigReady = false; return; }
+    if (!portalUser) { showPortalBlocked(); window._inventoryConfigReady = false; return; }
     try {
       const configs = await loadConfig();
       const cfg = configs?.inventory;
@@ -30,7 +48,7 @@
       // Trigger inventory init now that config is available
       if (typeof window._startInventory === 'function') window._startInventory();
     } catch(e) {
-      console.error("Inventory config load failed:", e.message);
+      //("Inventory config load failed:", e.message);
       window._inventoryConfigReady = false;
     }
   });
@@ -54,11 +72,11 @@ if(typeof firebase==='undefined'){
 // _startInventory is called once window._inventoryFirebaseCfg is populated
 window._startInventory = function() {
   var cfg = window._inventoryFirebaseCfg;
-  if (!cfg) { console.error("No inventory config"); return; }
+  if (!cfg) { return; }
   if (!firebase.apps.length) firebase.initializeApp(cfg);
-  // Null the config reference immediately after init
   window._inventoryFirebaseCfg = null;
-  initInventoryApp(); // call the existing init function
+  removePortalOverlay();
+  initInventoryApp();
 };
 // If config is already ready (unlikely but safe), start immediately
 if (window._inventoryConfigReady && window._inventoryFirebaseCfg) {
@@ -222,7 +240,6 @@ function fbLoad(){
       }
     });
   }).catch(function(e){
-    console.error('fbLoad error - details:', e.code, e.message, e);
     setSS('error');
     // Show a banner prompting the user to fix Firestore rules
     var banner=document.getElementById('connectionBanner');
@@ -919,9 +936,38 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
 .kb-tip-label{color:rgba(255,255,255,.7)}
 .kb-tip-key{font-family:monospace;font-size:11px;background:rgba(255,255,255,.15);
   border-radius:4px;padding:1px 6px;color:#fff;font-weight:600}
-</style>
+
+    /* ── Portal access overlay ──────────────────────────────── */
+    #portalOverlay{position:fixed;inset:0;background:#0f172a;z-index:9999;
+      display:flex;align-items:center;justify-content:center;transition:opacity .3s}
+    .po-spinner{width:36px;height:36px;border:3px solid #1e293b;border-top-color:#1d4ed8;
+      border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
+    #poLoading{text-align:center;color:#475569;font-size:13px}
+    #poBlocked{text-align:center;max-width:400px;padding:38px;background:#fff;
+      border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+    .po-lock{font-size:40px;margin-bottom:14px}
+    .po-title{font-size:18px;font-weight:800;color:#0f172a;margin-bottom:8px}
+    .po-sub{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:18px}
+    .po-countdown{font-size:11px;color:#94a3b8;margin-bottom:20px}
+    .po-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;
+      background:#1d4ed8;color:#fff;border-radius:9px;text-decoration:none;
+      font-weight:700;font-size:13px}
+    .po-btn:hover{background:#1e40af}
+  </style>
 </head>
 <body>
+<!-- PORTAL ACCESS OVERLAY -->
+<div id="portalOverlay">
+  <div id="poLoading"><div class="po-spinner"></div><div>Verifying portal session...</div></div>
+  <div id="poBlocked" style="display:none">
+    <div class="po-lock">🔒</div>
+    <div class="po-title">Portal Sign-In Required</div>
+    <div class="po-sub">This system requires you to sign in through the Plessen Management Portal first.</div>
+    <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
+    <a href="/" class="po-btn">← Return to Portal</a>
+  </div>
+</div>
+
 
 <!-- LOGIN SCREEN -->
 <div id="loginScreen" style="position:fixed;inset:0;background:#0d2d5e;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
@@ -947,7 +993,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
       style="width:100%;padding:11px;background:#1a5fb4;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">
       Sign In
     </button>
-    <a href="../portal/index.html" style="display:block;text-align:center;margin-top:16px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
+    <a href="/" style="display:block;text-align:center;margin-top:16px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
   </div>
 </div>
 
@@ -967,7 +1013,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
     <button class="btn btn-w" id="settingsBtn" onclick="openSettings()" style="display:none" title="Settings">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
-    <a href="../portal/index.html" class="btn btn-w" style="display:flex;align-items:center;gap:5px;text-decoration:none;font-size:12px;font-weight:600">← Portal</a>
+    <a href="/" class="btn btn-w" style="display:flex;align-items:center;gap:5px;text-decoration:none;font-size:12px;font-weight:600">← Portal</a>
     <button class="btn btn-w" id="logoutBtn" onclick="window.doLogout()" style="display:none">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Logout
     </button>
@@ -3099,7 +3145,6 @@ function exportCSV(){
 let settingsTechIdx=null;
 function openSettings(){
   if(currentRole!=='admin'){
-    console.log('[Settings] currentRole=',currentRole,'— blocked');
     showToast('Admin access required','error');return;
   }
   renderTechList();
