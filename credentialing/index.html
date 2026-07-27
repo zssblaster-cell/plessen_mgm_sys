@@ -22,19 +22,26 @@ async function initCredentialingFirebase() {
   return new Promise((resolve) => {
     const unsub = portalAuthState(portalAuth, async (portalUser) => {
       unsub();
-      if (!portalUser) { resolve(false); return; }
+      if (!portalUser) {
+        showPortalBlocked();
+        resolve(false);
+        return;
+      }
       try {
         let cfg = null;
         const configs = await loadConfig();
         cfg = configs?.credentialing;
-        if (!cfg) throw new Error("Credentialing config not found");
+        if (!cfg) throw new Error("Credentialing config not initialised — run /config-tool first.");
         const crdApp = initSystemApp(cfg, "plessen-credentials");
         cfg = null; // null immediately
         auth = getAuth(crdApp);
         db   = getFirestore(crdApp);
         resolve(true);
       } catch(e) {
-        console.error("Credentialing config load failed:", e.message);
+        // Show error on auth screen instead of crashing
+        document.getElementById('auth-screen')?.classList.remove('hidden');
+        const errEl = document.getElementById('a-error');
+        if (errEl) { errEl.textContent = e.message; errEl.style.display='block'; }
         resolve(false);
       }
     });
@@ -163,7 +170,6 @@ async function loadFileEncKey(){
     encKeyReady=true;
     updateKeyStatus(true);
   }catch(e){
-    console.error('Key load error:',e);
     encKeyReady=false;
     updateKeyStatus(false);
   }
@@ -314,7 +320,6 @@ async function doUpload(personId,docId,docType,file){
     renderAll();
   }catch(e){
     hideUploadProgress();
-    console.error('Upload error:',e);
     toast('Upload failed: '+e.message,'error');
   }
 }
@@ -384,7 +389,6 @@ window.viewFile=async(fileId)=>{
     setTimeout(()=>hideUploadProgress(),600);
   }catch(e){
     hideUploadProgress();
-    console.error('View error:',e);
     toast('Failed to open file: '+e.message,'error');
   }
 };
@@ -430,11 +434,13 @@ function resetAttempts(){loginAttempts=0;lockUntil=0;}
 // Boot: init Firebase from config, then start auth
 (async()=>{
   const ready = await initCredentialingFirebase();
-  if (!ready) { document.getElementById('auth-screen')?.classList.remove('hidden'); return; }
+  // If not ready, initCredentialingFirebase() already handled redirect or error
+  if (!ready) return;
   startCredApp();
 })();
 
 function startCredApp() {
+  removePortalOverlay();
   onAuthStateChanged(auth,async user=>{
   currentUser=user;
   if(user){
@@ -462,6 +468,24 @@ function startCredApp() {
   }
   }); // end onAuthStateChanged
 } // end startCredApp
+
+function showPortalBlocked() {
+  const loading=document.getElementById('poLoading');
+  const blocked=document.getElementById('poBlocked');
+  const countdown=document.getElementById('poCountdown');
+  if(loading)loading.style.display='none';
+  if(blocked)blocked.style.display='block';
+  let secs=5;
+  const iv=setInterval(()=>{
+    secs--;
+    if(countdown)countdown.textContent='Redirecting in '+secs+' second'+(secs!==1?'s':'')+'...';
+    if(secs<=0){clearInterval(iv);window.location.href='/';}
+  },1000);
+}
+function removePortalOverlay() {
+  const o=document.getElementById('portalOverlay');
+  if(!o)return; o.style.opacity='0'; setTimeout(()=>o.remove(),320);
+}
 window.doSignIn=async()=>{
   clrAE();if(!checkRateLimit())return;
   const e=$('a-email').value.trim(),p=$('a-pass').value;
@@ -975,7 +999,36 @@ function exportPDF(inclCreds,inclMaint,statusFilter,selectedIds){
       <tbody>${maint.map(i=>{const days=maintDaysUntil(i),next=nextDueDate(i),st=maintStatus(i);const stLbl={expired:'Overdue',danger:'Due soon',warn:'Upcoming',ok:'On schedule',none:'Not scheduled'};return`<tr><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9"><strong>${esc(i.name)}</strong>${i.location?`<br><span style="color:#94a3b8;font-size:11px">${esc(i.location)}</span>`:''}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${esc(i.category||'')}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${intLabel(i.intervalDays)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${fmtDate(i.lastDone)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9">${fmtDate(next)}</td><td style="padding:7px 10px;border-bottom:1px solid #f1f5f9"><span style="background:${stBg[st]||'#f1f5f9'};color:${stColor[st]||'#64748b'};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">${stLbl[st]}</span></td></tr>`;}).join('')}</tbody>
     </table>`;
   }
-  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:32px;color:#0f172a}@media print{body{padding:16px}}</style></head><body>
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:32px;color:#0f172a}@media print{body{padding:16px}}
+    /* ── Portal access overlay ──────────────────────────────── */
+    #portalOverlay{position:fixed;inset:0;background:#0f172a;z-index:9999;
+      display:flex;align-items:center;justify-content:center;transition:opacity .3s}
+    .po-spinner{width:36px;height:36px;border:3px solid #1e293b;border-top-color:#1d4ed8;
+      border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
+    #poLoading{text-align:center;color:#475569;font-size:13px}
+    #poBlocked{text-align:center;max-width:400px;padding:38px;background:#fff;
+      border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+    .po-lock{font-size:40px;margin-bottom:14px}
+    .po-title{font-size:18px;font-weight:800;color:#0f172a;margin-bottom:8px}
+    .po-sub{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:18px}
+    .po-countdown{font-size:11px;color:#94a3b8;margin-bottom:20px}
+    .po-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;
+      background:#1d4ed8;color:#fff;border-radius:9px;text-decoration:none;
+      font-weight:700;font-size:13px}
+    .po-btn:hover{background:#1e40af}
+  </style></head><body>
+<!-- PORTAL ACCESS OVERLAY -->
+<div id="portalOverlay">
+  <div id="poLoading"><div class="po-spinner"></div><div>Verifying portal session...</div></div>
+  <div id="poBlocked" style="display:none">
+    <div class="po-lock">🔒</div>
+    <div class="po-title">Portal Sign-In Required</div>
+    <div class="po-sub">This system requires you to sign in through the Plessen Management Portal first.</div>
+    <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
+    <a href="/" class="po-btn">← Return to Portal</a>
+  </div>
+</div>
+
   <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1e3a8a;padding-bottom:16px;margin-bottom:24px">
     <div><div style="font-size:10px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.1em">Plessen Ophthalmology</div><div style="font-size:22px;font-weight:700;color:#1e3a8a">Credential &amp; Maintenance Report</div></div>
     <div style="text-align:right;font-size:12px;color:#64748b">Generated: ${today}</div>
@@ -1270,7 +1323,7 @@ input:focus,select:focus{border-color:var(--bm)}
     <div id="auth-error"></div>
     <button class="abtn" onclick="doSignIn()">Sign in</button>
     <button class="alink" onclick="doReset()">Forgot password?</button>
-    <a href="../portal/index.html" style="display:block;text-align:center;margin-top:12px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
+    <a href="/" style="display:block;text-align:center;margin-top:12px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
     <div class="auth-note">🔒 Access restricted to authorized Plessen Ophthalmology staff only.</div>
   </div>
 </div>
@@ -1287,7 +1340,7 @@ input:focus,select:focus{border-color:var(--bm)}
       <button class="hbtn" onclick="openExportModal()">⬇ Export</button>
       <button class="hbtn" onclick="openReminderModal()">📧 Reminder</button>
       <button class="hbtn hbtn-p" id="header-add-btn" onclick="openAddModal()">+ Add record</button>
-      <a href="../portal/index.html" class="hbtn" style="text-decoration:none">← Portal</a>
+      <a href="/" class="hbtn" style="text-decoration:none">← Portal</a>
       <button class="hbtn" onclick="doSignOut()" title="Sign out" style="padding:8px 11px">↩</button>
     </div>
   </header>
