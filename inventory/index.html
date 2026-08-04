@@ -6,29 +6,25 @@
 <title>Plessen Ophthalmology — Clinical Inventory</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <!-- Firebase compat SDKs - official CDN -->
-<!-- Initialize shared arrays before Firebase runs -->
-<script>
-window.inventory = window.inventory || [];
-window.changeLog = window.changeLog || [];
-window.transactions = window.transactions || [];
-</script>
+<!-- Portal overlay: shown immediately, removed only when authenticated -->
+<div id="portalOverlay">
+  <div id="poLoading"><div class="po-spinner"></div><div>Verifying portal session...</div></div>
+  <div id="poBlocked" style="display:none">
+    <div class="po-lock">🔒</div>
+    <div class="po-title">Portal Sign-In Required</div>
+    <div class="po-sub">This system requires you to sign in through the Plessen Management Portal first.</div>
+    <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
+    <a href="/" class="po-btn">← Return to Portal</a>
+  </div>
+</div>
+
+<!-- Module script: ONLY handles portal auth check + config decrypt.
+     Main inventory script stays as a regular (non-module) script so all
+     inventory functions remain global and accessible from HTML event handlers. -->
 <script type="module">
-// ─── Firebase modular SDK v10.7.1 (matches crypto.js) ──────────────────────
-import { initializeApp, getApps }
-  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-         setPersistence, browserLocalPersistence }
-  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot }
-  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { portalAuth, loadConfig } from '/crypto.js';
+import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
-(function(){
-// ─── Firebase initialized async via crypto.js → no credentials in this file ─
-var db   = null;
-var auth = null;
-
-// ─── Portal overlay helpers ────────────────────────────────────────────────
 function showPortalBlocked() {
   var loading=document.getElementById('poLoading');
   var blocked=document.getElementById('poBlocked');
@@ -42,49 +38,70 @@ function showPortalBlocked() {
     if(secs<=0){clearInterval(iv);window.location.href='/';}
   },1000);
 }
-function removePortalOverlay() {
+
+function removePortalOverlay(){
   var o=document.getElementById('portalOverlay');
   if(!o)return; o.style.opacity='0'; setTimeout(function(){o.remove();},320);
 }
 
-// ─── Portal auth check + config decrypt (same pattern as equipment) ────────
-function initInventoryFirebase() {
-  return new Promise(function(resolve) {
-    var unsub = onAuthStateChanged(portalAuth, async function(portalUser) {
-      unsub();
-      if (!portalUser) { showPortalBlocked(); resolve(false); return; }
-      try {
-        var configs = await loadConfig();
-        var cfg = configs && configs.inventory;
-        if (!cfg) throw new Error('Inventory config not initialised — run /config-tool first.');
-        var APP = 'plessen-inventory';
-        var existing = getApps().find(function(a){return a.name===APP;});
-        var invApp = existing || initializeApp({
-          apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
-          storageBucket: cfg.storageBucket||'', messagingSenderId: cfg.messagingSenderId||'',
-          appId: cfg.appId
-        }, APP);
-        cfg = null; // null immediately — credentials no longer needed
-        auth = getAuth(invApp);
-        db   = getFirestore(invApp);
-        await setPersistence(auth, browserLocalPersistence);
-        resolve(true);
-      } catch(e) {
-        var el=document.getElementById('loginScreen');if(el)el.style.display='flex';
-        var err=document.getElementById('loginErr');if(err)err.textContent=e.message;
-        resolve(false);
-      }
-    });
-  });
-}
+// Check portal session, decrypt config, pass Firebase config to main script
+var unsub = onAuthStateChanged(portalAuth, async function(portalUser) {
+  unsub();
+  if (!portalUser) { showPortalBlocked(); return; }
+  try {
+    var configs = await loadConfig();
+    var cfg = configs && configs.inventory;
+    if (!cfg) throw new Error('Inventory config not initialised — run /config-tool first.');
+    // Pass decrypted config to the compat-SDK main script via window
+    window._inventoryFirebaseCfg = {
+      apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
+      storageBucket: cfg.storageBucket||'', messagingSenderId: cfg.messagingSenderId||'',
+      appId: cfg.appId
+    };
+    cfg = null; // null immediately
+    removePortalOverlay();
+    // Call _startInventory which is defined in the main (non-module) script below
+    if (typeof window._startInventory === 'function') window._startInventory();
+  } catch(e) {
+    removePortalOverlay();
+    var ls=document.getElementById('loginScreen');if(ls)ls.style.display='flex';
+    var err=document.getElementById('loginErr');if(err)err.textContent=e.message;
+  }
+});
+</script>
 
-// ─── Boot: verify portal session → decrypt config → init Firebase ──────────
-(async function() {
-  var ready = await initInventoryFirebase();
-  if (!ready) return;
-  removePortalOverlay();
-  startAuth(); // register Firebase auth listener now that auth + db are ready
-})();
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<!-- Initialize shared arrays before Firebase runs -->
+<script>
+window.inventory = window.inventory || [];
+window.changeLog = window.changeLog || [];
+window.transactions = window.transactions || [];
+</script>
+<script>
+(function(){
+if(typeof firebase==='undefined'){
+  document.addEventListener('DOMContentLoaded',function(){
+    var ls=document.getElementById('loginScreen');
+    if(ls)ls.innerHTML='<div style="color:#fff;text-align:center;padding:40px;max-width:400px"><h2>Connection Required</h2><p style="margin-top:12px;opacity:.8">This app must be opened from a web server (Vercel) not a local file. Please deploy to Vercel and open the Vercel URL.</p></div>';
+  });return;
+}
+// Firebase config comes from encrypted config.js via the module script above.
+// _startInventory() is called by the module script once config is decrypted.
+var db   = null;
+var auth = null;
+
+window._startInventory = function() {
+  var cfg = window._inventoryFirebaseCfg;
+  if (!cfg) return;
+  if (!firebase.apps.length) firebase.initializeApp(cfg);
+  window._inventoryFirebaseCfg = null; // null immediately after use
+  db   = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
+  startAuth(); // register auth listener now that auth + db are ready
+};
 
 function setSS(s){
   var el=document.getElementById('syncStatus'),dot=document.getElementById('syncDot');if(!el)return;
@@ -103,21 +120,21 @@ window.fbSave=function(){
   }
   setSS('saving');
   Promise.all([
-    setDoc(doc(db,'plessen','inventory'),{data:JSON.stringify(window.inventory),ts:new Date().toISOString()}),
-    setDoc(doc(db,'plessen','changelog'),{data:JSON.stringify(window.changeLog),ts:new Date().toISOString()}),
-    setDoc(doc(db,'plessen','transactions'),{data:JSON.stringify(window.transactions),ts:new Date().toISOString()})
+    db.doc('plessen/inventory').set({data:JSON.stringify(window.inventory),ts:new Date().toISOString()}),
+    db.doc('plessen/changelog').set({data:JSON.stringify(window.changeLog),ts:new Date().toISOString()}),
+    db.doc('plessen/transactions').set({data:JSON.stringify(window.transactions),ts:new Date().toISOString()})
   ]).then(function(){setSS('synced');}).catch(function(e){console.error('fbSave error:',e.code,e.message);setSS('error');});
 };
 window.fbSaveDebounced=function(){setSS('saving');clearTimeout(_sq);_sq=setTimeout(window.fbSave,900);};
 window.fbSaveConfig=function(cfg){
   if(!db)return;
-  setDoc(doc(db,'plessen','config'),cfg).catch(function(e){console.error('config save:',e);});
+  db.doc('plessen/config').set(cfg).catch(function(e){console.error('config save:',e);});
 };
 
 // Immediately write just the changelog document (called from logChange)
 window.fbSaveChangelog=function(){
   if(!window._fbReady||!db)return;
-  setDoc(doc(db,'plessen','changelog'),{
+  db.doc('plessen/changelog').set({
     data:JSON.stringify(window.changeLog),
     ts:new Date().toISOString()
   }).catch(function(e){console.error('changelog write error:',e);});
@@ -137,7 +154,7 @@ function mutArr(arr,data){if(!arr||!data)return;arr.length=0;data.forEach(functi
 
 function fbLoad(){
   setSS('loading');
-  Promise.all([getDoc(doc(db,'plessen','inventory')),getDoc(doc(db,'plessen','changelog')),getDoc(doc(db,'plessen','transactions'))])
+  Promise.all([db.doc('plessen/inventory').get(),db.doc('plessen/changelog').get(),db.doc('plessen/transactions').get()])
   .then(function(res){
     var iv=res[0],cl=res[1],tx=res[2];
     if(iv.exists){
@@ -160,7 +177,7 @@ function fbLoad(){
     setSS('synced');
     window._fbReady=true;
     // Load config then route by email
-    getDoc(doc(db,'plessen','config')).then(function(cfgSnap){
+    db.doc('plessen/config').get().then(function(cfgSnap){
       var cfg={adminPinHash:'',techs:[]};
       if(cfgSnap.exists&&cfgSnap.data()){
         cfg.adminPinHash=cfgSnap.data().adminPinHash||'';
@@ -187,8 +204,8 @@ function fbLoad(){
       else if(em==='examuser@plesseneye.com'){if(window.activateRole)window.activateRole('tech',null);}
     });
     // Listeners
-    onSnapshot(doc(db,'plessen','inventory'),function(snap){
-      if(!snap.exists()||_ru)return;
+    db.doc('plessen/inventory').onSnapshot(function(snap){
+      if(!snap.exists||_ru)return;
       var d=JSON.parse(snap.data().data).map(migrateItem);
       if(JSON.stringify(d)===JSON.stringify(window.inventory))return;
       _ru=true;mutArr(window.inventory,d);
@@ -199,8 +216,8 @@ function fbLoad(){
       if(t){t.textContent='Updated from another device';t.className='toast show';setTimeout(function(){t.classList.remove('show');},3000);}
       setTimeout(function(){_ru=false;},600);
     });
-    onSnapshot(doc(db,'plessen','changelog'),function(snap){
-      if(!snap.exists())return;
+    db.doc('plessen/changelog').onSnapshot(function(snap){
+      if(!snap.exists)return;
       var d=JSON.parse(snap.data().data);
       mutArr(window.changeLog,d);
       if(window.updateBadges)window.updateBadges();
@@ -210,8 +227,8 @@ function fbLoad(){
         window.renderChangelog();
       }
     });
-    onSnapshot(doc(db,'plessen','transactions'),function(snap){
-      if(!snap.exists())return;
+    db.doc('plessen/transactions').onSnapshot(function(snap){
+      if(!snap.exists)return;
       var d=JSON.parse(snap.data().data);
       if(JSON.stringify(d)!==JSON.stringify(window.transactions)){
         mutArr(window.transactions,d);
@@ -254,7 +271,7 @@ function fbLoad(){
 }
 
 function startAuth() {
-  onAuthStateChanged(auth, function(user){
+  auth.onAuthStateChanged(function(user){
     var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
     if(user){
       if(ls)ls.style.display='none';
@@ -262,6 +279,17 @@ function startAuth() {
       if(lb)lb.style.display='flex';
       var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
       window._authEmail=user.email;
+      // Activate role immediately on login — do not wait for fbLoad
+      // fbLoad will refine role with actual config/PIN data when it completes
+      db.collection('allowedUsers').doc(user.email).get().then(function(snap){
+        var role='tech';
+        if(snap.exists&&snap.data()&&snap.data().role==='admin')role='admin';
+        else if(!snap.exists&&user.email==='anthony.jolly@plesseneye.com')role='admin';
+        if(window.activateRole)window.activateRole(role,null);
+      }).catch(function(){
+        // Fallback: email-based routing if allowedUsers read fails
+        if(user.email==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
+      });
       setTimeout(fbLoad,200);
     } else {
       if(ls)ls.style.display='flex';
@@ -275,18 +303,18 @@ function startAuth() {
 }
 
 window.doLogin=function(){
-  if(!auth){var err=document.getElementById('loginErr');if(err)err.textContent='System initialising — please wait.';return;}
+  if(!auth){var e=document.getElementById('loginErr');if(e)e.textContent='System initialising — please wait.';return;}
   var email=document.getElementById('loginEmail').value.trim();
   var pass=document.getElementById('loginPass').value;
   var err=document.getElementById('loginErr');
   err.textContent='Signing in...';
-  signInWithEmailAndPassword(auth,email,pass).catch(function(e){
+  auth.signInWithEmailAndPassword(email,pass).catch(function(e){
     err.textContent=(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password')?'Incorrect email or password.':e.message;
   });
 };
 window.doLogout=function(){
   window._fbReady=false;
-  signOut(auth);
+  auth.signOut();
 };
 // Real online/offline detection using browser API
 window.addEventListener('online',  function(){ if(window._fbReady)setSS('synced'); });
@@ -922,33 +950,23 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
   border-radius:4px;padding:1px 6px;color:#fff;font-weight:600}
 
   #portalOverlay{position:fixed;inset:0;background:#0d2d5e;z-index:9999;
-    display:flex;align-items:center;justify-content:center;font-family:inherit;transition:opacity .3s}
-  .po-spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;
-    border-radius:50%;animation:poSpin .7s linear infinite;margin:0 auto 12px}
+    display:flex;align-items:center;justify-content:center;transition:opacity .3s}
+  .po-spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.2);
+    border-top-color:#fff;border-radius:50%;animation:poSpin .7s linear infinite;
+    margin:0 auto 12px}
   @keyframes poSpin{to{transform:rotate(360deg)}}
   #poLoading{text-align:center;color:rgba(255,255,255,.7);font-size:13px}
   #poBlocked{text-align:center;max-width:380px;padding:36px;background:#fff;
     border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
   .po-lock{font-size:40px;margin-bottom:12px}
   .po-title{font-size:17px;font-weight:700;color:#0d2d5e;margin-bottom:8px}
-  .po-sub{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:16px}
+  .po-sub{font-size:13px;color:#4a5568;line-height:1.6;margin-bottom:16px}
   .po-countdown{font-size:11px;color:#94a3b8;margin-bottom:18px}
   .po-btn{display:inline-block;padding:10px 20px;background:#1a5fb4;color:#fff;
     border-radius:8px;text-decoration:none;font-weight:700;font-size:13px}
-  .po-btn:hover{background:#0d2d5e}
 </style>
 </head>
 <body>
-<div id="portalOverlay">
-  <div id="poLoading"><div class="po-spinner"></div><div>Verifying portal session...</div></div>
-  <div id="poBlocked" style="display:none">
-    <div class="po-lock">🔒</div>
-    <div class="po-title">Portal Sign-In Required</div>
-    <div class="po-sub">This system requires you to sign in through the Plessen Management Portal first.</div>
-    <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
-    <a href="/" class="po-btn">← Return to Portal</a>
-  </div>
-</div>
 
 <!-- LOGIN SCREEN -->
 <div id="loginScreen" style="position:fixed;inset:0;background:#0d2d5e;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
@@ -1794,6 +1812,9 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
 </div>
 
 <script>
+// ─── Variable declarations for debounce timers ──────────────────────────────
+var _txRemTO; // debounce handle for transaction removal autosearch
+
 // ═══ CONSTANTS ═══
 const RAW = [
   {reorder:"OK",sku:"",item:"Alcohol Preps Pad",quantity:37,price:0,par:"",category:"Supplies",vendor:"Henry Schein",notes:""},
@@ -2753,6 +2774,43 @@ function setTxMode(mode){
     if(as)setTimeout(()=>as.focus(),80);
   }
 }
+// ─── Transaction step navigation ─────────────────────────────────────────────
+function txConfirmYes(){
+  // Advance from step 2A (confirm match) → step 3 (add to existing item)
+  var s2a=document.getElementById('tx-add-s2a');
+  var s3e=document.getElementById('tx-add-s3-existing');
+  var s3n=document.getElementById('tx-add-s3-new');
+  if(s2a)s2a.classList.remove('active');
+  if(txSelectedItem){
+    // Existing item found — go to add-to-existing form
+    if(s3e)s3e.classList.add('active');
+    var qtyEl=document.getElementById('tx-ex-qty');
+    if(qtyEl){qtyEl.value='';setTimeout(function(){qtyEl.focus();},80);}
+    // Pre-fill lot dropdown from item's existing lots
+    var lotSel=document.getElementById('tx-ex-lot');
+    if(lotSel&&txSelectedItem.lotDetails&&txSelectedItem.lotDetails.length){
+      lotSel.innerHTML='<option value="">New lot</option>'+
+        txSelectedItem.lotDetails.map(function(l){return'<option value="'+l.lot+'">'+l.lot+'</option>';}).join('');
+    }
+  } else {
+    // No item selected — go to new-item form
+    if(s3n)s3n.classList.add('active');
+  }
+}
+
+function txConfirmNo(){
+  // Go back from step 2A → step 1 (search again)
+  var s2a=document.getElementById('tx-add-s2a');
+  var s1=document.getElementById('tx-add-s1');
+  if(s2a)s2a.classList.remove('active');
+  if(s1)s1.classList.add('active');
+  txSelectedItem=null;
+  var searchEl=document.getElementById('tx-add-search');
+  if(searchEl){searchEl.value='';setTimeout(function(){searchEl.focus();},80);}
+  var resultsEl=document.getElementById('tx-add-results');
+  if(resultsEl)resultsEl.style.display='none';
+}
+
 function txRemSearch(val){
   clearTimeout(_txRemTO);
   if(!val||val.trim().length<2){document.getElementById('tx-rem-results').style.display='none';return;}
@@ -3008,7 +3066,7 @@ function renderRestock(){
   const items=inventory.filter(r=>r.item&&r.item.trim()&&!r.inactive&&(!cat||r.category===cat));
   const out=items.filter(r=>calcTotal(r)===0);
   const low=items.filter(r=>!r.par&&calcTotal(r)>0&&calcTotal(r)<=2);
-  const par=items.filter(r=>r.par&&calcTotal(r)>2&&calcTotal(r)<parseFloat(r.par));
+  const par=items.filter(r=>r.par&&calcTotal(r)>0&&calcTotal(r)<parseFloat(r.par));
   const manual=items.filter(r=>r.reorder==='REORDER'&&calcTotal(r)>2&&!(r.par&&calcTotal(r)<parseFloat(r.par)));
   const rsStats=document.getElementById('rsStats');
   if(rsStats)rsStats.innerHTML=`<div class="sc sd"><div class="sl">Out of Stock</div><div class="sv cd">${out.length}</div></div><div class="sc sw"><div class="sl">Low (≤2)</div><div class="sv cw">${low.length}</div></div><div class="sc st"><div class="sl">Below PAR</div><div class="sv ct">${par.length}</div></div><div class="sc"><div class="sl">Flagged</div><div class="sv">${manual.length}</div></div>`;
