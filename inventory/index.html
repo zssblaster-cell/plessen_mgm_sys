@@ -6,7 +6,7 @@
 <title>Plessen Ophthalmology — Clinical Inventory</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <!-- Firebase compat SDKs - official CDN -->
-<!-- Portal overlay: shown immediately, removed only when authenticated -->
+<!-- Portal overlay -->
 <div id="portalOverlay">
   <div id="poLoading"><div class="po-spinner"></div><div>Verifying portal session...</div></div>
   <div id="poBlocked" style="display:none">
@@ -18,51 +18,33 @@
   </div>
 </div>
 
-<!-- Module script: ONLY handles portal auth check + config decrypt.
-     Main inventory script stays as a regular (non-module) script so all
-     inventory functions remain global and accessible from HTML event handlers. -->
+<!-- Module script: portal auth check + config decrypt only.
+     Main script stays non-module so all inventory functions remain global. -->
 <script type="module">
 import { portalAuth, loadConfig } from '/crypto.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
-function showPortalBlocked() {
-  var loading=document.getElementById('poLoading');
-  var blocked=document.getElementById('poBlocked');
-  var countdown=document.getElementById('poCountdown');
-  if(loading)loading.style.display='none';
-  if(blocked)blocked.style.display='block';
-  var secs=5;
-  var iv=setInterval(function(){
-    secs--;
-    if(countdown)countdown.textContent='Redirecting in '+secs+' second'+(secs!==1?'s':'')+'...';
-    if(secs<=0){clearInterval(iv);window.location.href='/';}
-  },1000);
+function showPortalBlocked(){
+  var l=document.getElementById('poLoading'),b=document.getElementById('poBlocked'),c=document.getElementById('poCountdown');
+  if(l)l.style.display='none';if(b)b.style.display='block';
+  var s=5,iv=setInterval(function(){s--;if(c)c.textContent='Redirecting in '+s+' second'+(s!==1?'s':'')+'...';if(s<=0){clearInterval(iv);window.location.href='/';}},1000);
 }
-
 function removePortalOverlay(){
-  var o=document.getElementById('portalOverlay');
-  if(!o)return; o.style.opacity='0'; setTimeout(function(){o.remove();},320);
+  var o=document.getElementById('portalOverlay');if(!o)return;o.style.opacity='0';setTimeout(function(){o.remove();},320);
 }
 
-// Check portal session, decrypt config, pass Firebase config to main script
-var unsub = onAuthStateChanged(portalAuth, async function(portalUser) {
-  unsub();
-  if (!portalUser) { showPortalBlocked(); return; }
-  try {
-    var configs = await loadConfig();
-    var cfg = configs && configs.inventory;
-    if (!cfg) throw new Error('Inventory config not initialised — run /config-tool first.');
-    // Pass decrypted config to the compat-SDK main script via window
-    window._inventoryFirebaseCfg = {
-      apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
-      storageBucket: cfg.storageBucket||'', messagingSenderId: cfg.messagingSenderId||'',
-      appId: cfg.appId
-    };
-    cfg = null; // null immediately
+onAuthStateChanged(portalAuth,async function(portalUser){
+  if(!portalUser){showPortalBlocked();return;}
+  try{
+    var configs=await loadConfig();
+    var cfg=configs&&configs.inventory;
+    if(!cfg)throw new Error('Inventory config not initialised — run /config-tool first.');
+    window._inventoryFirebaseCfg={apiKey:cfg.apiKey,authDomain:cfg.authDomain,projectId:cfg.projectId,
+      storageBucket:cfg.storageBucket||'',messagingSenderId:cfg.messagingSenderId||'',appId:cfg.appId};
+    cfg=null;
     removePortalOverlay();
-    // Call _startInventory which is defined in the main (non-module) script below
-    if (typeof window._startInventory === 'function') window._startInventory();
-  } catch(e) {
+    if(typeof window._startInventory==='function')window._startInventory();
+  }catch(e){
     removePortalOverlay();
     var ls=document.getElementById('loginScreen');if(ls)ls.style.display='flex';
     var err=document.getElementById('loginErr');if(err)err.textContent=e.message;
@@ -87,20 +69,20 @@ if(typeof firebase==='undefined'){
     if(ls)ls.innerHTML='<div style="color:#fff;text-align:center;padding:40px;max-width:400px"><h2>Connection Required</h2><p style="margin-top:12px;opacity:.8">This app must be opened from a web server (Vercel) not a local file. Please deploy to Vercel and open the Vercel URL.</p></div>';
   });return;
 }
-// Firebase config comes from encrypted config.js via the module script above.
-// _startInventory() is called by the module script once config is decrypted.
+// Firebase config comes from encrypted config.js — no credentials in this file.
+// _startInventory() is called by the module script above once config is decrypted.
 var db   = null;
 var auth = null;
 
-window._startInventory = function() {
-  var cfg = window._inventoryFirebaseCfg;
-  if (!cfg) return;
-  if (!firebase.apps.length) firebase.initializeApp(cfg);
-  window._inventoryFirebaseCfg = null; // null immediately after use
-  db   = firebase.firestore();
-  auth = firebase.auth();
+window._startInventory = function(){
+  var cfg=window._inventoryFirebaseCfg;
+  if(!cfg)return;
+  if(!firebase.apps.length)firebase.initializeApp(cfg);
+  window._inventoryFirebaseCfg=null;
+  db=firebase.firestore();
+  auth=firebase.auth();
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
-  startAuth(); // register auth listener now that auth + db are ready
+  startAuth();
 };
 
 function setSS(s){
@@ -190,18 +172,14 @@ function fbLoad(){
           if(window.activateRole)window.activateRole('admin',null);
         } else if(email==='examuser@plesseneye.com'){
           if(window.activateRole)window.activateRole('tech',null);
-        } else { if(window.activateRole)window.activateRole("tech",null); }
+        } else {
+          if(window.showRoleScreen)window.showRoleScreen();
+        }
       }).catch(function(){
-        // Config load failed — route by email anyway
-        var em=window._authEmail||'';
-        if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-        else if(em==='examuser@plesseneye.com'){if(window.activateRole)window.activateRole('tech',null);}
+        if(window.showRoleScreen)window.showRoleScreen();
       });
     }).catch(function(){
-      // Config doc fetch failed — route by email anyway
-      var em=window._authEmail||'';
-      if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-      else if(em==='examuser@plesseneye.com'){if(window.activateRole)window.activateRole('tech',null);}
+      if(window.showRoleScreen)window.showRoleScreen();
     });
     // Listeners
     db.doc('plessen/inventory').onSnapshot(function(snap){
@@ -270,7 +248,7 @@ function fbLoad(){
   });
 }
 
-function startAuth() {
+function startAuth(){
   auth.onAuthStateChanged(function(user){
     var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
     if(user){
@@ -279,15 +257,13 @@ function startAuth() {
       if(lb)lb.style.display='flex';
       var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
       window._authEmail=user.email;
-      // Activate role immediately on login — do not wait for fbLoad
-      // fbLoad will refine role with actual config/PIN data when it completes
+      // Activate role immediately — don't wait for fbLoad
       db.collection('allowedUsers').doc(user.email).get().then(function(snap){
         var role='tech';
         if(snap.exists&&snap.data()&&snap.data().role==='admin')role='admin';
         else if(!snap.exists&&user.email==='anthony.jolly@plesseneye.com')role='admin';
         if(window.activateRole)window.activateRole(role,null);
       }).catch(function(){
-        // Fallback: email-based routing if allowedUsers read fails
         if(user.email==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
       });
       setTimeout(fbLoad,200);
@@ -1406,17 +1382,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
     <span class="clfb" onclick="clFilt('qty',this)">Qty Changed</span>
     <span class="clfb" onclick="clFilt('del',this)">Deleted</span>
   </div>
-  <div class="tw">
-    <table>
-      <thead><tr>
-        <th style="width:90px">Type</th>
-        <th>Item</th>
-        <th>Detail</th>
-        <th style="width:110px">Time</th>
-      </tr></thead>
-      <tbody id="clBody"></tbody>
-    </table>
-  </div>
+  <div class="tw"><div id="clBody" style="padding:4px 14px;max-height:68vh;overflow-y:auto"></div></div>
 </div>
 
 </div><!-- /wrap -->
@@ -1557,14 +1523,6 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
           <input type="file" id="imgFileInput" accept="image/*" style="display:none" onchange="handleImgUpload(this)">
         </div>
       </div>
-    </div>
-    <!-- Lot panel (shown when editing an existing item with lots) -->
-    <div id="itemModalLotSection" style="display:none;margin:0 -1px;padding:14px 16px;background:var(--surface2);border-top:1px solid var(--border)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:13px;font-weight:700;color:var(--text)">Lots / Batches</div>
-        <button class="btn btn-s btn-xs" onclick="openLotModal(editId,null)">+ Add Lot</button>
-      </div>
-      <div id="itemModalLotBody"></div>
     </div>
     <div class="mf"><button class="btn btn-s" onclick="closeItemModal()">Cancel</button><button class="btn btn-p" onclick="saveItem()">Save Item</button></div>
   </div>
@@ -1804,7 +1762,18 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
               <select id="tx-rem-lot"><option value="">— Not specified —</option></select>
             </div>
             <div class="field"><label>Quantity <span class="req-star">*</span></label><input type="number" id="tx-rem-qty" min="0" step="1" placeholder="0"/></div>
-            <div class="field"><label>Unit</label><select id="tx-rem-unit"><option value="units">Units</option><option value="vials">Vials</option><option value="doses">Doses</option><option value="mL">mL</option><option value="tablets">Tablets</option></select></div>
+            <div class="field"><label>Unit</label><select id="tx-rem-unit"><option>units</option><option>vials</option><option>boxes</option><option>bottles</option><option>doses</option><option>mL</option></select></div>
+            <div class="field"><label>Performed By</label><input type="text" id="tx-rem-by" placeholder="Staff initials"/></div>
+            <div class="field full"><label>Notes</label><input type="text" id="tx-rem-notes" placeholder="Patient ID, chart #, detail…"/></div>
+          </div>
+          <!-- Submit button — always visible to both admin and tech -->
+          <div style="display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+            <button class="btn btn-s" style="flex:1" onclick="txRemClear()">← Back</button>
+            <button class="btn btn-p" style="flex:2;background:var(--danger);color:#fff;font-size:14px;font-weight:700"
+              onclick="txSaveRemove()">
+              Confirm Removal
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1812,9 +1781,6 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
 </div>
 
 <script>
-// ─── Variable declarations for debounce timers ──────────────────────────────
-var _txRemTO; // debounce handle for transaction removal autosearch
-
 // ═══ CONSTANTS ═══
 const RAW = [
   {reorder:"OK",sku:"",item:"Alcohol Preps Pad",quantity:37,price:0,par:"",category:"Supplies",vendor:"Henry Schein",notes:""},
@@ -2011,26 +1977,6 @@ let fSkus=[], fLots=[], txNewSkus=[];
 let currentRole=null;   // 'admin' or 'tech'
 let currentTech=null;   // {name, pin, badgeId, pinHash} for logged-in tech
 let appConfig={adminPinHash:'',techs:[]};  // loaded from Firestore
-// applyConfig: called by Firebase block after loading plessen/config
-window.applyConfig = function(cfg){
-  appConfig.adminPinHash = cfg.adminPinHash||'';
-  appConfig.techs        = cfg.techs||[];
-  return Promise.resolve();
-};
-// fbSaveConfig: called by settings when PIN or techs change
-window.fbSaveConfig = function(cfg){
-  appConfig.adminPinHash = cfg.adminPinHash||'';
-  appConfig.techs        = cfg.techs||[];
-  if(window.fbSave) window.fbSave();
-};
-function showToast(msg,type){
-  const el=document.getElementById('toast');
-  if(!el)return;
-  el.textContent=msg;
-  el.className='toast show'+(type?' '+type:'');
-  setTimeout(()=>el.classList.remove('show'),3200);
-}
-
 let pinContext=null;    // what the pin modal is doing: 'admin'|'tech'
 let verifyContext=null; // pending removal after verification
 let verifyMode='pin';   // 'pin' or 'scan'
@@ -2199,7 +2145,7 @@ function doRefreshAnalytics(){
 function updateBadges(){
   const items=inventory.filter(r=>r.item&&r.item.trim()&&!r.inactive);
   // Restock count
-  const needsR=items.filter(r=>calcTotal(r)===0||(r.par&&calcTotal(r)<parseFloat(r.par))||r.reorder==='REORDER');
+  const needsR=items.filter(r=>calcTotal(r)===0||(r.par&&calcTotal(r)<=parseFloat(r.par))||r.reorder==='REORDER');
   const outN=items.filter(r=>calcTotal(r)===0).length;
   document.getElementById('s-restock').textContent=needsR.length;
   const rsub=document.getElementById('s-restock-sub');
@@ -2264,7 +2210,7 @@ function syncTotal(r){
   const qty=parseFloat(r.quantity)||0;
   const par=parseFloat(r.par)||0;
   if(qty===0)r.reorder='REORDER';
-  else if(par>0&&qty<par)r.reorder='REORDER';
+  else if(par>0&&qty<=par)r.reorder='REORDER';
   else r.reorder='OK';
 }
 function expInline(exp){if(!exp)return'';const d=daysLeft(exp);if(d<0)return'<span class="eexp">EXPIRED</span>';if(d<=14)return`<span class="eurg">${d}d</span>`;if(d<=60)return`<span class="esoon">${d}d</span>`;return`<span class="eok">${exp}</span>`;}
@@ -2427,21 +2373,7 @@ function rerenderRow(iid){const r=inventory.find(x=>x.id===iid);if(!r)return;con
 
 // ═══ LOT MODAL ═══
 function openLotModal(iid,li){editLotItemId=iid;editLotIdx=li;const r=inventory.find(x=>x.id===iid);document.getElementById('lot-item-name').textContent=r?r.item:'';document.getElementById('lotModalTitle').textContent=li===null?'Receive New Lot':'Edit Lot';if(li!==null&&r.lotDetails&&r.lotDetails[li]){const l=r.lotDetails[li];['lot','qty','expiry','received','vendor','price','notes'].forEach(f=>{const el=document.getElementById('l-'+f);if(el)el.value=l[f]||'';});}else{['l-lot','l-qty','l-expiry','l-vendor','l-price','l-notes'].forEach(x=>document.getElementById(x).value='');document.getElementById('l-received').value=new Date().toISOString().slice(0,10);}document.getElementById('lotModal').classList.add('open');setTimeout(()=>document.getElementById('l-lot').focus(),80);}
-function closeLotModal(){
-  document.getElementById('lotModal').classList.remove('open');
-  // Refresh lot section in item modal if it's open
-  const itemModal=document.getElementById('itemModal');
-  if(itemModal&&itemModal.classList.contains('open')&&editId){
-    const r=inventory.find(x=>x.id===editId);
-    const lotBody=document.getElementById('itemModalLotBody');
-    if(r&&lotBody){
-      lotBody.innerHTML=r.lotDetails&&r.lotDetails.length
-        ?renderItemModalLots(r)
-        :'<div style="font-size:12px;color:var(--text3);padding:4px 0">No lots yet. Use the Add Lot button above to receive stock by lot.</div>';
-    }
-  }
-  editLotItemId=null;editLotIdx=null;
-}
+function closeLotModal(){document.getElementById('lotModal').classList.remove('open');editLotItemId=null;editLotIdx=null;}
 function saveLot(){const lot=document.getElementById('l-lot').value.trim();const qty=parseFloat(document.getElementById('l-qty').value)||0;if(!lot){showToast('Lot # required','error');return;}const r=inventory.find(x=>x.id===editLotItemId);if(!r)return;if(!r.lotDetails)r.lotDetails=[];const data={lot,qty,expiry:document.getElementById('l-expiry').value||'',received:document.getElementById('l-received').value||'',vendor:document.getElementById('l-vendor').value.trim(),price:parseFloat(document.getElementById('l-price').value)||0,notes:document.getElementById('l-notes').value.trim()};if(editLotIdx!==null){const old=r.lotDetails[editLotIdx]||{};const ch=[];if(old.qty!==qty)ch.push(`qty:${old.qty}→${qty}`);if((old.expiry||'')!==data.expiry)ch.push(`exp:${old.expiry||'none'}→${data.expiry||'none'}`);r.lotDetails[editLotIdx]=data;if(ch.length)logChange('edit',r.item,`Lot ${lot}: ${ch.join(', ')}`);showToast('Lot updated','success');}else{r.lotDetails.push(data);if(!r.lotNums)r.lotNums=[];if(data.lot&&!r.lotNums.includes(data.lot))r.lotNums.push(data.lot);logChange('add',r.item,`New lot: ${lot}, qty:${qty}${data.expiry?', exp:'+data.expiry:''}`);transactions.unshift({id:Date.now()+Math.random(),mode:'add',type:'receive',reasonLabel:'Lot received',item:r.item,qty,unit:'units',lot,by:'',date:data.received||new Date().toISOString().slice(0,10),notes:data.notes||'',ts:new Date().toISOString()});showToast('Lot added','success');}syncTotal(r);saveAll();closeLotModal();renderLotPanel(editLotItemId,document.getElementById(`lpanel-${editLotItemId}`));rerenderRow(editLotItemId);updateBadges();}
 
 
@@ -2455,89 +2387,257 @@ function syncCbAll(){const s=(currentPage-1)*perPage,pg=filtered.slice(s,s+perPa
 
 // ═══ SELECTION ═══
 function toggleSel(id,c){c?selectedIds.add(id):selectedIds.delete(id);updBB();syncCbAll();}
-function toggleAll(c){const s=(currentPage-1)*perPage;filtered.slice(s,s+perPage).forEach(r=>{c?selectedIds.add(r.id):selectedIds.delete(r.id);});updBB();syncCbAll();}
-function updBB(){const n=selectedIds.size,el=document.getElementById('batchBar'),cnt=document.getElementById('batchCount');if(el)el.style.display=n?'flex':'none';if(cnt)cnt.textContent=n+' selected';}
-function batchDelete(){if(!selectedIds.size)return;if(!confirm('Delete '+selectedIds.size+' items?'))return;selectedIds.forEach(id=>{const i=inventory.findIndex(r=>r.id===id);if(i>-1){logChange('del',inventory[i].item,'Deleted');inventory.splice(i,1);}});selectedIds.clear();updBB();saveAll();applyFilters();}
+function toggleAll(c){const s=(currentPage-1)*perPage;filtered.slice(s,s+perPage).forEach(r=>c?selectedIds.add(r.id):selectedIds.delete(r.id));updBB();renderTable();}
+function updBB(){const n=selectedIds.size;document.getElementById('batchCnt').textContent=`${n} item${n!==1?'s':''} selected`;document.getElementById('batchBar').style.display=n>0?'flex':'none';}
+function clearSel(){selectedIds.clear();updBB();renderTable();}
+function batchCatFn(){const c=document.getElementById('batchCatSel').value;if(!c){showToast('Select category','warning');return;}selectedIds.forEach(id=>{const idx=inventory.findIndex(r=>r.id===id);if(idx>-1){logChange('edit',inventory[idx].item,`Category→${c}`);inventory[idx].category=c;}});saveAll();clearSel();applyFilters();showToast(`Category→${c}`,'success');}
+function batchStatusFn(){const s=document.getElementById('batchStSel').value;if(!s){showToast('Select status','warning');return;}selectedIds.forEach(id=>{const idx=inventory.findIndex(r=>r.id===id);if(idx>-1){logChange('edit',inventory[idx].item,`Status→${s}`);inventory[idx].reorder=s;}});saveAll();clearSel();applyFilters();showToast('Status updated','success');}
+function batchDelFn(){if(!selectedIds.size)return;document.getElementById('bDelCnt').textContent=`${selectedIds.size} item${selectedIds.size!==1?'s':''}`;document.getElementById('bDelModal').classList.add('open');}
+function confirmBDel(){selectedIds.forEach(id=>{const r=inventory.find(x=>x.id===id);if(r)logChange('del',r.item,'Batch deleted');});inventory=inventory.filter(r=>!selectedIds.has(r.id));saveAll();selectedIds.clear();document.getElementById('bDelModal').classList.remove('open');applyFilters();showToast('Deleted','error');}
+
+
+// ═══ SCANNER ═══
+function onScanInput(val){
+  clearTimeout(scanTO);
+  if(!val||val.length<3)return;
+  scanTO=setTimeout(()=>{
+    const code=val.trim();
+    if(!code)return;
+    if(_scanLocked){document.getElementById('scanLive').value='';return;}
+    const now=Date.now();
+    if(now-lastScanTime<SCAN_COOLDOWN){
+      // Still in cooldown — clear and ignore (each scan is fresh, no accumulation)
+      document.getElementById('scanLive').value='';
+      return;
+    }
+    lastScanTime=now;_scanLocked=true;
+    // Clear ALL inputs that could have accumulated content from typing or prior scan
+    document.getElementById('scanLive').value='';
+    const si=document.getElementById('searchInput');
+    if(si){si.value='';applyFilters&&applyFilters();}
+    // Clear tx search too if tx modal is open
+    const txRS=document.getElementById('tx-rem-search');
+    if(txRS)txRS.value='';
+    const txAS=document.getElementById('tx-add-search');
+    if(txAS)txAS.value='';
+    handleBarcodeScan(code);
+    setTimeout(()=>{_scanLocked=false;},SCAN_COOLDOWN);
+  },400);
+}
+function onScanKey(e){if(e.key==='Enter'){onScanInput(e.target.value);e.preventDefault();}}
+function handleBarcodeScan(code){
+  // If verify modal is open, treat as badge scan
+  const vm=document.getElementById('verifyModal');
+  if(vm&&vm.style.display!=='none'){verifyBadgeScan(code);return;}
+
+  // FIX 5: Always clear search/scanLive before acting on new scan
+  const si=document.getElementById('searchInput');
+  if(si){si.value='';Data&&Data.setSearch&&Data.setSearch('');}
+
+  // Find item by exact SKU match first, then partial
+  const exactMatches=inventory.filter(r=>getSkus(r).some(s=>s.toLowerCase()===code.toLowerCase()));
+  const matches=exactMatches.length?exactMatches:findBySku(code);
+  const r=matches.length===1?matches[0]:null;
+
+  if(r){
+    // Item found — open remove modal with defaults: qty=1, used for patient
+    openTxModal(code);
+    setTimeout(()=>{
+      setTxMode('remove');
+      txRemSelectItem(r);  // select item in remove flow
+      // Pre-set qty to 1 in remove form
+      const qtyEl=document.getElementById('tx-rem-qty');
+      if(qtyEl){qtyEl.value='1';}
+      // Pre-set reason to "used for patient"
+      const reasonEl=document.getElementById('tx-rem-reason');
+      if(reasonEl)reasonEl.value='used_patient';
+      // Auto-select FEFO lot
+      const lotEl=document.getElementById('tx-rem-lot');
+      if(lotEl&&r.lotDetails&&r.lotDetails.length){
+        const fefo=getFefo(r.lotDetails);
+        if(fefo)lotEl.value=fefo.lot;
+      }
+      // Focus qty field so user can optionally change it
+      if(qtyEl)qtyEl.focus();
+    },200);
+  } else {
+    // Item not found or multiple matches — open modal with barcode in search
+    openTxModal(code);
+  }
+  // Re-focus scanLive after processing so next scan is captured immediately
+  setTimeout(()=>{
+    const txOpen=document.getElementById('txModal')?.classList.contains('open');
+    if(!txOpen){
+      document.getElementById('scanLive')?.focus();
+    }
+  },300);
+}
+
+
+// ── CAMERA ──
+async function toggleCamera(){
+  const btn=document.getElementById('camBtn'),wrap=document.getElementById('camWrap');
+  if(camOn){stopCam();btn.className='btn-cam';btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Camera';return;}
+  try{
+    const constraints={video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}};
+    camStream=await navigator.mediaDevices.getUserMedia(constraints);
+    const vid=document.getElementById('camVideo');vid.srcObject=camStream;
+    wrap.classList.add('open');btn.className='btn-cam cam-on';
+    btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Stop Cam';
+    camOn=true;startDetect(vid);
+  }catch(e){showToast('Camera error: '+e.message,'error');}
+}
+function stopCam(){if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}camOn=false;document.getElementById('camWrap').classList.remove('open');}
+
+function startDetect(vid){
+  if('BarcodeDetector' in window){
+    const det=new BarcodeDetector({formats:['code_128','code_39','ean_13','ean_8','qr_code','upc_a','upc_e','data_matrix','itf','codabar']});
+    const tick=async()=>{if(!camOn)return;try{const codes=await det.detect(vid);if(codes.length){onCamHit(codes[0].rawValue);return;}}catch(e){}requestAnimationFrame(tick);};
+    vid.addEventListener('loadedmetadata',()=>requestAnimationFrame(tick),{once:true});
+  } else {
+    // ZXing fallback for Safari / iOS
+    const s=document.createElement('script');s.src='https://unpkg.com/@zxing/library@0.18.6/umd/index.min.js';
+    s.onload=()=>{const reader=new ZXing.BrowserMultiFormatReader();reader.decodeFromVideoDevice(null,'camVideo',(res,err)=>{if(res&&camOn)onCamHit(res.getText());});};
+    document.head.appendChild(s);
+  }
+}
+
+function onCamHit(val){
+  const flash=document.getElementById('camFlash');flash.textContent=val;flash.classList.add('show');
+  setTimeout(()=>flash.classList.remove('show'),1400);
+  document.getElementById('camWrap').style.boxShadow='0 0 0 2px #34d399';
+  setTimeout(()=>document.getElementById('camWrap').style.boxShadow='',500);
+  onScanInput(val);
+}
+
+
+// ── DEVICE DISCOVERY ──
+function openDevModal(){document.getElementById('devModal').classList.add('open');populateDevList();}
+function closeDevModal(){document.getElementById('devModal').classList.remove('open');}
+function populateDevList(){
+  const list=document.getElementById('devList');list.innerHTML='';
+  const devs=[
+    {name:'USB HID Scanner (plug-and-play)',sub:'Zebra, Honeywell, Datalogic — click scan field then scan',type:'USB HID',status:'ready'},
+    ...('bluetooth' in navigator?[{name:'Bluetooth Scanner',sub:'Pair via OS first, then click Scan Bluetooth',type:'Bluetooth',status:'available'}]:[]),
+    ...('serial' in navigator?[{name:'USB / RS-232 Serial',sub:'Older scanners — Chrome/Edge only',type:'Serial',status:'available'}]:[]),
+    {name:'WiFi Scanner (Bridge)',sub:'Requires plessen_scanner_bridge.js on local network',type:'WiFi',status:'available'},
+  ];
+  devs.forEach(d=>{
+    const el=document.createElement('div');el.className='device-item';
+    const statusCls=d.status==='ready'?'conn':'';
+    el.innerHTML=`<div><div class="d-name">${d.name}</div><div class="d-type">${d.sub}</div></div><button class="d-connect ${statusCls}" onclick="connectDev('${d.type}')">${d.status==='ready'?'✓ Ready':'Connect'}</button>`;
+    list.appendChild(el);
+  });
+}
+function connectDev(type){
+  if(type==='USB HID'){setScanConnected('USB HID Scanner');showToast('USB HID ready — click a scan field and scan','success');closeDevModal();}
+  else if(type==='Bluetooth')doDiscoverBT();
+  else if(type==='Serial')doConnectSerial();
+  else if(type==='WiFi')doScanWifi();
+}
+async function doDiscoverBT(){
+  if(!('bluetooth' in navigator)){document.getElementById('devStatus').innerHTML='<span style="color:var(--danger)">Web Bluetooth requires Chrome/Edge on Android or desktop.</span>';return;}
+  try{
+    document.getElementById('devStatus').textContent='Searching…';
+    const device=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:['00001101-0000-1000-8000-00805f9b34fb']});
+    setScanConnected(device.name||'BT Scanner');
+    document.getElementById('devStatus').innerHTML=`<span style="color:var(--okm)">✓ ${device.name||'BT Scanner'} paired — scan into the scanner bar field</span>`;
+    addDevToList(device.name||'BT Scanner','Bluetooth','connected');
+  }catch(e){if(e.name!=='NotFoundError')document.getElementById('devStatus').innerHTML=`<span style="color:var(--danger)">${e.message}</span>`;}
+}
+async function doConnectSerial(){
+  if(!('serial' in navigator)){document.getElementById('devStatus').innerHTML='<span style="color:var(--danger)">WebSerial: Chrome/Edge desktop only.</span>';return;}
+  try{
+    const port=await navigator.serial.requestPort();await port.open({baudRate:9600});
+    setScanConnected('USB Serial Scanner');addDevToList('USB Serial Scanner','USB Serial','connected');
+    document.getElementById('devStatus').innerHTML='<span style="color:var(--okm)">✓ Serial scanner connected</span>';
+    const reader=port.readable.getReader();let buf='';
+    (async()=>{try{while(true){const{value,done}=await reader.read();if(done)break;buf+=new TextDecoder().decode(value);if(buf.includes('\n')||buf.includes('\r')){const code=buf.trim();buf='';if(code)onScanInput(code);}}}catch(e){reader.releaseLock();}})();
+  }catch(e){document.getElementById('devStatus').innerHTML=`<span style="color:var(--danger)">${e.message}</span>`;}
+}
+function doScanWifi(){
+  const host=window.location.hostname||'localhost';
+  document.getElementById('devStatus').textContent='Searching for WiFi scanner bridge…';
+  let found=false;
+  [2525,8765,9001].forEach(port=>{
+    if(found)return;
+    try{
+      const ws=new WebSocket(`ws://${host}:${port}`);
+      ws.onopen=()=>{found=true;wsBridge=ws;setScanConnected(`WiFi Bridge :${port}`);addDevToList(`WiFi Scanner Bridge :${port}`,'WiFi','connected');document.getElementById('devStatus').innerHTML=`<span style="color:var(--okm)">✓ Bridge connected on port ${port}</span>`;ws.onmessage=e=>{if(e.data)onScanInput(e.data.trim());};};
+      ws.onerror=()=>{};
+    }catch(e){}
+  });
+  setTimeout(()=>{if(!found)document.getElementById('devStatus').innerHTML='<span style="color:var(--text3)">Bridge not found. Is plessen_scanner_bridge.js running?</span>';},3000);
+}
+function setScanConnected(name){document.getElementById('scanDot').className='sdot2 conn';document.getElementById('scanStatusTxt').textContent=name;}
+function addDevToList(name,type,status){
+  const list=document.getElementById('devList');
+  const el=document.createElement('div');el.className='device-item';
+  el.innerHTML=`<div><div class="d-name">${name}</div><div class="d-type">${type}</div></div><span class="d-connect conn">✓ Connected</span>`;
+  list.insertBefore(el,list.firstChild);
+}
 
 // ═══ ITEM MODAL ═══
-
-function renderTagList(elId,arr,type){const el=document.getElementById(elId);if(!el)return;el.innerHTML=arr.map((v,i)=>`<span class="tag">${escH(v)}<button onclick="removeItemTag('${type}',${i})">×</button></span>`).join('');}
-function addItemTag(type){const inp=document.getElementById('f-'+(type==='sku'?'sku':'lot')+'-input');if(!inp)return;const v=inp.value.trim();if(!v)return;const arr=type==='sku'?fSkus:fLots;if(!arr.includes(v))arr.push(v);inp.value='';renderTagList('f-'+(type==='sku'?'skus':'lots')+'-display',arr,type);}
-function removeItemTag(type,i){const arr=type==='sku'?fSkus:fLots;arr.splice(i,1);renderTagList('f-'+(type==='sku'?'skus':'lots')+'-display',arr,type);}
-
 function openItemModal(id=null){
   editId=id;
   document.getElementById('itemModalTitle').textContent=id?'Edit Item':'Add Item';
   const r=id?inventory.find(x=>x.id===id):null;
-  fSkus=r?[...getSkus(r)]:[];fLots=r?[...getLotNums(r)]:[];
-  const g=n=>document.getElementById(n);
-  g('f-item').value=r?r.item||'':'';
-  g('f-qty').value=r?calcTotal(r):'';
-  g('f-price').value=r?(r.priceLow||r.price||''):'';
-  const fph=g('f-price-high');if(fph)fph.value=r?r.priceHigh||'':'';
-  g('f-par').value=r?r.par||'':'';
-  g('f-status').value=r?r.reorder||'OK':'OK';
-  g('f-cat').value=r?r.category||'':'';
-  g('f-vendor').value=r?r.vendor||'':'';
-  g('f-notes').value=r?r.notes||'':'';
-  renderTagList('f-skus-display',fSkus,'sku');
-  renderTagList('f-lots-display',fLots,'lot');
-  const inactiveChk=g('f-inactive');if(inactiveChk)inactiveChk.checked=!!(r&&r.inactive);
-  // Lot section
-  const lotSection=g('itemModalLotSection'),lotBody=g('itemModalLotBody');
-  if(lotSection&&lotBody){
-    if(id&&r){
-      lotSection.style.display='';
-      lotBody.innerHTML=r.lotDetails&&r.lotDetails.length?renderItemModalLots(r):'<div style="font-size:12px;color:var(--text3);padding:4px 0">No lots yet.</div>';
-    } else {lotSection.style.display='none';lotBody.innerHTML='';}
-  }
-  g('itemModal').classList.add('open');
+  fSkus=r?[...getSkus(r)]:[];
+  fLots=r?[...getLotNums(r)]:[];
+  document.getElementById('f-item').value=r?r.item||'':'';
+  document.getElementById('f-qty').value=r?calcTotal(r):'';
+  document.getElementById('f-price').value=r?(r.priceLow||r.price||''):'';
+  const fph=document.getElementById('f-price-high');if(fph)fph.value=r?r.priceHigh||'':'';
+  document.getElementById('f-par').value=r?r.par||'':'';
+  document.getElementById('f-status').value=r?r.reorder||'OK':'OK';
+  document.getElementById('f-cat').value=r?r.category||'':'';
+  document.getElementById('f-vendor').value=r?r.vendor||'':'';
+  document.getElementById('f-notes').value=r?r.notes||'':'';
+  renderTagList('f-skus-display', fSkus, 'sku');
+  renderTagList('f-lots-display', fLots, 'lot');
+  const inactiveChk=document.getElementById('f-inactive');
+  if(inactiveChk)inactiveChk.checked=!!(r&&r.inactive);
+  document.getElementById('itemModal').classList.add('open');
+  // Load image preview
   loadItemImageIntoModal(id?inventory.find(x=>x.id===id):null);
-  setTimeout(()=>g('f-item').focus(),80);
+  setTimeout(()=>document.getElementById('f-item').focus(),80);
 }
-
 function closeItemModal(){document.getElementById('itemModal').classList.remove('open');editId=null;}
 
-function renderItemModalLots(r){
-  if(!r||!r.lotDetails||!r.lotDetails.length)return'';
-  return r.lotDetails.map((l,i)=>{
-    const fefo=getFefo(r.lotDetails),isFEFO=fefo&&fefo.lot===l.lot;
-    const d=l.expiry?daysLeft(l.expiry):null;
-    const expCls=d===null?'':d<0?'color:var(--danger)':d<=14?'color:var(--danger)':d<=60?'color:var(--warn)':'color:var(--ok-mid)';
-    const expTxt=d===null?'No expiry':d<0?'EXPIRED '+Math.abs(d)+'d ago':d+'d remaining';
-    return`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:6px">
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <span style="font-family:monospace;font-size:12px;font-weight:700">${l.lot||'—'}</span>
-          ${isFEFO?'<span style="font-size:10px;font-weight:700;background:var(--teal);color:#fff;padding:1px 5px;border-radius:8px">USE NEXT</span>':''}
-          ${l.vendor?`<span style="font-size:11px;color:var(--text3)">${l.vendor}</span>`:''}
-        </div>
-        <div style="font-size:12px;color:var(--text2);margin-top:2px">
-          Qty: <strong>${parseFloat(l.qty)||0}</strong>
-          ${l.expiry?`&nbsp;·&nbsp;<span style="${expCls}">${expTxt}</span>`:''}
-          ${l.price?`&nbsp;·&nbsp;$${parseFloat(l.price).toFixed(2)}`:''}
-        </div>
-      </div>
-      <button class="ib e" onclick="openLotModal(${r.id},${i})" title="Edit lot">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-      </button>
-    </div>`;
-  }).join('');
+function renderTagList(containerId, arr, type){
+  const el=document.getElementById(containerId);if(!el)return;
+  if(!arr.length){el.innerHTML='<span style="color:var(--text3);font-size:12px">None added yet</span>';return;}
+  el.innerHTML=arr.map((v,i)=>'<span class="tag">'+escH(v)+'<span class="tx" data-t="'+type+'" data-i="'+i+'">×</span></span>').join('');
+  el.querySelectorAll('span.tx').forEach(function(x){x.onclick=function(){removeItemTag(this.dataset.t,+this.dataset.i);};});
+}
+function removeItemTag(type,idx){
+  if(type==='sku'){fSkus.splice(idx,1);renderTagList('f-skus-display',fSkus,'sku');}
+  else{fLots.splice(idx,1);renderTagList('f-lots-display',fLots,'lot');}
+}
+function addItemTag(type){
+  const inputId=type==='sku'?'f-sku-input':'f-lot-input';
+  const val=document.getElementById(inputId).value.trim();
+  if(!val)return;
+  if(type==='sku'){if(!fSkus.includes(val)){fSkus.push(val);renderTagList('f-skus-display',fSkus,'sku');}
+  }else{if(!fLots.includes(val)){fLots.push(val);renderTagList('f-lots-display',fLots,'lot');}}
+  document.getElementById(inputId).value='';
 }
 
 function saveItem(){
   _pendingImageForSave=_imgPendingData;
   const item=document.getElementById('f-item').value.trim();
   if(!item){showToast('Item name required','error');return;}
+  const cat=document.getElementById('f-cat').value;
   const existingRecord=editId?inventory.find(x=>x.id===editId):null;
-  // Barcode uniqueness check — skip the item currently being edited
+  // Barcode uniqueness check — warn if any SKU in fSkus is already used by another item
   for(const sku of fSkus){
     if(!sku)continue;
-    // Use == not !== so string/number id mismatch doesn't cause false positives
-    const conflict=inventory.find(r=>r.id!=editId&&getSkus(r).some(s=>s.toLowerCase()===sku.toLowerCase()));
-    if(conflict){showToast('Barcode "'+sku+'" already used by "'+conflict.item+'"','error');return;}
+    const conflict=inventory.find(r=>r.id!==(editId||0)&&getSkus(r).some(s=>s.toLowerCase()===sku.toLowerCase()));
+    if(conflict){
+      showToast('Barcode "'+sku+'" already used by "'+conflict.item+'"','error');
+      return;
+    }
   }
-  const cat=document.getElementById('f-cat').value;
   const data={
     item,skus:[...fSkus],lotNums:[...fLots],
     quantity:parseFloat(document.getElementById('f-qty').value)||0,
@@ -2545,7 +2645,14 @@ function saveItem(){
     priceLow:parseFloat(document.getElementById('f-price').value)||0,
     priceHigh:parseFloat(document.getElementById('f-price-high')?.value)||parseFloat(document.getElementById('f-price').value)||0,
     par:document.getElementById('f-par').value.trim(),
-    reorder:(()=>{const qty=parseFloat(document.getElementById('f-qty').value)||0;const par=parseFloat(document.getElementById('f-par').value)||0;const manual=document.getElementById('f-status').value;if(par>0)return(qty===0||qty<par)?'REORDER':'OK';return manual||'OK';})(),
+    reorder:(()=>{
+      const qty=parseFloat(document.getElementById('f-qty').value)||0;
+      const par=parseFloat(document.getElementById('f-par').value)||0;
+      const manual=document.getElementById('f-status').value;
+      // If PAR is set, auto-compute; otherwise use manual selection
+      if(par>0)return(qty===0||qty<=par)?'REORDER':'OK';
+      return manual||'OK';
+    })(),
     category:cat,vendor:document.getElementById('f-vendor').value.trim(),
     expiry:existingRecord?existingRecord.expiry||'':'',
     notes:document.getElementById('f-notes').value.trim(),
@@ -2554,267 +2661,357 @@ function saveItem(){
   };
   _pendingImageForSave=null;
   if(editId){
-    const idx=inventory.findIndex(r=>r.id===editId);
+    const idx=inventory.findIndex(x=>x.id===editId);
     if(idx>-1){
       if(data.image===undefined)data.image=existingRecord?existingRecord.image||null:null;
       const old=inventory[idx];const ch=[];
-      if(old.item!==data.item)ch.push('Name: '+old.item+'→'+data.item);
-      if(old.quantity!==data.quantity)ch.push('Qty: '+old.quantity+'→'+data.quantity);
-      if(old.reorder!==data.reorder)ch.push('Status: '+old.reorder+'→'+data.reorder);
+      if(old.item!==data.item)ch.push('Name:'+old.item+'→'+data.item);
+      if(old.category!==data.category)ch.push('Cat→'+data.category);
+      if(old.reorder!==data.reorder)ch.push('Status→'+data.reorder);
+      if((old.expiry||'')!==data.expiry)ch.push('Exp→'+(data.expiry||'none'));
+      const oldSkus=JSON.stringify(getSkus(old));const newSkus=JSON.stringify(data.skus);
+      if(oldSkus!==newSkus)ch.push('SKUs updated');
       inventory[idx]={...inventory[idx],...data};
-      if(ch.length)logChange('edit',data.item,ch.join(', '));
+      if(ch.length)logChange('edit',data.item,ch.join(' | '));
     }
+    showToast('Item updated','success');
   } else {
-    const newId=inventory.reduce((m,r)=>Math.max(m,r.id||0),0)+1;
-    inventory.push({id:newId,...data,lotDetails:[],image:_pendingImageForSave||null});
-    logChange('add',data.item,'Added to inventory');
+    const maxId=inventory.reduce((m,r)=>Math.max(m,r.id||0),0);
+    inventory.push({...data,id:maxId+1,lotDetails:[]});
+    logChange('add',data.item,'Added: qty '+data.quantity+' cat:'+(data.category||'—'));
   }
-  syncTotal(inventory.find(r=>r.item===data.item)||{});
   saveAll();closeItemModal();applyFilters();
-  showToast((editId?'Updated':'Added')+': '+data.item,'ok');
+}
+function updQty(id,val){
+  const idx=inventory.findIndex(x=>x.id===id);
+  if(idx>-1){const old=inventory[idx].quantity;inventory[idx].quantity=parseFloat(val)||0;
+    if(parseFloat(val)===0)inventory[idx].reorder='REORDER';
+    logChange('qty',inventory[idx].item,'Qty:'+old+'→'+val);saveAll();updateBadges();showToast('Qty updated','success');}
 }
 
-// ═══ DELETE MODAL ═══
+function openDelModal(id){deleteId=id;const r=inventory.find(x=>x.id===id);document.getElementById('delName').textContent=r?r.item:'item';document.getElementById('delModal').classList.add('open');}
+function closeDelModal(){document.getElementById('delModal').classList.remove('open');deleteId=null;}
+function confirmDel(){if(deleteId){const r=inventory.find(x=>x.id===deleteId);if(r)logChange('del',r.item,'Deleted');inventory=inventory.filter(x=>x.id!==deleteId);saveAll();closeDelModal();applyFilters();showToast('Deleted','error');}}
 
-function openDelModal(id){
-  deleteId=id;
-  const r=inventory.find(x=>x.id===id);
-  const el=document.getElementById('delModalName');if(el)el.textContent=r?r.item:'';
-  document.getElementById('bDelModal').classList.add('open');
-}
-function closeDelModal(){document.getElementById('bDelModal').classList.remove('open');deleteId=null;}
-function confirmDelete(){
-  if(!deleteId)return;
-  const r=inventory.find(x=>x.id===deleteId);
-  if(r){logChange('del',r.item,'Deleted from inventory');inventory=inventory.filter(x=>x.id!==deleteId);window.inventory.length=0;inventory.forEach(x=>window.inventory.push(x));}
-  saveAll();closeDelModal();applyFilters();
-  showToast('Item deleted','warning');
-}
-
-// ═══ PRICE RANGE HELPERS ═══
-function getItemPriceRange(r){
-  const lotPrices=(r.lotDetails||[]).map(l=>parseFloat(l.price)||0).filter(p=>p>0);
-  const itemPrice=parseFloat(r.price)||0,itemPriceLow=parseFloat(r.priceLow)||0,itemPriceHigh=parseFloat(r.priceHigh)||0;
-  if(lotPrices.length>1){const lo=Math.min(...lotPrices),hi=Math.max(...lotPrices);if(lo!==hi)return{lo,hi,isRange:true};return{lo,hi:lo,isRange:false};}
-  if(lotPrices.length===1)return{lo:lotPrices[0],hi:lotPrices[0],isRange:false};
-  if(itemPriceLow>0&&itemPriceHigh>0&&itemPriceLow!==itemPriceHigh)return{lo:itemPriceLow,hi:itemPriceHigh,isRange:true};
-  const p=itemPrice||itemPriceLow||itemPriceHigh;return{lo:p,hi:p,isRange:false};
-}
-function formatPrice(r){const{lo,hi,isRange}=getItemPriceRange(r);if(!lo&&!hi)return'—';if(isRange)return`{$${lo.toFixed(2)} — $${hi.toFixed(2)}}`;return`$${lo.toFixed(2)}`;}
-
-// ═══ INACTIVE ITEMS ═══
-function toggleInactive(id){
-  const r=inventory.find(x=>x.id===id);if(!r)return;
-  r.inactive=!r.inactive;
-  logChange('edit',r.item,r.inactive?'Marked inactive':'Restored to active');
-  saveAll();applyFilters();updateInactiveBadge();
-  showToast(r.item+(r.inactive?' marked inactive':' restored to active'),r.inactive?'warn':'ok');
-}
-function renderInactiveTab(){
-  const body=document.getElementById('inactiveBody');if(!body)return;
-  const inactive=inventory.filter(r=>r.inactive&&r.item&&r.item.trim());
-  if(!inactive.length){body.innerHTML='<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No inactive items</td></tr>';return;}
-  body.innerHTML=inactive.map(r=>`<tr style="opacity:.7"><td><strong>${escH(r.item)}</strong></td><td style="font-size:12px">${r.category||'—'}</td><td style="font-size:13px;font-weight:700">${calcTotal(r)||0}</td><td style="font-size:12px">${r.vendor||'—'}</td><td><button class="act-btn" onclick="toggleInactive(${r.id});renderInactiveTab();updateInactiveBadge()" style="color:var(--ok-mid);border-color:var(--ok-mid);white-space:nowrap">↩ Restore</button></td></tr>`).join('');
-}
-function updateInactiveBadge(){const cnt=inventory.filter(r=>r.inactive).length;const el=document.getElementById('inactive-count');if(el)el.textContent=cnt;}
-
-// ═══ IMAGE SYSTEM ═══
-let _imgCamStream=null,_imgFacing='environment';
-function compressImage(file,maxPx=800,quality=0.72){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=e=>{const img=new Image();img.onload=()=>{let w=img.width,h=img.height;if(w>maxPx||h>maxPx){if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}else{w=Math.round(w*maxPx/h);h=maxPx;}}const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;canvas.getContext('2d').drawImage(img,0,0,w,h);resolve(canvas.toDataURL('image/jpeg',quality));};img.onerror=reject;img.src=e.target.result;};reader.onerror=reject;reader.readAsDataURL(file);});}
-async function handleImgUpload(input){const file=input.files[0];if(!file)return;if(!file.type.startsWith('image/')){showToast('Please select an image file','error');return;}try{const data=await compressImage(file);setItemImage(data);}catch(e){showToast('Could not process image','error');}input.value='';}
-function setItemImage(dataUrl){_imgPendingData=dataUrl;const preview=document.getElementById('imgPreview'),placeholder=document.getElementById('imgPlaceholder'),removeBtn=document.getElementById('imgRemoveBtn'),box=document.getElementById('imgPreviewBox');if(preview){preview.src=dataUrl;preview.style.display='';}if(placeholder)placeholder.style.display='none';if(removeBtn)removeBtn.style.display='';if(box)box.style.borderStyle='solid';showToast('Image ready — save item to store it','ok');}
-function clearItemImage(){_imgPendingData=null;const preview=document.getElementById('imgPreview'),placeholder=document.getElementById('imgPlaceholder'),removeBtn=document.getElementById('imgRemoveBtn'),box=document.getElementById('imgPreviewBox');if(preview){preview.src='';preview.style.display='none';}if(placeholder)placeholder.style.display='';if(removeBtn)removeBtn.style.display='none';if(box)box.style.borderStyle='dashed';}
-function loadItemImageIntoModal(r){if(r&&r.image)setItemImage(r.image);else clearItemImage();}
-async function openImgCapture(){const overlay=document.getElementById('imgCaptureOverlay'),video=document.getElementById('imgCaptureVideo');if(!overlay||!video)return;try{_imgCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:_imgFacing},width:{ideal:1280},height:{ideal:960}}});video.srcObject=_imgCamStream;overlay.style.display='flex';}catch(e){showToast('Camera not available','error');}}
-function closeImgCapture(){if(_imgCamStream){_imgCamStream.getTracks().forEach(t=>t.stop());_imgCamStream=null;}const overlay=document.getElementById('imgCaptureOverlay'),video=document.getElementById('imgCaptureVideo');if(overlay)overlay.style.display='none';if(video)video.srcObject=null;}
-async function switchImgCamera(){_imgFacing=_imgFacing==='environment'?'user':'environment';closeImgCapture();await new Promise(r=>setTimeout(r,200));openImgCapture();}
-function captureImg(){const video=document.getElementById('imgCaptureVideo'),canvas=document.getElementById('imgCaptureCanvas');if(!video||!canvas)return;const overlay=document.getElementById('imgCaptureOverlay');if(overlay){overlay.style.background='rgba(255,255,255,.8)';setTimeout(()=>{overlay.style.background='rgba(0,0,0,.9)';},120);}let w=video.videoWidth,h=video.videoHeight;const maxPx=800;if(w>maxPx||h>maxPx){if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}else{w=Math.round(w*maxPx/h);h=maxPx;}}canvas.width=w;canvas.height=h;canvas.getContext('2d').drawImage(video,0,0,w,h);const dataUrl=canvas.toDataURL('image/jpeg',0.72);closeImgCapture();setItemImage(dataUrl);}
-
-// ═══ VERIFY MODAL (PIN confirmation for transactions) ═══
-
-function openVerifyModal(data){
-  verifyContext=data;verifyAttempts=0;
-  if(Date.now()>verifyLockedUntil)verifyLockedUntil=0;
-  document.getElementById('verifyPinInput').value='';
-  document.getElementById('verifyErr').textContent='';
-  const vf=document.getElementById('verifyAttemptFill');if(vf)vf.style.width='0%';
-  const info=document.getElementById('verifyItemInfo');
-  if(info&&data.item)info.textContent='Removing from: '+data.item;
-  document.getElementById('verifyModal').style.display='flex';
-  setTimeout(()=>document.getElementById('verifyPinInput').focus(),80);
-}
-function closeVerifyModal(){document.getElementById('verifyModal').style.display='none';verifyContext=null;}
-function verifyShowLockout(errEl,until){
-  const ms=until-Date.now();if(ms<=0){if(errEl)errEl.textContent='';return;}
-  const s=Math.ceil(ms/1000);const display=s<60?s+'s':Math.floor(s/60)+'m '+s%60+'s';
-  if(errEl)errEl.textContent='Too many attempts. Try again in '+display+'.';
-  setTimeout(()=>verifyShowLockout(errEl,until),1000);
-}
-async function verifySubmit(){
-  const errEl=document.getElementById('verifyErr');
-  if(Date.now()<verifyLockedUntil){verifyShowLockout(errEl,verifyLockedUntil);return;}
-  const pin=document.getElementById('verifyPinInput').value.trim();
-  if(!pin){errEl.textContent='Enter your PIN.';return;}
-  errEl.textContent='Checking…';
-  let pinOk=false,matchedTech=null;
-  if(currentRole==='admin'){
-    pinOk=await checkPin(pin,appConfig.adminPinHash||'');
+// ═══ TRANSACTION MODAL ═══
+function openTxModal(prefilledSku){
+  txMode='add';txSelectedItem=null;txSearchTerm=prefilledSku||'';txPathBSku='';txNewSkus=[];
+  document.getElementById('txModal').classList.add('open');
+  if(currentRole==='tech'){
+    // Tech: only remove mode, pre-filled with scan
+    setTxMode('remove');
+    const rs=document.getElementById('tx-rem-search');
+    if(prefilledSku&&rs){rs.value=prefilledSku;txRemSearch(prefilledSku);}
+    else if(rs)setTimeout(()=>{rs.value='';rs.focus();},80);
+    // Hide Add mode button for tech
+    const addBtn=document.getElementById('txModeAdd');
+    if(addBtn)addBtn.style.display='none';
   } else {
-    for(const t of (appConfig.techs||[])){if(await checkPin(pin,t.pinHash||'')){pinOk=true;matchedTech=t;break;}}
-    if(!pinOk)pinOk=await checkPin(pin,appConfig.adminPinHash||'');
-  }
-  document.getElementById('verifyPinInput').value='';
-  if(pinOk){
-    verifyAttempts=0;verifyLockedUntil=0;
-    const vf=document.getElementById('verifyAttemptFill');if(vf)vf.style.width='0%';
-    if(matchedTech)currentTech=matchedTech;
-    verifySuccess();
-  } else {
-    verifyAttempts++;
-    const vf=document.getElementById('verifyAttemptFill');if(vf)vf.style.width=(verifyAttempts/PIN_MAX_ATTEMPTS*100)+'%';
-    if(verifyAttempts>=PIN_MAX_ATTEMPTS){
-      verifyLockoutCount++;
-      const ms=PIN_LOCKOUT_BASE_MS*Math.pow(2,verifyLockoutCount-1);
-      verifyLockedUntil=Date.now()+ms;verifyAttempts=0;
-      const vf2=document.getElementById('verifyAttemptFill');if(vf2)vf2.style.width='0%';
-      verifyShowLockout(errEl,verifyLockedUntil);
+    // Admin: full access
+    const addBtn=document.getElementById('txModeAdd');
+    if(addBtn)addBtn.style.display='';
+    setTxMode('add');
+    if(prefilledSku){
+      document.getElementById('tx-add-search').value=prefilledSku;
+      txAddSearch(prefilledSku);
     } else {
-      const left=PIN_MAX_ATTEMPTS-verifyAttempts;
-      errEl.textContent='PIN not recognised. '+left+' attempt'+(left!==1?'s':'')+' remaining before lockout.';
-      document.getElementById('verifyPinInput').focus();
+      setTimeout(()=>{const el=document.getElementById('tx-add-search');if(el){el.value='';el.focus();}},80);
     }
   }
-}
-function verifySuccess(){
-  document.getElementById('verifyModal').style.display='none';
-  if(verifyContext){
-    if(verifyContext._undoTx)completeUndoTransaction(verifyContext);
-    else completeTechRemoval(verifyContext);
-    verifyContext=null;
-  }
-}
-function verifyBadgeScan(code){
-  const match=appConfig.techs.find(t=>t.badgeId&&t.badgeId===code);
-  if(!match)return;
-  currentTech=match;
-  verifySuccess();
-}
-
-// ═══ UNDO TRANSACTION ═══
-const UNDO_WINDOW_MS=30*60*1000;
-function canUndoTx(tx){if(!tx||tx.mode!=='remove')return false;if(tx.reversed)return false;if(Date.now()-new Date(tx.ts).getTime()>UNDO_WINDOW_MS)return false;return true;}
-function undoTransaction(txId){const tx=(window.transactions||transactions).find(t=>t.id===txId);if(!tx||!canUndoTx(tx)){showToast('This transaction can no longer be undone','error');return;}requireVerifyForUndo(tx);}
-function requireVerifyForUndo(tx){
-  const data={item:tx.item,itemId:inventory.find(r=>r.item===tx.item)?.id,lot:tx.lot,unit:tx.unit,_undoTx:tx};
-  const verifyInfo=document.getElementById('verifyItemInfo');
-  if(verifyInfo)verifyInfo.textContent='Returning '+(tx.qty||1)+' × '+tx.item+' to stock — not used for patient';
-  verifyContext=data;verifyAttempts=0;
-  if(Date.now()>verifyLockedUntil)verifyLockedUntil=0;
-  document.getElementById('verifyPinInput').value='';
-  document.getElementById('verifyErr').textContent='';
-  document.getElementById('verifyModal').style.display='flex';
-  setTimeout(()=>document.getElementById('verifyPinInput').focus(),80);
-}
-function completeUndoTransaction(data){
-  const tx=data._undoTx;if(!tx)return;
-  if(!canUndoTx(tx)){showToast('Undo window expired','error');return;}
-  const r=inventory.find(x=>x.item===tx.item);if(!r){showToast('Item not found','error');return;}
-  const qty=parseFloat(tx.qty)||1;
-  if(tx.lot&&r.lotDetails&&r.lotDetails.length){
-    const li=r.lotDetails.findIndex(l=>l.lot===tx.lot);
-    if(li>-1){const old=r.lotDetails[li].qty;r.lotDetails[li].qty=(parseFloat(old)||0)+qty;syncTotal(r);logChange('qty',r.item,'Lot '+tx.lot+': '+old+'→'+r.lotDetails[li].qty+' [UNDO by '+getCurrentUserName()+']');}
-    else{r.quantity=(parseFloat(r.quantity)||0)+qty;syncTotal(r);}
-  } else {r.quantity=(parseFloat(r.quantity)||0)+qty;syncTotal(r);logChange('qty',r.item,'Qty returned: +'+qty+' [UNDO by '+getCurrentUserName()+']');}
-  const txIdx=(window.transactions||transactions).findIndex(t=>t.id===tx.id);
-  if(txIdx>-1){(window.transactions||transactions)[txIdx].reversed=true;(window.transactions||transactions)[txIdx].reversedBy=getCurrentUserName();(window.transactions||transactions)[txIdx].reversedAt=new Date().toISOString();}
-  const reversalTx={id:Date.now()+Math.random(),mode:'add',type:'undo',reasonCode:'undo',reasonLabel:'Returned to stock (not used)',item:tx.item,qty,unit:tx.unit||'units',lot:tx.lot||'',by:getCurrentUserName(),date:new Date().toISOString().slice(0,10),notes:'Undo of removal at '+new Date(tx.ts).toLocaleTimeString(),ts:new Date().toISOString()};
-  (window.transactions||transactions).unshift(reversalTx);
-  saveAll();applyFilters();renderHistPanel();
-  showToast(tx.item+' returned to stock','ok');
-}
-
-// ═══ TX MODAL ═══
-
-function openTxModal(prefilledSku){
-  txSelectedItem=null;
-  const modal=document.getElementById('txModal');
-  if(modal)modal.classList.add('open');
-  // Also support style-based display for backwards compatibility
-  if(modal&&modal.style)modal.style.display='flex';
-  setTxMode('remove');
-  txRemClear();
-  const rs=document.getElementById('tx-rem-search');
-  if(prefilledSku&&rs){rs.value=prefilledSku;txRemSearch(prefilledSku);}
-  else if(rs)setTimeout(()=>{rs.value='';rs.focus();},80);
+  updateByDisplays();
 }
 function closeTxModal(){
-  const modal=document.getElementById('txModal');
-  if(modal){modal.style.display='none';modal.classList.remove('open');}
-  txSelectedItem=null;txRemClear();
-  stopTxCam();
+  document.getElementById('txModal').classList.remove('open');
+  txSelectedItem=null;txPathBSku='';
 }
+
 function setTxMode(mode){
   txMode=mode;
-  // Mode toggle buttons (HTML uses txModeAdd / txModeRem)
-  const addBtn=document.getElementById('txModeAdd')||document.getElementById('tx-mode-add');
-  const remBtn=document.getElementById('txModeRem')||document.getElementById('tx-mode-remove');
-  if(addBtn)addBtn.classList.toggle('active',mode==='add');
-  if(remBtn)remBtn.classList.toggle('active',mode==='remove');
-  // Flow sections (HTML uses tx-add-flow / tx-rem-flow)
-  const addS=document.getElementById('tx-add-flow')||document.getElementById('tx-add-section');
-  const remS=document.getElementById('tx-rem-flow')||document.getElementById('tx-rem-section');
-  if(addS)addS.style.display=mode==='add'?'':'none';
-  if(remS)remS.style.display=mode==='remove'?'':'none';
-  // Focus the right search field
-  if(mode==='remove'){
-    const rs=document.getElementById('tx-rem-search');
-    if(rs)setTimeout(()=>rs.focus(),80);
-  } else {
-    const as=document.getElementById('tx-add-search');
-    if(as)setTimeout(()=>as.focus(),80);
-  }
+  document.getElementById('txModeAdd').className='tx-mode-btn'+(mode==='add'?' add-sel':'');
+  document.getElementById('txModeRem').className='tx-mode-btn'+(mode==='remove'?' rem-sel':'');
+  document.getElementById('tx-add-flow').style.display=mode==='add'?'':'none';
+  document.getElementById('tx-rem-flow').style.display=mode==='remove'?'':'none';
+  if(mode==='add'){txGoStep('tx-add-s1');}
+  if(mode==='remove'){txRemClear();}
 }
-// ─── Transaction step navigation ─────────────────────────────────────────────
-function txConfirmYes(){
-  // Advance from step 2A (confirm match) → step 3 (add to existing item)
-  var s2a=document.getElementById('tx-add-s2a');
-  var s3e=document.getElementById('tx-add-s3-existing');
-  var s3n=document.getElementById('tx-add-s3-new');
-  if(s2a)s2a.classList.remove('active');
-  if(txSelectedItem){
-    // Existing item found — go to add-to-existing form
-    if(s3e)s3e.classList.add('active');
-    var qtyEl=document.getElementById('tx-ex-qty');
-    if(qtyEl){qtyEl.value='';setTimeout(function(){qtyEl.focus();},80);}
-    // Pre-fill lot dropdown from item's existing lots
-    var lotSel=document.getElementById('tx-ex-lot');
-    if(lotSel&&txSelectedItem.lotDetails&&txSelectedItem.lotDetails.length){
-      lotSel.innerHTML='<option value="">New lot</option>'+
-        txSelectedItem.lotDetails.map(function(l){return'<option value="'+l.lot+'">'+l.lot+'</option>';}).join('');
+
+function txGoStep(stepId){
+  ['tx-add-s1','tx-add-s2a','tx-add-s2b','tx-add-s3-new','tx-add-s3-existing']
+    .forEach(id=>{const el=document.getElementById(id);if(el)el.classList.toggle('active',id===stepId);});
+}
+
+// ── ADD FLOW ──
+var _txSearchTO=null;
+function txAddSearch(val){
+  txSearchTerm=val.trim();
+  document.getElementById('tx-add-no-match').style.display='none';
+  clearTimeout(_txSearchTO);
+  if(!val||val.trim().length<2){document.getElementById('tx-add-results').style.display='none';return;}
+  _txSearchTO=setTimeout(()=>{
+    const results=findItems(val);
+    txShowResults('tx-add-results', results, (item)=>txAddSelectItem(item));
+  },200);
+}
+function txShowResults(containerId, results, onSelect){
+  const el=document.getElementById(containerId);if(!el)return;
+  if(!results.length){
+    el.style.display='none';
+    if(containerId==='tx-add-results'&&txSearchTerm.length>=2){
+      document.getElementById('tx-add-no-match').style.display='';
+      document.getElementById('tx-add-no-match-term').textContent=txSearchTerm;
     }
+    return;
+  }
+  el.style.display='';
+  el.innerHTML=results.map((r,i)=>{
+    const skus=getSkus(r);const tq=calcTotal(r);
+    return '<div class="tx-result-item" onclick="arguments[0].stopPropagation()">'
+      +'<div><div class="tx-result-name">'+r.item+'</div>'
+      +'<div class="tx-result-meta">'+(r.category||'—')+' · '+(r.vendor||'—')
+      +(skus.length?' · <span class="tx-result-sku">'+skus.slice(0,2).join(', ')+(skus.length>2?' +more':' ')+'</span>':'')
+      +'</div></div>'
+      +'<div class="tx-result-qty">Qty: '+tq+'</div></div>';
+  }).join('');
+  // Add click listeners after render
+  el.querySelectorAll('.tx-result-item').forEach((el2,i)=>{
+    el2.addEventListener('click',()=>onSelect(results[i]));
+  });
+}
+function txRemSelectItem(item){
+  // Select an item in the remove flow (used after barcode scan)
+  txSelectedItem=item;
+  const rs=document.getElementById('tx-rem-search');
+  if(rs){rs.value=item.item;}
+  // Run search to populate lot dropdown
+  txRemSearch(item.item);
+  // Move to remove form step
+  setTimeout(()=>{
+    txGoStep('tx-rem-form');
+    // Show the remove form fields
+    const form=document.getElementById('tx-rem-flow');
+    if(form)form.style.display='';
+  },100);
+}
+
+function txAddSelectItem(item){
+  txSelectedItem=item;
+  document.getElementById('tx-add-results').style.display='none';
+  document.getElementById('tx-add-no-match').style.display='none';
+  const skus=getSkus(item);const tq=calcTotal(item);
+  document.getElementById('tx-add-confirm-name').textContent=item.item;
+  document.getElementById('tx-add-confirm-meta').innerHTML=
+    (item.category||'—')+' · Current qty: <strong>'+tq+'</strong>'
+    +(skus.length?'<br><small>SKUs: '+skus.join(', ')+'</small>':'');
+  txGoStep('tx-add-s2a');
+}
+function txConfirmYes(){
+  if(!txSelectedItem)return;
+  // Show add form for existing item
+  txGoStep('tx-add-s3-existing');
+  document.getElementById('tx-add-existing-name').textContent=txSelectedItem.item;
+  const tq=calcTotal(txSelectedItem);
+  document.getElementById('tx-add-existing-meta').innerHTML=(txSelectedItem.category||'—')+' · Current qty: <strong>'+tq+'</strong>';
+  // Populate lot selector
+  txPopulateRemLots(txSelectedItem);
+  document.getElementById('tx-ex-qty').value='';
+  document.getElementById('tx-ex-lot').value='';
+  document.getElementById('tx-ex-expiry').value='';
+  document.getElementById('tx-ex-by').value='';
+  document.getElementById('tx-ex-notes').value='';
+  checkExistingExpiryReq();
+}
+function txConfirmNo(){txGoStep('tx-add-s1');setTimeout(()=>{const el=document.getElementById('tx-add-search');if(el)el.focus();},80);}
+
+function txAddPath(path){
+  if(path==='new'){
+    txGoStep('tx-add-s3-new');
+    // Pre-fill search term as name suggestion
+    document.getElementById('tx-new-name').value=txSearchTerm;
+    // Pre-add the scanned SKU if it looks like one (numeric-ish)
+    txNewSkus=txSearchTerm&&/^[\d\-+A-Z]{4,}$/i.test(txSearchTerm)?[txSearchTerm]:[];
+    renderTxNewTags();
+    document.getElementById('tx-new-qty').value='';
+    document.getElementById('tx-new-lot').value='';
+    document.getElementById('tx-new-expiry').value='';
+    document.getElementById('tx-new-cat').value='';
+    document.getElementById('tx-new-by').value='';
+    document.getElementById('tx-new-notes').value='';
+    checkNewExpiryReq();
+    setTimeout(()=>document.getElementById('tx-new-name').focus(),80);
   } else {
-    // No item selected — go to new-item form
-    if(s3n)s3n.classList.add('active');
+    txPathBSku=txSearchTerm;
+    txGoStep('tx-add-s2b');
+    setTimeout(()=>document.getElementById('tx-add-existing-search').focus(),80);
   }
 }
-
-function txConfirmNo(){
-  // Go back from step 2A → step 1 (search again)
-  var s2a=document.getElementById('tx-add-s2a');
-  var s1=document.getElementById('tx-add-s1');
-  if(s2a)s2a.classList.remove('active');
-  if(s1)s1.classList.add('active');
-  txSelectedItem=null;
-  var searchEl=document.getElementById('tx-add-search');
-  if(searchEl){searchEl.value='';setTimeout(function(){searchEl.focus();},80);}
-  var resultsEl=document.getElementById('tx-add-results');
-  if(resultsEl)resultsEl.style.display='none';
+function txAddBackToSearch(){
+  txGoStep('tx-add-s1');
+  document.getElementById('tx-add-no-match').style.display='none';
+  document.getElementById('tx-add-results').style.display='none';
+  setTimeout(()=>document.getElementById('tx-add-search').focus(),80);
 }
 
+// Path B — existing search
+let _txExTO=null;
+function txExistingSearch(val){
+  clearTimeout(_txExTO);
+  if(!val||val.trim().length<2){document.getElementById('tx-add-existing-results').style.display='none';return;}
+  _txExTO=setTimeout(()=>{
+    const results=findItems(val);
+    txShowResults('tx-add-existing-results',results,(item)=>txExistingSelect(item));
+  },200);
+}
+function txExistingSelect(item){
+  txSelectedItem=item;
+  document.getElementById('tx-add-existing-results').style.display='none';
+  txGoStep('tx-add-s3-existing');
+  document.getElementById('tx-add-existing-name').textContent=item.item;
+  const tq=calcTotal(item);
+  document.getElementById('tx-add-existing-meta').innerHTML=(item.category||'—')+' · Current qty: <strong>'+tq+'</strong>';
+  txPopulateRemLots(item);
+  document.getElementById('tx-ex-qty').value='';
+  document.getElementById('tx-ex-lot').value='';
+  document.getElementById('tx-ex-expiry').value='';
+  document.getElementById('tx-ex-by').value='';
+  document.getElementById('tx-ex-notes').value='';
+  checkExistingExpiryReq();
+}
+
+// New medication SKU tags
+function renderTxNewTags(){renderTagWrap('tx-new-skus-display',txNewSkus,'txnew');}
+function renderTagWrap(containerId,arr,prefix){
+  const el=document.getElementById(containerId);if(!el)return;
+  el.innerHTML=arr.length===0?'<span style="color:var(--text3);font-size:12px">None added yet</span>':
+    arr.map((v,i)=>'<span class="tag">'+v+'<span class="tx" data-t="'+prefix+'" data-i="'+i+'">×</span></span>').join('');
+  el.querySelectorAll("span.tx").forEach(function(x){x.onclick=function(){removeTxNewTag(this.dataset.t,+this.dataset.i);};});
+}
+function removeTxNewTag(prefix,idx){txNewSkus.splice(idx,1);renderTxNewTags();}
+function addTxNewTag(type){
+  const val=document.getElementById('tx-new-sku-input').value.trim();
+  if(!val)return;
+  if(!txNewSkus.includes(val)){txNewSkus.push(val);renderTxNewTags();}
+  document.getElementById('tx-new-sku-input').value='';
+}
+
+// Expiry requirement checks
+function checkNewExpiryReq(){
+  const cat=document.getElementById('tx-new-cat').value;
+  const lot=document.getElementById('tx-new-lot').value.trim();
+  const isMed=cat==='Medications';
+  const req=isMed||lot.length>0;
+  document.getElementById('tx-new-expiry-star').style.display=req?'':'none';
+  document.getElementById('tx-new-expiry-note').style.display=req?'':'none';
+}
+function checkExistingExpiryReq(){
+  const r=txSelectedItem;
+  const isMed=r&&r.category==='Medications';
+  const lot=document.getElementById('tx-ex-lot').value.trim();
+  const req=isMed||lot.length>0;
+  document.getElementById('tx-ex-expiry-star').style.display=req?'':'none';
+  document.getElementById('tx-ex-expiry-note').style.display=req?'':'none';
+}
+
+// Save new medication
+function txSaveNew(){
+  const name=document.getElementById('tx-new-name').value.trim();
+  const cat=document.getElementById('tx-new-cat').value;
+  const qty=parseFloat(document.getElementById('tx-new-qty').value)||0;
+  const lot=document.getElementById('tx-new-lot').value.trim();
+  const expiry=document.getElementById('tx-new-expiry').value;
+  const by=getCurrentUserName();
+  const notes=document.getElementById('tx-new-notes').value.trim();
+  if(!name){showToast('Item name required','error');return;}
+  if(!cat){showToast('Category required','error');return;}
+  if(txNewSkus.length===0){showToast('At least one SKU is required','error');return;}
+  if(qty<=0){showToast('Quantity must be > 0','error');return;}
+  if(!lot){showToast('Lot number is required','error');return;}
+  const isMed=cat==='Medications';
+  if((isMed||lot)&&!expiry){showToast(isMed?'Expiry date required for medications':'Expiry date required when lot # is entered','error');return;}
+  const maxId=inventory.reduce((m,r)=>Math.max(m,r.id||0),0);
+  const lotEntry={lot,qty,expiry,received:new Date().toISOString().slice(0,10),vendor:document.getElementById('tx-new-vendor').value.trim(),price:parseFloat(document.getElementById('tx-new-price').value)||0,notes};
+  const newItem={
+    id:maxId+1,item:name,skus:txNewSkus,lotNums:[lot],
+    quantity:qty,price:parseFloat(document.getElementById('tx-new-price').value)||0,
+    par:document.getElementById('tx-new-par').value.trim(),
+    reorder:qty===0?'REORDER':'OK',category:cat,
+    vendor:document.getElementById('tx-new-vendor').value.trim(),
+    expiry,notes:'',lotDetails:[lotEntry]
+  };
+  inventory.push(newItem);
+  const tx={id:Date.now()+Math.random(),mode:'add',type:'receive',reasonLabel:'New medication added',
+    item:name,qty,unit:document.getElementById('tx-new-unit').value,lot,expiry,by,
+    date:new Date().toISOString().slice(0,10),notes,ts:new Date().toISOString()};
+  transactions.unshift(tx);
+  logChange('add',name,'New item created: qty '+qty+', lot '+lot+(expiry?', exp '+expiry:''));
+  saveAll();closeTxModal();applyFilters();
+  showToast('New medication added: '+name,'success');
+}
+
+// Save add to existing item
+function txSaveExisting(){
+  if(!txSelectedItem){showToast('No item selected','error');return;}
+  const qty=parseFloat(document.getElementById('tx-ex-qty').value)||0;
+  const lot=document.getElementById('tx-ex-lot').value.trim();
+  const expiry=document.getElementById('tx-ex-expiry').value;
+  const by=getCurrentUserName();
+  const notes=document.getElementById('tx-ex-notes').value.trim();
+  const unit=document.getElementById('tx-ex-unit').value;
+  if(qty<=0){showToast('Quantity must be > 0','error');return;}
+  if(!lot){showToast('Lot number is required','error');return;}
+  const isMed=txSelectedItem.category==='Medications';
+  if((isMed||lot)&&!expiry){showToast(isMed?'Expiry date required for medications':'Expiry date required when lot # is entered','error');return;}
+  const idx=inventory.findIndex(r=>r.id===txSelectedItem.id);
+  if(idx<0){showToast('Item not found','error');return;}
+  const r=inventory[idx];
+  if(!r.lotDetails)r.lotDetails=[];
+  if(!r.lotNums)r.lotNums=[];
+  // If item had a plain quantity with no lot tracking, migrate it first
+  // so it isn't wiped when calcTotal switches to summing lotDetails
+  if(r.lotDetails.length===0&&(parseFloat(r.quantity)||0)>0){
+    r.lotDetails.push({
+      lot:'Prior Stock',qty:parseFloat(r.quantity)||0,
+      expiry:r.expiry||'',received:'',vendor:r.vendor||'',
+      price:r.price||0,notes:'Migrated from plain quantity'
+    });
+    if(!r.lotNums.includes('Prior Stock'))r.lotNums.push('Prior Stock');
+  }
+  // Add to or create lot entry
+  const li=r.lotDetails.findIndex(l=>l.lot===lot);
+  if(li>-1){
+    const old=r.lotDetails[li].qty;
+    r.lotDetails[li].qty=(parseFloat(old)||0)+qty;
+    if(expiry&&!r.lotDetails[li].expiry)r.lotDetails[li].expiry=expiry;
+    logChange('qty',r.item,'Lot '+lot+': '+old+'→'+r.lotDetails[li].qty+' [added]');
+  } else {
+    r.lotDetails.push({lot,qty,expiry,received:new Date().toISOString().slice(0,10),vendor:r.vendor||'',price:r.price||0,notes});
+    logChange('qty',r.item,'New lot '+lot+': +'+qty+(expiry?' exp '+expiry:''));
+  }
+  // Append lot to lotNums if new
+  if(!r.lotNums.includes(lot))r.lotNums.push(lot);
+  // Path B: append new SKU to item skus[]
+  if(txPathBSku&&!getSkus(r).includes(txPathBSku)){
+    if(!r.skus)r.skus=[];
+    r.skus.push(txPathBSku);
+    logChange('edit',r.item,'New SKU added from Path B: '+txPathBSku);
+  }
+  syncTotal(r);
+  const tx={id:Date.now()+Math.random(),mode:'add',type:'receive',reasonLabel:'Restocked',
+    item:r.item,qty,unit,lot,expiry,by,
+    date:new Date().toISOString().slice(0,10),notes,ts:new Date().toISOString()};
+  transactions.unshift(tx);
+  saveAll();closeTxModal();applyFilters();
+  showToast('Added '+qty+' × '+r.item,'success');
+}
+
+// ── REMOVE FLOW ──
+let _txRemTO=null;
 function txRemSearch(val){
   clearTimeout(_txRemTO);
   if(!val||val.trim().length<2){document.getElementById('tx-rem-results').style.display='none';return;}
-  _txRemTO=setTimeout(()=>{const results=findItems(val);txShowResults('tx-rem-results',results,item=>txRemSelect(item));},200);
+  _txRemTO=setTimeout(()=>{
+    const results=findItems(val);
+    txShowResults('tx-rem-results',results,(item)=>txRemSelect(item));
+  },200);
 }
 function txRemSelect(item){
   txSelectedItem=item;
@@ -2830,61 +3027,39 @@ function txRemSelect(item){
   document.getElementById('tx-rem-notes').value='';
   txPopulateRemLots(item);
 }
-function txRemSelectItem(item){
-  txSelectedItem=item;
-  const rs=document.getElementById('tx-rem-search');if(rs)rs.value=item.item;
-  txRemSearch(item.item);
-  setTimeout(()=>{
-    txRemSelect(item);
-  },300);
+function txPopulateRemLots(item){
+  const sel=document.getElementById('tx-rem-lot');if(!sel)return;
+  sel.innerHTML='<option value="">— Not specified —</option>';
+  if(item.lotDetails&&item.lotDetails.length){
+    const fefo=getFefo(item.lotDetails);
+    item.lotDetails.filter(l=>(parseFloat(l.qty)||0)>0).forEach(l=>{
+      sel.innerHTML+='<option value="'+l.lot+'"'+(fefo&&fefo.lot===l.lot?' selected':'')+'>'+l.lot+' — qty:'+l.qty+(l.expiry?' exp:'+l.expiry:'')+(fefo&&fefo.lot===l.lot?' ★FEFO':'')+'</option>';
+    });
+  }
+}
+function txRemReasonChange(){
+  const r=document.getElementById('tx-rem-reason').value;
+  document.getElementById('tx-rem-shared-wrap').style.display=SHARED_REASONS.has(r)?'':'none';
 }
 function txRemClear(){
   txSelectedItem=null;
-  ['tx-rem-search','tx-rem-reason','tx-rem-by','tx-rem-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  const qtyEl=document.getElementById('tx-rem-qty');if(qtyEl)qtyEl.value='1';
   document.getElementById('tx-rem-form').style.display='none';
+  document.getElementById('tx-rem-search').value='';
   document.getElementById('tx-rem-results').style.display='none';
-}
-function txShowResults(containerId,results,onSelect){
-  const el=document.getElementById(containerId);if(!el)return;
-  if(!results.length){
-    el.innerHTML='<div style="padding:10px 12px;font-size:12px;color:var(--text3)">No items found</div>';
-    el.style.display='';return;
-  }
-  // Build result items using data-id attribute — no serialised callbacks
-  el.innerHTML=results.slice(0,8).map(r=>{
-    const tq=calcTotal(r);
-    return '<div class="tx-result-item" data-id="'+r.id+'" style="cursor:pointer">'
-      +'<strong>'+escH(r.item)+'</strong>'
-      +'<span style="font-size:11px;color:var(--text3);margin-left:8px">'+(r.category||'')+' · Qty: '+tq+'</span>'
-      +'</div>';
-  }).join('');
-  // Attach click handlers directly to the elements
-  el.querySelectorAll('.tx-result-item').forEach(function(div){
-    div.addEventListener('click',function(){
-      const item=inventory.find(function(x){return x.id==div.dataset.id;});
-      if(item)onSelect(item);
-    });
-  });
-  el.style.display='';
-}
-function txPopulateRemLots(item){
-  const lotSel=document.getElementById('tx-rem-lot');if(!lotSel)return;
-  if(item.lotDetails&&item.lotDetails.length){
-    const fefo=getFefo(item.lotDetails);
-    lotSel.innerHTML=item.lotDetails.map(l=>`<option value="${escH(l.lot)}"${fefo&&fefo.lot===l.lot?' selected':''}>Lot ${escH(l.lot)} · Qty:${parseFloat(l.qty)||0}${l.expiry?' · Exp:'+l.expiry:''}</option>`).join('');
-  } else {lotSel.innerHTML='<option value="">No lots</option>';}
 }
 function txSaveRemove(){
   if(!txSelectedItem){showToast('No item selected','error');return;}
+  // Tech flow: 1 unit, used for patient, requires verification
   if(currentRole==='tech'){
     const lot=document.getElementById('tx-rem-lot').value;
     const unit=document.getElementById('tx-rem-unit')?.value||'units';
     const qty=parseFloat(document.getElementById('tx-rem-qty').value)||1;
     if(qty<=0){showToast('Quantity must be greater than 0','error');return;}
     const remData={item:txSelectedItem.item,itemId:txSelectedItem.id,lot,unit,qty};
-    openVerifyModal(remData);return;
+    openVerifyModal(remData);
+    return;
   }
+  // Admin flow: full form
   const reasonCode=document.getElementById('tx-rem-reason').value;
   const qty=parseFloat(document.getElementById('tx-rem-qty').value)||0;
   const lot=document.getElementById('tx-rem-lot').value;
@@ -2901,140 +3076,33 @@ function txSaveRemove(){
   const r=inventory[idx];
   if(lot&&r.lotDetails&&r.lotDetails.length){
     const li=r.lotDetails.findIndex(l=>l.lot===lot);
-    if(li>-1){const old=r.lotDetails[li].qty;r.lotDetails[li].qty=Math.max(0,(parseFloat(old)||0)-qty);syncTotal(r);logChange('qty',r.item,'Lot '+lot+': '+old+'→'+r.lotDetails[li].qty+' ['+reasonLabel+']');}
-  } else {const old=parseFloat(r.quantity)||0;r.quantity=Math.max(0,old-qty);syncTotal(r);logChange('qty',r.item,'Qty:'+old+'→'+r.quantity+' ['+reasonLabel+']');}
+    if(li>-1){
+      const old=r.lotDetails[li].qty;
+      r.lotDetails[li].qty=Math.max(0,(parseFloat(old)||0)-qty);
+      syncTotal(r);
+      logChange('qty',r.item,'Lot '+lot+': '+old+'→'+r.lotDetails[li].qty+' ['+reasonLabel+']');
+    }
+  } else {
+    const old=parseFloat(r.quantity)||0;
+    r.quantity=Math.max(0,old-qty);
+    r.reorder=r.quantity===0?'REORDER':'OK';
+    logChange('qty',r.item,'Qty:'+old+'→'+r.quantity+' ['+reasonLabel+']');
+  }
   const type=(reasonCode==='expired'||reasonCode==='contaminated'||reasonCode==='damaged'||reasonCode==='recalled')?'waste':'use';
-  const tx={id:Date.now()+Math.random(),mode:'remove',type,reasonCode,reasonLabel,item:r.item,qty,unit,lot:lot||'',by,date:new Date().toISOString().slice(0,10),notes:noteParts.join(' | '),ts:new Date().toISOString()};
+  const tx={id:Date.now()+Math.random(),mode:'remove',type,reasonCode,reasonLabel,
+    item:r.item,qty,unit,lot:lot||'',by,
+    date:new Date().toISOString().slice(0,10),notes:noteParts.join(' | '),ts:new Date().toISOString()};
   transactions.unshift(tx);
   saveAll();closeTxModal();applyFilters();
   showToast('Removed '+qty+' × '+r.item+' — '+reasonLabel,'warning');
 }
-function completeTechRemoval(data){
-  const qty=parseFloat(data.qty)||1;
-  const idx=inventory.findIndex(r=>r.id===data.itemId);
-  if(idx<0){showToast('Item not found','error');return;}
-  const r=inventory[idx];
-  if(data.lot&&r.lotDetails&&r.lotDetails.length){
-    const li=r.lotDetails.findIndex(l=>l.lot===data.lot);
-    if(li>-1){const old=r.lotDetails[li].qty;r.lotDetails[li].qty=Math.max(0,(parseFloat(old)||0)-qty);syncTotal(r);logChange('qty',r.item,'Lot '+data.lot+': '+old+'→'+r.lotDetails[li].qty+' [Used for patient — '+getCurrentUserName()+']');}
-  } else {const old=parseFloat(r.quantity)||0;r.quantity=Math.max(0,old-qty);syncTotal(r);logChange('qty',r.item,'Qty:'+old+'→'+r.quantity+' [Used for patient — '+getCurrentUserName()+']');}
-  const tx={id:Date.now()+Math.random(),mode:'remove',type:'use',reasonCode:'used_patient',reasonLabel:'Used for patient',item:r.item,qty,unit:data.unit||'units',lot:data.lot||'',by:getCurrentUserName(),date:new Date().toISOString().slice(0,10),notes:'',ts:new Date().toISOString()};
-  transactions.unshift(tx);
-  saveAll();closeTxModal();applyFilters();
-  showToast(qty+' × '+r.item+' removed — Used for patient','warning');
-}
 
-// ═══ ADD FLOW ═══
-function txAddSearch(val){
-  clearTimeout(_txSearchTO);
-  if(!val||val.trim().length<2){document.getElementById('tx-add-results').style.display='none';return;}
-  _txSearchTO=setTimeout(()=>{const results=findItems(val);txShowResults('tx-add-results',results,item=>txAddSelectItem(item));},200);
-}
-function txAddSelectItem(item){
-  txSelectedItem=item;
-  document.getElementById('tx-add-results').style.display='none';
-  document.getElementById('tx-add-confirm-name').textContent=item.item;
-  document.getElementById('tx-add-s1').classList.remove('active');
-  document.getElementById('tx-add-s2a').classList.add('active');
-}
-
-// ═══ SCAN SYSTEM ═══
-
-function onScanInput(val){
-  clearTimeout(scanTO);if(!val||val.length<3)return;
-  scanTO=setTimeout(()=>{
-    const code=val.trim();if(!code)return;
-    if(_scanLocked){document.getElementById('scanLive').value='';return;}
-    const now=Date.now();
-    if(now-lastScanTime<SCAN_COOLDOWN){document.getElementById('scanLive').value='';return;}
-    lastScanTime=now;_scanLocked=true;
-    document.getElementById('scanLive').value='';
-    const si=document.getElementById('searchInput');if(si){si.value='';applyFilters&&applyFilters();}
-    const txRS=document.getElementById('tx-rem-search');if(txRS)txRS.value='';
-    const txAS=document.getElementById('tx-add-search');if(txAS)txAS.value='';
-    handleBarcodeScan(code);
-    setTimeout(()=>{_scanLocked=false;},SCAN_COOLDOWN);
-  },400);
-}
-function handleBarcodeScan(code){
-  const vm=document.getElementById('verifyModal');
-  if(vm&&vm.style.display!=='none'){verifyBadgeScan(code);return;}
-  const si=document.getElementById('searchInput');if(si){si.value='';applyFilters&&applyFilters();}
-  const exactMatches=inventory.filter(r=>getSkus(r).some(s=>s.toLowerCase()===code.toLowerCase()));
-  const matches=exactMatches.length?exactMatches:findBySku(code);
-  const r=matches.length===1?matches[0]:null;
-  if(r){
-    openTxModal(code);
-    setTimeout(()=>{
-      setTxMode('remove');txRemSelectItem(r);
-      const qtyEl=document.getElementById('tx-rem-qty');if(qtyEl)qtyEl.value='1';
-      const reasonEl=document.getElementById('tx-rem-reason');if(reasonEl)reasonEl.value='used_patient';
-      const lotEl=document.getElementById('tx-rem-lot');
-      if(lotEl&&r.lotDetails&&r.lotDetails.length){const fefo=getFefo(r.lotDetails);if(fefo)lotEl.value=fefo.lot;}
-      if(qtyEl)qtyEl.focus();
-    },200);
-  } else {openTxModal(code);}
-  setTimeout(()=>{const txOpen=document.getElementById('txModal')?.style.display!=='none';if(!txOpen)document.getElementById('scanLive')?.focus();},300);
-}
-function toggleCamera(){
-  if(camOn){stopCam();}else{startCam();}
-}
-function startCam(){
-  const overlay=document.getElementById('camOverlay');if(!overlay)return;
-  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}).then(stream=>{
-    camStream=stream;camOn=true;
-    const video=document.getElementById('camVideo');if(video){video.srcObject=stream;video.play();}
-    overlay.style.display='flex';
-    startDetect();
-  }).catch(()=>showToast('Camera not available','error'));
-}
-function stopCam(){
-  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
-  camOn=false;if(txCamFrame)cancelAnimationFrame(txCamFrame);txCamFrame=null;
-  const overlay=document.getElementById('camOverlay');if(overlay)overlay.style.display='none';
-}
-function startDetect(){
-  if(!camOn)return;
-  const video=document.getElementById('camVideo');if(!video||video.readyState<2){txCamFrame=requestAnimationFrame(startDetect);return;}
-  if(typeof BarcodeDetector==='undefined'){txCamFrame=requestAnimationFrame(startDetect);return;}
-  const detector=new BarcodeDetector();
-  let lastCode='',lastTime=0;
-  function detect(){
-    if(!camOn)return;
-    detector.detect(video).then(barcodes=>{
-      if(barcodes.length){
-        const code=barcodes[0].rawValue,now=Date.now();
-        if(_scanLocked||(code===lastCode&&now-lastTime<SCAN_COOLDOWN)){txCamFrame=requestAnimationFrame(detect);return;}
-        lastCode=code;lastTime=now;lastScanTime=now;_scanLocked=true;
-        document.getElementById('camResult')&&(document.getElementById('camResult').textContent=code);
-        handleBarcodeScan(code);
-        setTimeout(()=>{_scanLocked=false;},SCAN_COOLDOWN);
-      }
-    }).catch(()=>{});
-    txCamFrame=requestAnimationFrame(detect);
-  }
-  detect();
-}
-function startTxCam(){
-  const overlay=document.getElementById('txCamOverlay');if(!overlay)return;
-  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}).then(stream=>{
-    const video=document.getElementById('txCamVideo');if(video){video.srcObject=stream;video.play();}
-    overlay.style.display='flex';
-  }).catch(()=>showToast('Camera not available','error'));
-}
-function stopTxCam(){
-  const overlay=document.getElementById('txCamOverlay'),video=document.getElementById('txCamVideo');
-  if(video&&video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop());video.srcObject=null;}
-  if(overlay)overlay.style.display='none';
-}
-function toggleTxCamera(){const overlay=document.getElementById('txCamOverlay');if(overlay&&overlay.style.display!=='none')stopTxCam();else startTxCam();}
-
-// ═══ ANALYTICS ═══
+function getMedSub(name){const n=name.toLowerCase();if(n.includes('lidocaine')||n.includes('proparacaine')||n.includes('tetracaine')||n.includes('altacaine'))return'Anesthetics';if(n.includes('cipro')||n.includes('moxiflox')||(n.includes('tobramycin')&&!n.includes('inject'))||n.includes('polymyxin')||n.includes('erythromycin')||n.includes('cefazolin')||n.includes('vancomycin')||n.includes('maxitrol'))return'Antibiotics';if(n.includes('prednisolone')||n.includes('dexamethasone')||n.includes('ketorolac'))return'Anti-Inflammatory';if(n.includes('tropicamide')||n.includes('phenylephrine')||n.includes('cyclopentolate')||n.includes('atropine')||n.includes('pilocarpine'))return'Dilation/Miotic';if(n.includes('latanoprost')||n.includes('timolol')||n.includes('brimonidine')||n.includes('dorzolamide')||n.includes('combigan')||n.includes('apraclonidine')||n.includes('acetazolamide'))return'Glaucoma';if(n.includes('avastin')||n.includes('lucentis')||n.includes('eylea')||n.includes('vabysmo')||n.includes('ozurdex')||n.includes('durysta')||n.includes('kenalog'))return'Intravitreal';if(n.includes('systane')||n.includes('refresh')||n.includes('goniosol')||n.includes('genteal')||n.includes('saline')||n.includes('clear eyes'))return'Lubricants';if(n.includes('bss')||n.includes('sodium chloride')||n.includes('sterile water')||n.includes('betadine')||n.includes('fluorescein'))return'Solutions';if(n.includes('tylenol')||n.includes('ibuprofen')||n.includes('benadryl')||n.includes('glucose')||n.includes('epi pen'))return'Oral/Emergency';return'Other';}
 
 function renderOverview(){
   Object.values(aCharts).forEach(c=>{try{c.destroy();}catch(e){}});aCharts={};
   const cat=document.getElementById('ov-cat').value,st=document.getElementById('ov-status').value,vv=(document.getElementById('ov-vendor')||{}).value||'';
-  const all=inventory.filter(r=>r.item&&r.item.trim()&&!r.inactive&&(!cat||r.category===cat)&&(!st||r.reorder===st)&&(!vv||r.vendor===vv));
+  const all=inventory.filter(r=>r.item&&r.item.trim()&&(!cat||r.category===cat)&&(!st||r.reorder===st)&&(!vv||r.vendor===vv));
   const catC={},catV={};
   all.forEach(r=>{if(r.category)catC[r.category]=(catC[r.category]||0)+1;});
   all.forEach(r=>{const v=r.lotDetails&&r.lotDetails.length?r.lotDetails.reduce((s,l)=>(parseFloat(l.qty)||0)*(parseFloat(l.price||r.price)||0)+s,0):(parseFloat(r.quantity)||0)*(parseFloat(r.price)||0);if(r.category&&v>0)catV[r.category]=(catV[r.category]||0)+v;});
@@ -3057,36 +3125,39 @@ function renderOverview(){
   if(sk.length)aCharts.med=new Chart(document.getElementById('chMed'),{type:'bar',data:{labels:sk,datasets:[{label:'In Stock',data:sk.map(k=>medSub[k].ok),backgroundColor:'#059669',borderRadius:3},{label:'Reorder',data:sk.map(k=>medSub[k].re),backgroundColor:'#b45309',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{font:{size:11}}}},scales:{x:{stacked:true,ticks:{font:{size:9}}},y:{stacked:true,ticks:{font:{size:10}}}}}});
 }
 
-function getMedSub(name){const n=name.toLowerCase();if(n.includes('lidocaine')||n.includes('proparacaine')||n.includes('tetracaine')||n.includes('altacaine'))return'Anesthetics';if(n.includes('cipro')||n.includes('moxiflox')||(n.includes('tobramycin')&&!n.includes('inject'))||n.includes('polymyxin')||n.includes('erythromycin')||n.includes('cefazolin')||n.includes('vancomycin')||n.includes('maxitrol'))return'Antibiotics';if(n.includes('prednisolone')||n.includes('dexamethasone')||n.includes('ketorolac'))return'Anti-Inflammatory';if(n.includes('tropicamide')||n.includes('phenylephrine')||n.includes('cyclopentolate')||n.includes('atropine')||n.includes('pilocarpine'))return'Dilation/Miotic';if(n.includes('latanoprost')||n.includes('timolol')||n.includes('brimonidine')||n.includes('dorzolamide')||n.includes('combigan')||n.includes('apraclonidine')||n.includes('acetazolamide'))return'Glaucoma';if(n.includes('avastin')||n.includes('lucentis')||n.includes('eylea')||n.includes('vabysmo')||n.includes('ozurdex')||n.includes('durysta')||n.includes('kenalog'))return'Intravitreal';if(n.includes('systane')||n.includes('refresh')||n.includes('goniosol')||n.includes('genteal')||n.includes('saline')||n.includes('clear eyes'))return'Lubricants';if(n.includes('bss')||n.includes('sodium chloride')||n.includes('sterile water')||n.includes('betadine')||n.includes('fluorescein'))return'Solutions';if(n.includes('tylenol')||n.includes('ibuprofen')||n.includes('benadryl')||n.includes('glucose')||n.includes('epi pen'))return'Oral/Emergency';return'Other';}
-
-function setRsFilter(f){rsFilter=f;document.querySelectorAll('.rs-filter-btn').forEach(b=>b.classList.toggle('active',b.dataset.filter===f));renderRestock();}
-function switchRS(f,el){rsFilter=f;document.querySelectorAll('.pt').forEach(b=>b.classList.remove('active'));if(el)el.classList.add('active');renderRestock();}
 function renderRestock(){
-  const cat=document.getElementById('rs-cat')?.value||'';
-  const items=inventory.filter(r=>r.item&&r.item.trim()&&!r.inactive&&(!cat||r.category===cat));
+  const cat=document.getElementById('rs-cat').value;
+  const items=inventory.filter(r=>r.item&&r.item.trim()&&(!cat||r.category===cat));
   const out=items.filter(r=>calcTotal(r)===0);
-  const low=items.filter(r=>!r.par&&calcTotal(r)>0&&calcTotal(r)<=2);
-  const par=items.filter(r=>r.par&&calcTotal(r)>0&&calcTotal(r)<parseFloat(r.par));
-  const manual=items.filter(r=>r.reorder==='REORDER'&&calcTotal(r)>2&&!(r.par&&calcTotal(r)<parseFloat(r.par)));
-  const rsStats=document.getElementById('rsStats');
-  if(rsStats)rsStats.innerHTML=`<div class="sc sd"><div class="sl">Out of Stock</div><div class="sv cd">${out.length}</div></div><div class="sc sw"><div class="sl">Low (≤2)</div><div class="sv cw">${low.length}</div></div><div class="sc st"><div class="sl">Below PAR</div><div class="sv ct">${par.length}</div></div><div class="sc"><div class="sl">Flagged</div><div class="sv">${manual.length}</div></div>`;
+  const low=items.filter(r=>calcTotal(r)>0&&calcTotal(r)<=2);
+  const par=items.filter(r=>r.par&&calcTotal(r)>2&&calcTotal(r)<=parseFloat(r.par));
+  const manual=items.filter(r=>r.reorder==='REORDER'&&calcTotal(r)>2&&!(r.par&&calcTotal(r)<=parseFloat(r.par)));
+  document.getElementById('rsStats').innerHTML=`
+    <div class="sc sd"><div class="sl">Out of Stock</div><div class="sv cd">${out.length}</div></div>
+    <div class="sc sw"><div class="sl">Low (≤2)</div><div class="sv cw">${low.length}</div></div>
+    <div class="sc st"><div class="sl">Below PAR</div><div class="sv ct">${par.length}</div></div>
+    <div class="sc"><div class="sl">Flagged</div><div class="sv">${manual.length}</div></div>`;
   let shown=rsFilter==='out'?out:rsFilter==='low'?low:rsFilter==='par'?par:[...out,...low,...par,...manual];
-  const el=document.getElementById('rsContent');if(!el)return;
+  const el=document.getElementById('rsContent');
   if(!shown.length){el.innerHTML='<div class="empty" style="grid-column:1/-1">No items need restocking.</div>';return;}
   el.innerHTML=shown.map(r=>{
-    const tq=calcTotal(r),cls=tq===0?'out':(r.par&&tq<parseFloat(r.par))?'par':tq<=2?'low':'par';
-    const status=tq===0?'OUT OF STOCK':(r.par&&tq<parseFloat(r.par))?`Below PAR (${r.par}) — ${tq} remaining`:tq<=2?`Low — ${tq} remaining`:'Manually flagged';
-    const hasLots=r.lotDetails&&r.lotDetails.length>0;
-    const lotsBtn=hasLots?`<button class="btn btn-s btn-xs" style="margin-top:4px;width:100%" onclick="event.stopPropagation();openItemModal(${r.id})">✏ Edit / View Lots</button>`:'';
-    return`<div class="restock-card ${cls}" style="cursor:pointer" onclick="openItemModal(${r.id})"><div style="flex:1"><div class="rc-name" style="text-decoration:underline;text-underline-offset:2px">${escH(r.item)}</div><div class="rc-meta">${r.category||'—'} · ${r.vendor||'—'}</div><div class="rc-meta" style="margin-top:2px;font-weight:600;color:${cls==='out'?'var(--danger)':cls==='low'?'var(--warn)':'var(--teal)'}">${status}</div></div><div style="text-align:right;flex-shrink:0"><div class="rc-qty ${cls}">${tq}</div><button class="btn btn-p btn-xs" style="margin-top:5px;width:100%;display:block" onclick="event.stopPropagation();openTxModal()">+ Add Stock</button>${lotsBtn}</div></div>`;
-  }).join('');
+    const tq=calcTotal(r);const cls=tq===0?'out':tq<=2?'low':'par';
+    const status=tq===0?'OUT OF STOCK':tq<=2?`Low — ${tq} remaining`:r.par?`Below PAR level (${r.par})`:'Manually flagged';
+    return`<div class="restock-card ${cls}">
+      <div style="flex:1"><div class="rc-name">${r.item}</div>
+      <div class="rc-meta">${r.category||'—'} · ${r.vendor||'—'}</div>
+      <div class="rc-meta" style="margin-top:2px;font-weight:600;color:${cls==='out'?'var(--danger)':cls==='low'?'var(--warn)':'var(--teal)'}">${status}</div></div>
+      <div style="text-align:right;flex-shrink:0"><div class="rc-qty ${cls}">${tq}</div>
+      <button class="btn btn-p btn-xs" style="margin-top:5px" onclick="openTxModal()"\'")}';showPage('inventory')">+ Add Stock</button></div>
+    </div>`;}).join('');
 }
+function switchRS(f,el){rsFilter=f;document.querySelectorAll('#sub-restock .pt').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderRestock();}
 
 function renderExpiring(){
-  const days=exDays,cat=document.getElementById('ex-cat')?.value||'';
+  const days=exDays,cat=document.getElementById('ex-cat').value;
   const entries=[];
   inventory.forEach(r=>{
-    if(!r.item||!r.item.trim()||r.inactive)return;
+    if(!r.item||!r.item.trim())return;
     if(cat&&r.category!==cat)return;
     if(r.lotDetails&&r.lotDetails.length)r.lotDetails.forEach((l,i)=>{if(l.expiry)entries.push({item:r.item,category:r.category,lot:l.lot||'—',expiry:l.expiry,qty:l.qty,id:r.id,lotIdx:i});});
     else if(r.expiry)entries.push({item:r.item,category:r.category,lot:r.lot||'—',expiry:r.expiry,qty:calcTotal(r),id:r.id,lotIdx:null});
@@ -3095,22 +3166,28 @@ function renderExpiring(){
   const expired=entries.filter(e=>daysLeft(e.expiry)<0);
   const expiring=entries.filter(e=>{const d=daysLeft(e.expiry);return d>=0&&d<=days;});
   const shown=[...expired,...expiring];
-  const exStats=document.getElementById('exStats');
-  if(exStats)exStats.innerHTML=`<div class="sc sd"><div class="sl">Expired</div><div class="sv cd">${expired.length}</div></div><div class="sc sd"><div class="sl">≤14 days</div><div class="sv cd">${entries.filter(e=>{const d=daysLeft(e.expiry);return d>=0&&d<=14;}).length}</div></div><div class="sc sw"><div class="sl">≤60 days</div><div class="sv cw">${entries.filter(e=>{const d=daysLeft(e.expiry);return d>14&&d<=60;}).length}</div></div><div class="sc"><div class="sl">All Tracked</div><div class="sv">${entries.length}</div></div>`;
-  const banner=document.getElementById('exBanner');if(banner)banner.innerHTML=expired.length>0?`<div style="background:linear-gradient(90deg,#b91c1c,#dc2626);color:#fff;padding:8px 14px;font-size:13px;font-weight:600;border-radius:var(--rl);margin-bottom:11px">⚠ ${expired.length} lot${expired.length!==1?'s':''} EXPIRED — remove immediately</div>`:'';
-  const body=document.getElementById('exBody');if(!body)return;
-  if(!shown.length){body.innerHTML=`<tr><td colspan="8"><div class="empty">No items expiring within ${days===9999?'any timeframe':days+' days'}.</div></td></tr>`;return;}
-  body.innerHTML=shown.map(e=>{
+  document.getElementById('exStats').innerHTML=`
+    <div class="sc sd"><div class="sl">Expired</div><div class="sv cd">${expired.length}</div></div>
+    <div class="sc sd"><div class="sl">≤14 days</div><div class="sv cd">${entries.filter(e=>{const d=daysLeft(e.expiry);return d>=0&&d<=14;}).length}</div></div>
+    <div class="sc sw"><div class="sl">≤60 days</div><div class="sv cw">${entries.filter(e=>{const d=daysLeft(e.expiry);return d>14&&d<=60;}).length}</div></div>
+    <div class="sc"><div class="sl">All Tracked</div><div class="sv">${entries.length}</div></div>`;
+  const banner=document.getElementById('exBanner');
+  banner.innerHTML=expired.length>0?`<div style="background:linear-gradient(90deg,#b91c1c,#dc2626);color:#fff;padding:8px 14px;font-size:13px;font-weight:600;border-radius:var(--rl);margin-bottom:11px">⚠ ${expired.length} lot${expired.length!==1?'s':''} EXPIRED — remove immediately</div>`:'';
+  const body=document.getElementById('exBody');
+  if(!shown.length){body.innerHTML=`<tr><td colspan="8"><div class="empty">No items expiring within ${days===9999?'any timeframe':days+' days'}.</div></td></tr>`;}
+  else body.innerHTML=shown.map(e=>{
     const d=daysLeft(e.expiry);
     const bdg=d<0?'<span class="eexp">EXPIRED '+Math.abs(d)+'d ago</span>':d<=14?'<span class="eurg">'+d+'d</span>':d<=60?'<span class="esoon">'+d+'d</span>':'<span class="eok">'+d+'d</span>';
     const editFn=e.lotIdx!==null?'openLotModal('+e.id+','+e.lotIdx+')':'openItemModal('+e.id+')';
     const rowCls=d<0?'ee':d<=14?'eu':d<=60?'es':'';
-    return'<tr class="'+rowCls+'"><td>'+bdg+'</td><td><strong style="cursor:pointer;text-decoration:underline;text-underline-offset:2px" onclick="openItemModal('+e.id+')">'+escH(e.item)+'</strong></td><td><span class="badge cat-'+(e.category||'Other')+'">'+(e.category||'—')+'</span></td><td style="font-family:monospace;font-size:11px">'+escH(e.lot)+'</td><td style="font-weight:600">'+e.expiry+'</td><td>'+bdg+'</td><td>'+e.qty+'</td><td><button class="ib e" onclick="'+editFn+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></td></tr>';
+    return '<tr class="'+rowCls+'"><td>'+bdg+'</td><td><strong>'+e.item+'</strong></td><td><span class="badge cat-'+(e.category||'Other')+'">'+(e.category||'—')+'</span></td><td style="font-family:monospace;font-size:11px">'+e.lot+'</td><td style="font-weight:600">'+e.expiry+'</td><td>'+bdg+'</td><td>'+e.qty+'</td><td><button class="ib e" onclick="'+editFn+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></td></tr>';
   }).join('');
-  const noExp=inventory.filter(r=>r.category==='Medications'&&r.item&&r.item.trim()&&!r.inactive&&!r.expiry&&!(r.lotDetails&&r.lotDetails.length));
-  const noExpList=document.getElementById('noExpList');if(!noExpList)return;
-  noExpList.innerHTML=noExp.length===0?'<p style="font-size:12px;color:var(--okm)">✓ All medications have expiry tracking.</p>':'<div style="display:flex;flex-wrap:wrap;gap:6px">'+noExp.map(r=>'<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:3px 8px;font-size:12px;display:flex;align-items:center;gap:5px">'+escH(r.item)+'<button class="ib e" style="width:18px;height:18px" onclick="openItemModal('+r.id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></div>').join('')+'</div>';
+  const noExp=inventory.filter(r=>r.category==='Medications'&&r.item&&r.item.trim()&&!r.expiry&&!(r.lotDetails&&r.lotDetails.length));
+  document.getElementById('noExpList').innerHTML=noExp.length===0
+    ?'<p style="font-size:12px;color:var(--okm)">✓ All medications have expiry tracking.</p>'
+    :'<div style="display:flex;flex-wrap:wrap;gap:6px">'+noExp.map(r=>'<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:3px 8px;font-size:12px;display:flex;align-items:center;gap:5px">'+r.item+'<button class="ib e" style="width:18px;height:18px" onclick="openItemModal('+r.id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></div>').join('')+'</div>';
 }
+function switchEX(d,el){exDays=d;document.querySelectorAll('#sub-expiring .pt').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderExpiring();}
 
 function renderTrends(){
   Object.keys(aCharts).filter(k=>k.startsWith('tr')).forEach(k=>{try{aCharts[k].destroy();}catch(e){}delete aCharts[k];});
@@ -3159,231 +3236,1113 @@ function renderTrends(){
   if(topItems.length)aCharts.trItems=new Chart(document.getElementById('trItems'),{type:'bar',data:{labels:topItems.map(([n])=>n.length>20?n.substring(0,20)+'…':n),datasets:[{label:'Added',data:topItems.map(([,v])=>v.added),backgroundColor:'rgba(5,150,105,.7)',borderRadius:3},{label:'Removed',data:topItems.map(([,v])=>v.removed),backgroundColor:'rgba(185,28,28,.7)',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{labels:{font:{size:10}}}},scales:{x:{ticks:{font:{size:10}}},y:{ticks:{font:{size:9}}}}}});
   if(bca.length)aCharts.trCat=new Chart(document.getElementById('trCat'),{type:'doughnut',data:{labels:bca,datasets:[{data:bca.map(c=>byCat[c].added+byCat[c].removed),backgroundColor:clrs,borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},padding:5}}}}});
 }
+function switchTR(d,el){trendDays=d;document.querySelectorAll('#trPeriodTabs .pt').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderTrends();}
+
 function renderSavings(){
-  const el=document.getElementById('savContent');if(!el)return;
-  el.innerHTML='';
-  const waste=transactions.filter(t=>t.type==='waste');
-  const byReason={};waste.forEach(t=>{if(!byReason[t.reasonLabel])byReason[t.reasonLabel]={label:t.reasonLabel,count:0,qty:0};byReason[t.reasonLabel].count++;byReason[t.reasonLabel].qty+=parseFloat(t.qty)||1;});
-  const rows=Object.values(byReason);
-  el.innerHTML='<table style="width:100%"><thead><tr><th>Reason</th><th style="width:70px">Events</th><th style="width:70px">Units</th></tr></thead><tbody>'
-    +(rows.length?rows.map(r=>'<tr><td>'+escH(r.label)+'</td><td style="text-align:center">'+r.count+'</td><td style="text-align:center">'+r.qty+'</td></tr>').join('')
-    :'<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:20px">No waste or disposal events recorded.</td></tr>')
-    +'</tbody></table>';
+  const savings=[
+    {t:'<strong>Avastin</strong> — Compounded bevacizumab ~$60/dose vs Lucentis/Eylea at $1,850–$2,100 for appropriate AMD patients.',v:'~$1,800+/dose',gpo:false},
+    {t:'<strong>Henry Schein Connect GPO</strong> — Reduces supply costs 12–20% on gloves, drapes, and consumables.',v:'12–20%',gpo:true},
+    {t:'<strong>Generic Glaucoma Drops</strong> — Latanoprost, Timolol, Brimonidine, Dorzolamide generics at 40–70% savings.',v:'40–70%',gpo:false},
+    {t:'<strong>Eylea HD extended dosing</strong> — Fewer injections per year reduces total annual treatment costs.',v:'Fewer visits',gpo:false},
+    {t:'<strong>AMD/Concordance GPO</strong> — Alternative distributors for ophthalmic-specific supplies.',v:'10–15%',gpo:true},
+    {t:'<strong>Ozurdex vs compounded Kenalog</strong> — Triamcinolone ~$35/vial vs Ozurdex ~$1,200/implant for select cases.',v:'~$1,165/tx',gpo:false},
+    {t:'<strong>Multi-lot bulk purchasing</strong> — Negotiate volume discounts on Avastin, Eylea PFS, Cefazolin via Besse/Pine Pharma.',v:'Volume discount',gpo:false},
+    {t:'<strong>Natacyn 1%</strong> — Only FDA-approved antifungal eye drop at ~$320. Monitor expiry to avoid waste.',v:'Waste reduction',gpo:false},
+  ];
+  document.getElementById('savContent').innerHTML=`<div class="ac"><div class="act" style="font-size:14px;margin-bottom:10px">Savings Opportunities — GPO &amp; Purchasing</div>${savings.map(s=>`<div class="sav-item"><div style="flex:1">${s.t}</div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px"><span class="sav-v">${s.v}</span>${s.gpo?'<span class="gpo">GPO</span>':''}</div></div>`).join('')}</div>`;
 }
+
+
+// ═══ CHANGELOG ═══
+let clf='all';
+function clFilt(type,el){clf=type;document.querySelectorAll('.clfb').forEach(f=>f.classList.remove('active'));el.classList.add('active');renderChangelog();}
+function renderChangelog(){
+  const df=document.getElementById('cl-date-filter').value;
+  let cutoff=0;
+  if(df==='today'){const t=new Date();t.setHours(0,0,0,0);cutoff=t.getTime();}
+  else if(df!=='9999')cutoff=Date.now()-parseInt(df)*86400000;
+  let entries=(window.changeLog||changeLog).filter(l=>!cutoff||new Date(l.ts).getTime()>=cutoff);
+  if(clf!=='all')entries=entries.filter(l=>l.type===clf);
+  const body=document.getElementById('clBody');
+  if(!entries.length){body.innerHTML='<div class="empty">No changes in selected period.</div>';return;}
+  const ico={add:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',qty:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>',del:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>'};
+  const lbl={add:'Added',edit:'Edited',qty:'Qty Updated',del:'Deleted'};
+  body.innerHTML=entries.map(l=>{const d=new Date(l.ts);const ts=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});return`<div class="cl-e"><div class="cl-ic ${l.type}">${ico[l.type]||ico.edit}</div><div style="flex:1"><div style="font-size:13px;font-weight:600">${l.item||'Unknown'}</div><div style="font-size:11px;color:var(--text3)">${lbl[l.type]||l.type} · ${ts}${l.by?' · '+l.by:''}</div>${l.detail?`<div style="font-size:12px;color:var(--text2);margin-top:2px;background:var(--bg);padding:3px 8px;border-radius:4px">${l.detail}</div>`:''}</div></div>`;}).join('');}
+
 
 // ═══ EXPORT ═══
-function exportCSV(){
-  const headers=['Item','SKU','Category','Vendor','Quantity','PAR','Reorder','Price','Notes'];
-  const rows=inventory.filter(r=>r.item&&!r.inactive).map(r=>[r.item,getSkus(r).join(';'),r.category||'',r.vendor||'',calcTotal(r),r.par||'',r.reorder||'',r.price||'',r.notes||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','));
-  const csv=[headers.join(','),...rows].join('\n');
-  const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='plessen_inventory_'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(url);
-  showToast('Exported '+rows.length+' items','ok');
+function exportCSV(){const h=['Status','SKU','Item','Qty','Price','Category','Vendor','Expiry','Lot','Multi-Lot','Notes'];const rows=filtered.map(r=>[r.reorder,(getSkus(r)||[]).join('|'),r.item,calcTotal(r),r.price,r.category,r.vendor,r.expiry||'',r.lot||'','Yes',r.notes||''].map(v=>`"${String(v||'').replace(/"/g,'""')}"`));const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([[h,...rows].map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download=`plessen_inventory_${new Date().toISOString().slice(0,10)}.csv`;a.click();showToast('Exported','success');}
+function exportTx(){const h=['Mode','Reason','Item','Qty','Unit','Lot','By','Date','Notes'];const rows=transactions.map(t=>[t.mode||'',t.reasonLabel||'',t.item,t.qty,t.unit||'',t.lot||'',t.by||'',t.date||'',t.notes||''].map(v=>`"${String(v).replace(/"/g,'""')}"`));const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([[h,...rows].map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download=`plessen_transactions_${new Date().toISOString().slice(0,10)}.csv`;a.click();showToast('Exported','success');}
+
+
+// ═══ TOAST ═══
+function showToast(msg,type=''){const el=document.getElementById('toast');el.textContent=msg;el.className='toast show '+type;setTimeout(()=>el.classList.remove('show'),3200);}
+
+// ═══ KEYBOARD ═══
+document.addEventListener('keydown',e=>{
+  // ── ESC: close any open modal/overlay ──
+  if(e.key==='Escape'){
+    closeItemModal();closeLotModal();closeDelModal();closeDevModal();
+    document.getElementById('bDelModal').classList.remove('open');
+    stopCam();stopTxCam();closeSettings();closeImgCapture();
+    return;
+  }
+
+  // ── ENTER: submit the active modal ──
+  if(e.key==='Enter'){
+    // Only when focus is on an input/select inside a modal (not textarea)
+    const ae=document.activeElement;
+    if(ae&&(ae.tagName==='INPUT'||ae.tagName==='SELECT')&&!ae.closest('textarea')){
+      const modal=ae.closest('.modal-wrap,.modal-overlay,[id$="Modal"],[id$="modal"]');
+      if(modal){
+        // Find the primary button in this modal
+        const primary=modal.querySelector('.btn-p,.btn-primary,[data-primary]');
+        if(primary&&!primary.disabled){
+          e.preventDefault();
+          primary.click();
+          return;
+        }
+      }
+    }
+    // PIN inputs specifically
+    if(ae&&ae.id==='verifyPinInput'){e.preventDefault();verifySubmit();return;}
+    if(ae&&ae.id==='pinInput'){e.preventDefault();submitPin();return;}
+    if(ae&&(ae.id==='loginEmail'||ae.id==='loginPass')){
+      e.preventDefault();doLogin();return;
+    }
+  }
+
+  // ── Ctrl/Cmd shortcuts ──
+  // Only fire when this tab/window has focus — addEventListener only fires for
+  // the active document, so this naturally won't interfere with other tabs.
+  // isTyping guard prevents shortcuts from firing while typing in app inputs,
+  // but allows them when focus is on the body or non-input elements.
+  const ae2=document.activeElement;
+  const tag=ae2?.tagName;
+  // scanLive is a background scanner capture input — not real typing
+  const isScanLive=ae2?.id==='scanLive';
+  const isTyping=!isScanLive&&(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'
+    ||ae2?.isContentEditable);
+
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey){
+    switch(e.key.toLowerCase()){
+      case 'k':
+        e.preventDefault();
+        // Always focus search, even from an input (it's a navigation shortcut)
+        document.getElementById('searchInput')?.focus();
+        document.getElementById('searchInput')?.select();
+        break;
+      case 'q':
+        // Ctrl+Q — open new transaction (Ctrl+T is browser-reserved)
+        e.preventDefault();
+        if(!isTyping)openTxModal();
+        break;
+      case 'n':
+        if(!isTyping&&currentRole==='admin'){e.preventDefault();openItemModal();}
+        break;
+      case 'e':
+        if(!isTyping&&currentRole==='admin'){
+          e.preventDefault();
+          document.querySelector('[onclick*="exportCSV"]')?.click();
+        }
+        break;
+      // All other Ctrl combinations: do NOT preventDefault — let browser handle them
+    }
+  }
+}, true) // ← true = capture phase, fires BEFORE browser default;
+// Click-outside-to-close disabled — use X button to close
+
+
+// ═══════════════════════════════════════════════════
+// ── ROLE & AUTH SYSTEM ──
+// ═══════════════════════════════════════════════════
+
+function resetAppState(){
+  currentRole=null;currentTech=null;
+  pinAttempts=0;pinLockedUntil=0;pinLockoutCount=0;
+  verifyAttempts=0;verifyLockedUntil=0;verifyLockoutCount=0;
+  appConfig={adminPinHash:'',techs:[]};
+  const badge=document.getElementById('roleBadge');if(badge)badge.style.display='none';
+  const sb=document.getElementById('settingsBtn');if(sb)sb.style.display='none';
+  const tb=document.getElementById('newTxBtn');if(tb)tb.style.display='none';
+  const lb=document.getElementById('logoutBtn');if(lb)lb.style.display='none';
+  document.querySelectorAll('.admin-only').forEach(el=>el.style.display='none');
+}
+window.resetAppState=resetAppState;
+
+// Called by Firebase module after login - show role screen
+window.showRoleScreen = function(){
+  document.getElementById('roleScreen').style.display='flex';
+};
+
+function selectRole(role){
+  // Kept for fallback role screen - routes to PIN flow
+  showTechPinScreen();
+}
+function showTechPinScreen(){
+  pinContext='tech';
+  pinAttempts=0;
+  if(Date.now()>pinLockedUntil)pinLockedUntil=0;
+  document.getElementById('pinTitle').textContent='Staff Sign In';
+  document.getElementById('pinSub').textContent='Enter your PIN or scan your ID badge';
+  document.getElementById('pinScanNote').style.display='';
+  document.getElementById('pinInput').value='';
+  document.getElementById('pinErr').textContent='';
+  document.getElementById('pinModal').style.display='flex';
+  setTimeout(()=>document.getElementById('pinInput').focus(),80);
 }
 
-// ═══ SETTINGS ═══
-let settingsTechIdx=null;
-function openSettings(){
-  if(currentRole!=='admin'){
-    console.log('[Settings] currentRole=',currentRole,'— blocked');
-    showToast('Admin access required','error');return;
+function pinInputChange(){
+  document.getElementById('pinErr').textContent='';
+}
+
+function pinCancel(){
+  pinAttempts=0;pinLockedUntil=0;pinLockoutCount=0;
+  document.getElementById('pinModal').style.display='none';
+  document.getElementById('pinErr').textContent='';
+  // Tech login - can't bypass PIN, log out instead
+  if(window.doLogout)window.doLogout();
+}
+
+function fmtLockTime(ms){
+  if(ms<=0)return'0s';
+  const s=Math.ceil(ms/1000);
+  if(s<60)return s+'s';
+  const m=Math.floor(s/60),rs=s%60;
+  return m+'m'+(rs>0?' '+rs+'s':'');
+}
+function pinShowLockout(errEl,until){
+  const remaining=until-Date.now();
+  if(remaining<=0){pinAttempts=0;pinLockedUntil=0;if(errEl)errEl.textContent='';
+    var pf=document.getElementById('pinAttemptFill');if(pf)pf.style.width='0%';
+    return;}
+  if(errEl)errEl.textContent='Too many attempts. Try again in '+fmtLockTime(remaining)+'.';
+  setTimeout(()=>pinShowLockout(errEl,until),1000);
+}
+async function pinSubmit(){
+  const errEl=document.getElementById('pinErr');
+  // Check lockout
+  if(Date.now()<pinLockedUntil){pinShowLockout(errEl,pinLockedUntil);return;}
+  const pin=document.getElementById('pinInput').value.trim();
+  if(!pin){errEl.textContent='Please enter your PIN.';return;}
+  errEl.textContent='Checking…';
+  if(pinContext==='admin'){
+    const ok=await checkPin(pin,appConfig.adminPinHash);
+    if(ok){
+      pinAttempts=0;pinLockedUntil=0;
+      document.getElementById('pinModal').style.display='none';
+      activateRole('admin',null);
+    } else {
+      pinAttempts++;
+      var _pf=document.getElementById('pinAttemptFill');if(_pf)_pf.style.width=(pinAttempts/PIN_MAX_ATTEMPTS*100)+'%';
+      document.getElementById('pinInput').value='';
+      if(pinAttempts>=PIN_MAX_ATTEMPTS){
+        pinLockoutCount++;
+        const adminLockMs=PIN_LOCKOUT_BASE_MS*Math.pow(2,pinLockoutCount-1);
+        pinLockedUntil=Date.now()+adminLockMs;
+        pinAttempts=0;
+        var _pf2=document.getElementById('pinAttemptFill');if(_pf2)_pf2.style.width='0%';
+        pinShowLockout(errEl,pinLockedUntil);
+      } else {
+        errEl.textContent='Incorrect PIN. '+(PIN_MAX_ATTEMPTS-pinAttempts)+' attempt'+(PIN_MAX_ATTEMPTS-pinAttempts!==1?'s':'')+' remaining.';
+        document.getElementById('pinInput').focus();
+      }
+    }
+  } else {
+    // Tech identification — check against hashed PINs
+    let matchedTech=null;
+    for(const t of appConfig.techs){
+      const ok=await checkPin(pin,t.pinHash||'');
+      if(ok){matchedTech=t;break;}
+    }
+    if(matchedTech){
+      pinAttempts=0;pinLockedUntil=0;
+      document.getElementById('pinModal').style.display='none';
+      activateRole('tech',matchedTech);
+    } else {
+      pinAttempts++;
+      var _pft=document.getElementById('pinAttemptFill');if(_pft)_pft.style.width=(pinAttempts/PIN_MAX_ATTEMPTS*100)+'%';
+      document.getElementById('pinInput').value='';
+      if(pinAttempts>=PIN_MAX_ATTEMPTS){
+        pinLockoutCount++;
+        const techLockMs=PIN_LOCKOUT_BASE_MS*Math.pow(2,pinLockoutCount-1);
+        pinLockedUntil=Date.now()+techLockMs;
+        pinAttempts=0;
+        var _pft2=document.getElementById('pinAttemptFill');if(_pft2)_pft2.style.width='0%';
+        pinShowLockout(errEl,pinLockedUntil);
+      } else {
+        errEl.textContent='PIN not recognised. '+(PIN_MAX_ATTEMPTS-pinAttempts)+' attempt'+(PIN_MAX_ATTEMPTS-pinAttempts!==1?'s':'')+' remaining.';
+        document.getElementById('pinInput').focus();
+      }
+    }
   }
+}
+
+// Also handle badge scan in PIN modal (for tech sign-in)
+function pinBadgeScan(badgeId){
+  if(pinContext!=='tech')return;
+  const tech=appConfig.techs.find(t=>t.badgeId&&t.badgeId===badgeId);
+  if(tech){
+    document.getElementById('pinModal').style.display='none';
+    activateRole('tech',tech);
+  } else {
+    document.getElementById('pinErr').textContent='Badge not recognised.';
+  }
+}
+
+function activateRole(role,tech){
+  currentRole=role;
+  currentTech=tech;
+  // Update UI
+  const badge=document.getElementById('roleBadge');
+  const adminEls=document.querySelectorAll('.admin-only');
+  const txBtn=document.getElementById('newTxBtn');
+  const settingsBtn=document.getElementById('settingsBtn');
+  // Always show logout button and role badge
+  const lb=document.getElementById('logoutBtn');
+  if(lb)lb.style.display='flex';
+  if(role==='admin'){
+    badge.className='role-badge admin';
+    badge.innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Admin';
+    badge.style.display='flex';
+    adminEls.forEach(el=>el.style.display='');
+    document.querySelectorAll('.mobile-nav .admin-only').forEach(el=>el.style.display='');
+    if(settingsBtn)settingsBtn.style.display='';
+    if(txBtn)txBtn.style.display='';
+  } else {
+    badge.className='role-badge tech';
+    badge.innerHTML='👤 '+(tech?tech.name:'Staff');
+    badge.style.display='flex';
+    adminEls.forEach(el=>el.style.display='none');
+    document.querySelectorAll('.mobile-nav .admin-only').forEach(el=>el.style.display='none');
+    if(settingsBtn)settingsBtn.style.display='none';
+    if(txBtn)txBtn.style.display='';
+  }
+  // Update performed-by displays
+  updateByDisplays();
+
+  showPage('inventory');
+  updateBadges();
+  applyFilters();
+  updateKbTip(); // update shortcut tooltip for this role
+}
+
+function updateByDisplays(){
+  const name=currentRole==='admin'?'Admin':(currentTech?currentTech.name:'—');
+  ['tx-ex-by-display','tx-new-by-display'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.textContent=name;
+  });
+}
+
+function getCurrentUserName(){
+  if(currentRole==='admin')return'Admin';
+  if(currentTech)return currentTech.name;
+  return'—';
+}
+
+// ═══ CONFIG LOADING ═══
+
+
+window.applyConfig = async function(cfg){
+  if(!cfg)return;
+  let needsSave=false;
+  // Handle admin PIN — migrate plain to hash if needed
+  if(cfg.adminPinHash){
+    appConfig.adminPinHash=cfg.adminPinHash;
+  } else if(cfg.adminPin){
+    // Legacy plain PIN — hash it and save
+    appConfig.adminPinHash=await hashPin(cfg.adminPin);
+    needsSave=true;
+  } else {
+    // First run — hash the default PIN
+    appConfig.adminPinHash=await hashPin('1234');
+    needsSave=true;
+  }
+  // Handle techs — migrate plain pins to hashes
+  if(cfg.techs&&cfg.techs.length){
+    const migrated=[];
+    for(const t of cfg.techs){
+      if(t.pinHash){
+        migrated.push(t);
+      } else if(t.pin){
+        // Legacy plain PIN — hash it
+        const pinHash=await hashPin(t.pin);
+        migrated.push({name:t.name,pinHash,badgeId:t.badgeId||''});
+        needsSave=true;
+      }
+    }
+    appConfig.techs=migrated;
+  }
+  if(needsSave&&window.fbSaveConfig){
+    // Save migrated hashes to Firestore (removes plain text PINs)
+    window.fbSaveConfig({adminPinHash:appConfig.adminPinHash,techs:appConfig.techs});
+  }
+};
+
+// ═══ VERIFY MODAL (tech removal authentication) ═══
+function openVerifyModal(removalData){
+  verifyContext=removalData;
+  verifyMode='pin';
+  verifyAttempts=0;
+  // Only reset lockout if it has expired
+  if(Date.now()>verifyLockedUntil)verifyLockedUntil=0;
+  document.getElementById('verifyPinInput').value='';
+  document.getElementById('verifyErr').textContent='';
+  document.getElementById('verifyScanErr').textContent='';
+  document.getElementById('verifyItemInfo').textContent=
+    'Removing 1 × '+(removalData.item||'item')+' — Used for patient';
+  setVerifyMode('pin');
+  document.getElementById('verifyModal').style.display='flex';
+  setTimeout(()=>document.getElementById('verifyPinInput').focus(),80);
+}
+
+function setVerifyMode(mode){
+  verifyMode=mode;
+  document.getElementById('vTabPin').classList.toggle('active',mode==='pin');
+  document.getElementById('vTabScan').classList.toggle('active',mode==='scan');
+  document.getElementById('verifyPinSection').style.display=mode==='pin'?'':'none';
+  document.getElementById('verifyScanSection').style.display=mode==='scan'?'':'none';
+  document.getElementById('verifySubmitBtn').style.display=mode==='pin'?'':'none';
+  if(mode==='pin')setTimeout(()=>document.getElementById('verifyPinInput').focus(),80);
+}
+
+function verifyBadgeScan(badgeId){
+  // Check if any tech has this badge ID
+  const tech=appConfig.techs.find(t=>t.badgeId&&t.badgeId===badgeId);
+  if(tech){
+    // Badge matches a tech - but must be the logged-in tech
+    if(currentTech&&tech.name===currentTech.name){
+      verifySuccess();
+    } else {
+      document.getElementById('verifyScanErr').textContent='Badge does not match your account.';
+    }
+  } else {
+    document.getElementById('verifyScanErr').textContent='Badge not recognised.';
+  }
+}
+
+function verifyShowLockout(errEl,until){
+  const remaining=until-Date.now();
+  if(remaining<=0){verifyAttempts=0;verifyLockedUntil=0;if(errEl)errEl.textContent='';
+    var vf=document.getElementById('verifyAttemptFill');if(vf)vf.style.width='0%';
+    return;}
+  if(errEl)errEl.textContent='Too many attempts. Try again in '+fmtLockTime(remaining)+'.';
+  setTimeout(()=>verifyShowLockout(errEl,until),1000);
+}
+async function verifySubmit(){
+  if(verifyMode==='scan')return;
+  const errEl=document.getElementById('verifyErr');
+  if(Date.now()<verifyLockedUntil){verifyShowLockout(errEl,verifyLockedUntil);return;}
+  const pin=document.getElementById('verifyPinInput').value.trim();
+  if(!pin){errEl.textContent='Enter your PIN.';return;}
+  errEl.textContent='Checking…';
+
+  let pinOk=false;
+  let matchedTech=null;
+
+  if(currentRole==='admin'){
+    pinOk=await checkPin(pin,appConfig.adminPinHash||'');
+  } else {
+    // Search ALL techs — PIN identifies who is removing the medication.
+    // Each staff member enters their OWN PIN. A wrong PIN means
+    // "this PIN doesn't match any staff member" — not a lockout event,
+    // since another staff member could still enter their correct PIN.
+    for(const t of (appConfig.techs||[])){
+      if(await checkPin(pin,t.pinHash||'')){
+        pinOk=true; matchedTech=t; break;
+      }
+    }
+    // Admin PIN works as fallback at tech station
+    if(!pinOk) pinOk=await checkPin(pin,appConfig.adminPinHash||'');
+  }
+
+  document.getElementById('verifyPinInput').value='';
+
+  if(pinOk){
+    // Success — identify the staff member and proceed
+    verifyAttempts=0; verifyLockedUntil=0;
+    var _vf=document.getElementById('verifyAttemptFill');
+    if(_vf)_vf.style.width='0%';
+    if(matchedTech) currentTech=matchedTech;
+    verifySuccess();
+  } else {
+    // Wrong PIN — increment counter for brute-force protection.
+    // Lockout only triggers after PIN_MAX_ATTEMPTS *consecutive* failures,
+    // preventing someone from hammering random PINs.
+    verifyAttempts++;
+    var _vf=document.getElementById('verifyAttemptFill');
+    if(_vf)_vf.style.width=(verifyAttempts/PIN_MAX_ATTEMPTS*100)+'%';
+    if(verifyAttempts>=PIN_MAX_ATTEMPTS){
+      verifyLockoutCount++;
+      const ms=PIN_LOCKOUT_BASE_MS*Math.pow(2,verifyLockoutCount-1);
+      verifyLockedUntil=Date.now()+ms;
+      verifyAttempts=0;
+      var _vf2=document.getElementById('verifyAttemptFill');if(_vf2)_vf2.style.width='0%';
+      verifyShowLockout(errEl,verifyLockedUntil);
+    } else {
+      const left=PIN_MAX_ATTEMPTS-verifyAttempts;
+      errEl.textContent='PIN not recognised. '+left+' attempt'+(left!==1?'s':'')+' remaining before lockout.';
+      document.getElementById('verifyPinInput').focus();
+    }
+  }
+}
+
+function verifySuccess(){
+  document.getElementById('verifyModal').style.display='none';
+  if(verifyContext){
+    if(verifyContext._undoTx){
+      // This is an undo, not a removal
+      completeUndoTransaction(verifyContext);
+    } else {
+      completeTechRemoval(verifyContext);
+    }
+    verifyContext=null;
+  }
+}
+
+function verifyCancel(){
+  verifyAttempts=0;verifyLockedUntil=0;verifyLockoutCount=0;
+  document.getElementById('verifyModal').style.display='none';
+  document.getElementById('verifyErr').textContent='';
+  document.getElementById('verifyPinInput').value='';
+  verifyContext=null;
+}
+
+function completeTechRemoval(data){
+  // data: {item, itemId, lot, unit, qty}
+  const qty=parseFloat(data.qty)||1;  // use qty from form, default 1
+  const idx=inventory.findIndex(r=>r.id===data.itemId);
+  if(idx<0){showToast('Item not found','error');return;}
+  const r=inventory[idx];
+  if(data.lot&&r.lotDetails&&r.lotDetails.length){
+    const li=r.lotDetails.findIndex(l=>l.lot===data.lot);
+    if(li>-1){
+      const old=r.lotDetails[li].qty;
+      r.lotDetails[li].qty=Math.max(0,(parseFloat(old)||0)-qty);
+      syncTotal(r);
+      logChange('qty',r.item,'Lot '+data.lot+': '+old+'→'+r.lotDetails[li].qty+' [Used for patient — '+getCurrentUserName()+']');
+    }
+  } else {
+    const old=parseFloat(r.quantity)||0;
+    r.quantity=Math.max(0,old-qty);
+    syncTotal(r);
+    logChange('qty',r.item,'Qty:'+old+'→'+r.quantity+' [Used for patient — '+getCurrentUserName()+']');
+  }
+  const tx={id:Date.now()+Math.random(),mode:'remove',type:'use',reasonCode:'used_patient',
+    reasonLabel:'Used for patient',item:r.item,qty,unit:data.unit||'units',
+    lot:data.lot||'',by:getCurrentUserName(),
+    date:new Date().toISOString().slice(0,10),notes:'',ts:new Date().toISOString()};
+  transactions.unshift(tx);
+  saveAll();closeTxModal();applyFilters();
+  showToast(qty+' × '+r.item+' removed — Used for patient','warning');
+}
+
+// ═══ TX MODAL - ROLE-AWARE OPEN ═══
+
+// ═══ SETTINGS ═══
+function openSettings(){
+  if(currentRole!=='admin'){showToast('Admin access required','error');return;}
   renderTechList();
-  ['s-admin-pin-current','s-admin-pin-new','s-admin-pin-confirm'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('s-admin-pin-current').value='';
+  document.getElementById('s-admin-pin-new').value='';
+  document.getElementById('s-admin-pin-confirm').value='';
   document.getElementById('s-admin-pin-err').textContent='';
   hideAddTech();
   document.getElementById('settingsModal').style.display='flex';
 }
-function closeSettings(){document.getElementById('settingsModal').style.display='none';}
-function renderTechList(){
-  const el=document.getElementById('s-tech-list');if(!el)return;
-  if(!appConfig.techs.length){el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">No staff members yet.</div>';return;}
-  el.innerHTML=appConfig.techs.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><div style="flex:1"><div style="font-size:13px;font-weight:600">${escH(t.name)}</div><div style="font-size:11px;color:var(--text3)">PIN: ••••••${t.badgeId?' · Badge: '+t.badgeId.slice(0,8)+'…':''}</div></div><button class="btn btn-s btn-xs" onclick="editTech(${i})">Edit</button><button class="btn btn-xs" style="background:var(--danger);color:#fff" onclick="deleteTech(${i})">Delete</button></div>`).join('');
+
+function closeSettings(){
+  document.getElementById('settingsModal').style.display='none';
 }
-function showAddTech(){settingsTechIdx=null;['s-tech-name','s-tech-pin','s-tech-badge'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('s-tech-err').textContent='';document.getElementById('addTechForm').style.display='';}
-function hideAddTech(){document.getElementById('addTechForm').style.display='none';settingsTechIdx=null;}
-function editTech(i){const t=appConfig.techs[i];settingsTechIdx=i;document.getElementById('s-tech-name').value=t.name;document.getElementById('s-tech-pin').value='';document.getElementById('s-tech-badge').value=t.badgeId||'';document.getElementById('s-tech-err').textContent='';document.getElementById('addTechForm').style.display='';}
+
+function renderTechList(){
+  const el=document.getElementById('s-tech-list');
+  if(!el)return;
+  if(!appConfig.techs.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">No staff members yet. Add one above.</div>';
+    return;
+  }
+  el.innerHTML=appConfig.techs.map((t,i)=>`
+    <div class="tech-row">
+      <div class="tech-name-cell">${t.name}</div>
+      <div class="tech-pin-cell">PIN: ••••••</div>
+      <div style="font-size:11px;color:var(--text3);flex:1">${t.badgeId?'Badge: '+t.badgeId.substring(0,8)+'…':''}</div>
+      <button class="btn btn-s btn-sm" onclick="editTech(${i})">Edit</button>
+      <button class="btn btn-d btn-sm" onclick="deleteTech(${i})">Delete</button>
+    </div>`).join('');
+}
+
+function showAddTech(){
+  document.getElementById('s-add-tech-form').style.display='';
+  document.getElementById('s-tech-name').value='';
+  document.getElementById('s-tech-pin').value='';
+  document.getElementById('s-tech-badge').value='';
+  document.getElementById('s-add-tech-err').textContent='';
+  setTimeout(()=>document.getElementById('s-tech-name').focus(),80);
+}
+
+function hideAddTech(){
+  const form=document.getElementById('s-add-tech-form');
+  if(form){form.style.display='none';form.dataset.editIdx='';}
+}
+
 async function saveTech(){
-  const name=document.getElementById('s-tech-name').value.trim(),pin=document.getElementById('s-tech-pin').value.trim(),badge=document.getElementById('s-tech-badge').value.trim(),errEl=document.getElementById('s-tech-err');
+  const name=document.getElementById('s-tech-name').value.trim();
+  const pin=document.getElementById('s-tech-pin').value.trim();
+  const badge=document.getElementById('s-tech-badge').value.trim();
+  const form=document.getElementById('s-add-tech-form');
+  const editIdx=form.dataset.editIdx!==undefined&&form.dataset.editIdx!==''?parseInt(form.dataset.editIdx):-1;
+  const errEl=document.getElementById('s-add-tech-err');
   if(!name){errEl.textContent='Name is required.';return;}
-  if(!pin&&settingsTechIdx===null){errEl.textContent='PIN is required for new staff.';return;}
+  // PIN is required for new techs, optional when editing (blank = keep existing)
+  if(!pin&&editIdx<0){errEl.textContent='PIN is required for new staff members.';return;}
   if(pin&&pin.length<4){errEl.textContent='PIN must be at least 4 characters.';return;}
   errEl.textContent='Saving…';
-  const pinHash=pin?await hashPin(pin):null;
-  if(settingsTechIdx!==null){const t=appConfig.techs[settingsTechIdx];t.name=name;if(pinHash)t.pinHash=pinHash;t.badgeId=badge;}
-  else{appConfig.techs.push({name,pinHash:pinHash||'',badgeId:badge});}
-  if(window.fbSaveConfig)window.fbSaveConfig({adminPinHash:appConfig.adminPinHash,techs:appConfig.techs});
-  hideAddTech();renderTechList();showToast('Staff member saved','ok');errEl.textContent='';
+  // Hash the PIN (or keep existing hash if blank during edit)
+  let pinHash=pin?await hashPin(pin):(editIdx>=0&&appConfig.techs[editIdx]?appConfig.techs[editIdx].pinHash:'');
+  if(!pinHash){errEl.textContent='PIN is required.';return;}
+  // Check PIN uniqueness by hash (skip current entry if editing)
+  const pinConflict=appConfig.techs.find((t,i)=>t.pinHash===pinHash&&i!==editIdx);
+  if(pinConflict){errEl.textContent='That PIN is already in use.';return;}
+  const techEntry={name,pinHash,badgeId:badge};
+  if(editIdx>=0){
+    appConfig.techs[editIdx]=techEntry;
+    // Update currentTech if we just edited the logged-in tech
+    if(currentTech&&currentTech.name===appConfig.techs[editIdx].name)currentTech=techEntry;
+    showToast('Staff member updated: '+name,'success');
+  } else {
+    appConfig.techs.push(techEntry);
+    showToast('Staff member added: '+name,'success');
+  }
+  errEl.textContent='';
+  saveConfig();renderTechList();hideAddTech();
 }
-function deleteTech(i){
-  if(!confirm('Remove '+appConfig.techs[i].name+'?'))return;
-  appConfig.techs.splice(i,1);
-  if(window.fbSaveConfig)window.fbSaveConfig({adminPinHash:appConfig.adminPinHash,techs:appConfig.techs});
-  renderTechList();showToast('Staff member removed','warning');
+
+function deleteTech(idx){
+  if(!confirm('Remove '+appConfig.techs[idx].name+' from staff list?'))return;
+  appConfig.techs.splice(idx,1);
+  saveConfig();
+  renderTechList();
+}
+
+function editTech(idx){
+  const t=appConfig.techs[idx];
+  showAddTech();
+  document.getElementById('s-tech-name').value=t.name;
+  document.getElementById('s-tech-pin').value=t.pin;
+  document.getElementById('s-tech-badge').value=t.badgeId||'';
+  document.getElementById('s-add-tech-form').dataset.editIdx=idx;
 }
 async function saveAdminPin(){
-  const cur=document.getElementById('s-admin-pin-current').value.trim(),nw=document.getElementById('s-admin-pin-new').value.trim(),conf=document.getElementById('s-admin-pin-confirm').value.trim(),errEl=document.getElementById('s-admin-pin-err');
-  if(!cur||!nw||!conf){errEl.textContent='All fields required.';return;}
-  if(nw!==conf){errEl.textContent='New PINs do not match.';return;}
-  if(nw.length<4){errEl.textContent='PIN must be at least 4 characters.';return;}
-  errEl.textContent='Verifying…';
-  const ok=await checkPin(cur,appConfig.adminPinHash||'');
-  if(!ok){errEl.textContent='Current PIN is incorrect.';return;}
+  const cur=document.getElementById('s-admin-pin-current').value.trim();
+  const nw=document.getElementById('s-admin-pin-new').value.trim();
+  const cf=document.getElementById('s-admin-pin-confirm').value.trim();
+  const err=document.getElementById('s-admin-pin-err');
+  if(!cur){err.textContent='Enter your current PIN.';return;}
+  if(!nw){err.textContent='New PIN cannot be empty.';return;}
+  if(nw.length<4){err.textContent='PIN must be at least 4 characters.';return;}
+  if(nw!==cf){err.textContent='New PINs do not match.';return;}
+  err.textContent='Verifying…';
+  // Verify current PIN against stored hash
+  const curOk=await checkPin(cur,appConfig.adminPinHash);
+  if(!curOk){err.textContent='Current PIN is incorrect.';return;}
+  err.textContent='Saving…';
+  // Hash and store new PIN
   appConfig.adminPinHash=await hashPin(nw);
-  if(window.fbSaveConfig)window.fbSaveConfig({adminPinHash:appConfig.adminPinHash,techs:appConfig.techs});
-  errEl.style.color='var(--ok-mid)';errEl.textContent='✓ PIN updated.';
-  ['s-admin-pin-current','s-admin-pin-new','s-admin-pin-confirm'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  setTimeout(()=>{errEl.textContent='';errEl.style.color='var(--danger)';},3000);
+  saveConfig();
+  err.style.color='var(--okm)';err.textContent='Admin PIN updated.';
+  document.getElementById('s-admin-pin-current').value='';
+  document.getElementById('s-admin-pin-new').value='';
+  document.getElementById('s-admin-pin-confirm').value='';
+  setTimeout(()=>{err.textContent='';err.style.color='var(--danger)';},3000);
 }
-function showTechPinScreen(){
-  // Tech goes straight in now - no PIN at login
-  // This function kept for compatibility
-  if(window.activateRole)window.activateRole('tech',null);
+
+function saveConfig(){
+  // Save to Firestore via window.fbSaveConfig
+  if(window.fbSaveConfig)window.fbSaveConfig(appConfig);
+}
+
+// ═══ TX CAMERA (inside modal) ═══
+let txCamFrame=null;
+async function toggleTxCamera(){
+  if(txCamStream){stopTxCam();return;}
+  const overlay=document.getElementById('txCamOverlay');
+  const vid=document.getElementById('txCamVideo');
+  const result=document.getElementById('txCamResult');
+  if(!overlay||!vid)return;
+  try{
+    txCamStream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}
+    });
+    vid.srcObject=txCamStream;
+    if(result)result.textContent='';
+    overlay.style.display='flex';
+    startTxDetect(vid);
+  }catch(e){
+    showToast('Camera not available — check browser permissions','error');
+  }
+}
+
+function stopTxCam(){
+  if(txCamStream){txCamStream.getTracks().forEach(t=>t.stop());txCamStream=null;}
+  cancelAnimationFrame(txCamFrame);txCamFrame=null;
+  const overlay=document.getElementById('txCamOverlay');
+  if(overlay)overlay.style.display='none';
+}
+
+function startTxDetect(vid){
+  if(!('BarcodeDetector' in window)){
+    showToast('Camera scanning not supported — try Chrome or Edge','warning');
+    stopTxCam();return;
+  }
+  const det=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code','upc_a','upc_e','itf']});
+  const flash=document.getElementById('txCamFlash');
+  const result=document.getElementById('txCamResult');
+  let lastCode='',lastTime=0;
+  function detect(){
+    txCamFrame=requestAnimationFrame(detect);
+    if(vid.readyState<2)return;
+    det.detect(vid).then(function(codes){
+      if(!codes.length)return;
+      const code=codes[0].rawValue;
+      const now=Date.now();
+      if(_scanLocked||(code===lastCode&&now-lastTime<SCAN_COOLDOWN))return;
+      lastCode=code;lastTime=now;
+      // Flash feedback
+      if(flash){flash.classList.add('flash');setTimeout(()=>flash.classList.remove('flash'),250);}
+      if(result)result.textContent='✓ Scanned: '+code;
+      // Brief pause so user sees the result, then close and fill search
+      setTimeout(function(){
+        stopTxCam();
+        // Fill the active search input based on which flow is open
+        const remFlow=document.getElementById('tx-rem-flow');
+        const isRemove=remFlow&&remFlow.style.display!=='none';
+        const searchId=isRemove?'tx-rem-search':'tx-add-search';
+        const searchEl=document.getElementById(searchId);
+        if(searchEl){
+          searchEl.value=code;
+          searchEl.dispatchEvent(new Event('input'));
+          searchEl.focus();
+        }
+      },600);
+    }).catch(function(){});
+  }
+  detect();
+}
+
+// ═══ MOBILE NAV & FILTERS ═══
+function mobileNav(page){
+  // Update bottom nav active state
+  ['inventory','analytics','changelog'].forEach(p=>{
+    const btn=document.getElementById('mn-'+p);
+    if(btn)btn.classList.toggle('active',p===page);
+  });
+  showPage(page);
+}
+
+function openFilterDrawer(){
+  // Sync desktop selects → mobile selects
+  ['fCat','fStatus','fVendor','sortSel'].forEach(id=>{
+    const desk=document.getElementById(id);
+    const mob=document.getElementById(id+'-m');
+    if(desk&&mob)mob.value=desk.value;
+  });
+  // Sync vendor options
+  const dv=document.getElementById('fVendor');
+  const mv=document.getElementById('fVendor-m');
+  if(dv&&mv){mv.innerHTML=dv.innerHTML;}
+  document.getElementById('filterDrawer').classList.add('open');
+}
+
+function closeFilterDrawer(){
+  document.getElementById('filterDrawer').classList.remove('open');
+}
+
+function syncMobileFilter(desktopId,mobileId){
+  const mob=document.getElementById(mobileId);
+  const desk=document.getElementById(desktopId);
+  if(mob&&desk){desk.value=mob.value;applyFilters();}
+}
+
+// Update mobile nav badges when updateBadges runs
+
+// ═══ ITEM IMAGE SYSTEM ═══
+// Stores compressed base64 image on the item record as r.image
+// Max stored size: 800×800px, JPEG quality 0.72 → ~50-100KB typical
+
+let _imgCamStream=null, _imgFacing='environment', _imgPendingData=null;
+
+// ── compress image via canvas ──
+function compressImage(file, maxPx=800, quality=0.72){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        let w=img.width,h=img.height;
+        if(w>maxPx||h>maxPx){
+          if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}
+          else{w=Math.round(w*maxPx/h);h=maxPx;}
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg',quality));
+      };
+      img.onerror=reject;
+      img.src=e.target.result;
+    };
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── handle file upload ──
+async function handleImgUpload(input){
+  const file=input.files[0];
+  if(!file)return;
+  if(!file.type.startsWith('image/')){showToast('Please select an image file','error');return;}
+  if(file.size>15*1024*1024){showToast('Image too large (max 15MB)','error');return;}
+  showToast('Compressing image…','');
+  try{
+    const data=await compressImage(file);
+    setItemImage(data);
+  }catch(e){showToast('Could not process image','error');}
+  input.value=''; // reset so same file can be re-selected
+}
+
+// ── set image in the modal preview ──
+function setItemImage(dataUrl){
+  _imgPendingData=dataUrl;
+  const preview=document.getElementById('imgPreview');
+  const placeholder=document.getElementById('imgPlaceholder');
+  const removeBtn=document.getElementById('imgRemoveBtn');
+  const box=document.getElementById('imgPreviewBox');
+  if(preview){preview.src=dataUrl;preview.style.display='';}
+  if(placeholder)placeholder.style.display='none';
+  if(removeBtn)removeBtn.style.display='';
+  if(box)box.style.borderStyle='solid';
+  showToast('Image ready — save item to store it','ok');
+}
+
+function clearItemImage(){
+  _imgPendingData=null;
+  const preview=document.getElementById('imgPreview');
+  const placeholder=document.getElementById('imgPlaceholder');
+  const removeBtn=document.getElementById('imgRemoveBtn');
+  const box=document.getElementById('imgPreviewBox');
+  if(preview){preview.src='';preview.style.display='none';}
+  if(placeholder)placeholder.style.display='';
+  if(removeBtn)removeBtn.style.display='none';
+  if(box)box.style.borderStyle='dashed';
+}
+
+function loadItemImageIntoModal(r){
+  if(r&&r.image){
+    setItemImage(r.image);
+  } else {
+    clearItemImage();
+  }
+}
+
+// ── CAMERA CAPTURE ──
+async function openImgCapture(){
+  const overlay=document.getElementById('imgCaptureOverlay');
+  const video=document.getElementById('imgCaptureVideo');
+  if(!overlay||!video)return;
+  try{
+    _imgCamStream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:_imgFacing},width:{ideal:1280},height:{ideal:960}}
+    });
+    video.srcObject=_imgCamStream;
+    overlay.style.display='flex';
+  }catch(e){
+    showToast('Camera not available — check browser permissions','error');
+  }
+}
+
+function closeImgCapture(){
+  if(_imgCamStream){_imgCamStream.getTracks().forEach(t=>t.stop());_imgCamStream=null;}
+  const overlay=document.getElementById('imgCaptureOverlay');
+  const video=document.getElementById('imgCaptureVideo');
+  if(overlay)overlay.style.display='none';
+  if(video)video.srcObject=null;
+}
+
+async function switchImgCamera(){
+  _imgFacing=_imgFacing==='environment'?'user':'environment';
+  closeImgCapture();
+  await new Promise(r=>setTimeout(r,200));
+  openImgCapture();
+}
+
+function captureImg(){
+  const video=document.getElementById('imgCaptureVideo');
+  const canvas=document.getElementById('imgCaptureCanvas');
+  if(!video||!canvas)return;
+  // Flash effect
+  const overlay=document.getElementById('imgCaptureOverlay');
+  if(overlay){
+    overlay.style.background='rgba(255,255,255,.8)';
+    setTimeout(()=>{overlay.style.background='rgba(0,0,0,.9)';},120);
+  }
+  // Draw frame to canvas and compress
+  let w=video.videoWidth,h=video.videoHeight;
+  const maxPx=800;
+  if(w>maxPx||h>maxPx){
+    if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}
+    else{w=Math.round(w*maxPx/h);h=maxPx;}
+  }
+  canvas.width=w;canvas.height=h;
+  canvas.getContext('2d').drawImage(video,0,0,w,h);
+  const dataUrl=canvas.toDataURL('image/jpeg',0.72);
+  closeImgCapture();
+  setItemImage(dataUrl);
+}
+
+let _pendingImageForSave=null;
+
+
+// ═══ UNDO TRANSACTION ═══
+const UNDO_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+
+function canUndoTx(tx) {
+  if (!tx || tx.mode !== 'remove') return false;
+  if (tx.reversed) return false;
+  if (Date.now() - new Date(tx.ts).getTime() > UNDO_WINDOW_MS) return false;
+  // Both admin and tech can undo any removal within the 30-min window.
+  // (Only one shared tech login exists, so "own transaction" check is not needed.)
+  return true;
+}
+
+function undoTransaction(txId) {
+  const tx = (window.transactions||transactions).find(t => t.id === txId);
+  if (!tx || !canUndoTx(tx)) {
+    showToast('This transaction can no longer be undone', 'error');
+    return;
+  }
+  // Require PIN verification before undoing
+  requireVerifyForUndo(tx);
+}
+
+function requireVerifyForUndo(tx) {
+  // Use existing verify modal flow
+  const data = {
+    item:   tx.item,
+    itemId: inventory.find(r => r.item === tx.item)?.id,
+    lot:    tx.lot,
+    unit:   tx.unit,
+    _undoTx: tx,
+  };
+  // Show verify modal with custom message
+  const verifyInfo = document.getElementById('verifyItemInfo');
+  if (verifyInfo) {
+    verifyInfo.textContent = 'Returning ' + (tx.qty||1) + ' × ' + tx.item + ' to stock — not used for patient';
+  }
+  verifyContext = data;
+  verifyAttempts = 0;
+  if (Date.now() > verifyLockedUntil) verifyLockedUntil = 0;
+  document.getElementById('verifyPinInput').value = '';
+  document.getElementById('verifyErr').textContent = '';
+  document.getElementById('verifyModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('verifyPinInput').focus(), 80);
+}
+
+function completeUndoTransaction(data) {
+  const tx = data._undoTx;
+  if (!tx) return;
+
+  // Double-check window hasn't expired during PIN entry
+  if (!canUndoTx(tx)) {
+    showToast('Undo window expired', 'error');
+    return;
+  }
+
+  const r = inventory.find(x => x.item === tx.item);
+  if (!r) { showToast('Item not found in inventory', 'error'); return; }
+
+  // Return qty to the correct lot
+  if (tx.lot && r.lotDetails && r.lotDetails.length) {
+    const li = r.lotDetails.findIndex(l => l.lot === tx.lot);
+    if (li > -1) {
+      const old = r.lotDetails[li].qty;
+      r.lotDetails[li].qty = (parseFloat(old) || 0) + (parseFloat(tx.qty) || 1);
+      syncTotal(r);
+      logChange('qty', r.item,
+        'Lot ' + tx.lot + ': ' + old + '→' + r.lotDetails[li].qty +
+        ' [UNDO — returned to stock by ' + getCurrentUserName() + ']');
+    } else {
+      // Lot no longer exists — add back to total directly
+      r.quantity = (parseFloat(r.quantity) || 0) + (parseFloat(tx.qty) || 1);
+      syncTotal(r);
+    }
+  } else {
+    r.quantity = (parseFloat(r.quantity) || 0) + (parseFloat(tx.qty) || 1);
+    syncTotal(r);
+    logChange('qty', r.item,
+      'Qty returned: +' + tx.qty + ' [UNDO by ' + getCurrentUserName() + ']');
+  }
+
+  // Mark original transaction as reversed
+  const txIdx = (window.transactions||transactions).findIndex(t => t.id === tx.id);
+  if (txIdx > -1) {
+    (window.transactions||transactions)[txIdx].reversed = true;
+    (window.transactions||transactions)[txIdx].reversedBy = getCurrentUserName();
+    (window.transactions||transactions)[txIdx].reversedAt = new Date().toISOString();
+  }
+
+  // Add a reversal transaction record
+  const reversalTx = {
+    id:          Date.now() + Math.random(),
+    mode:        'add',
+    type:        'undo',
+    reasonCode:  'undo',
+    reasonLabel: 'Returned to stock (not used)',
+    item:        tx.item,
+    qty:         tx.qty || 1,
+    unit:        tx.unit || 'units',
+    lot:         tx.lot || '',
+    by:          getCurrentUserName(),
+    date:        new Date().toISOString().slice(0, 10),
+    notes:       'Undo of removal at ' + new Date(tx.ts).toLocaleTimeString(),
+    ts:          new Date().toISOString(),
+  };
+  (window.transactions||transactions).unshift(reversalTx);
+
+  saveAll();
+  applyFilters();
+  renderHistPanel();
+  showToast(tx.item + ' returned to stock', 'ok');
+}
+
+
+// ═══ INACTIVE ITEMS ═══
+function toggleInactive(id){
+  const r=inventory.find(x=>x.id===id);
+  if(!r)return;
+  r.inactive=!r.inactive;
+  logChange('edit',r.item,(r.inactive?'Marked inactive':'Restored to active'));
+  saveAll();applyFilters();
+  showToast(r.item+(r.inactive?' marked inactive':' restored to active'),
+            r.inactive?'warn':'ok');
+}
+
+function renderInactiveTab(){
+  const body=document.getElementById('inactiveBody');
+  if(!body)return;
+  const inactive=inventory.filter(r=>r.inactive&&r.item&&r.item.trim());
+  if(!inactive.length){
+    body.innerHTML='<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No inactive items</td></tr>';
+    return;
+  }
+  body.innerHTML=inactive.map(r=>`<tr style="opacity:.7">
+    <td><strong>${r.item}</strong>${r.notes?'<br><small style="color:var(--text3)">'+r.notes+'</small>':''}</td>
+    <td style="font-size:12px">${r.category||'—'}</td>
+    <td style="font-size:13px;font-weight:700">${calcTotal(r)||0}</td>
+    <td style="font-size:12px">${r.vendor||'—'}</td>
+    <td><button class="act-btn" title="Restore to active" onclick="toggleInactive(${r.id});renderInactiveTab();updateInactiveBadge()" style="color:var(--ok-mid);border-color:var(--ok-mid)">↩ Restore</button></td>
+  </tr>`).join('');
+}
+
+function updateInactiveBadge(){
+  const cnt=inventory.filter(r=>r.inactive).length;
+  const el=document.getElementById('inactive-count');
+  if(el)el.textContent=cnt;
+}
+
+// ═══ PRICE RANGE HELPERS ═══
+function getItemPriceRange(r){
+  // Collect prices from lots
+  const lotPrices=(r.lotDetails||[]).map(l=>parseFloat(l.price)||0).filter(p=>p>0);
+  const itemPrice=parseFloat(r.price)||0;
+  const itemPriceLow=parseFloat(r.priceLow)||0;
+  const itemPriceHigh=parseFloat(r.priceHigh)||0;
+
+  // If lots have prices, derive from lots
+  if(lotPrices.length>1){
+    const lo=Math.min(...lotPrices),hi=Math.max(...lotPrices);
+    if(lo!==hi)return{lo,hi,isRange:true};
+    return{lo,hi:lo,isRange:false};
+  }
+  if(lotPrices.length===1)return{lo:lotPrices[0],hi:lotPrices[0],isRange:false};
+
+  // Otherwise use item-level price(s)
+  if(itemPriceLow>0&&itemPriceHigh>0&&itemPriceLow!==itemPriceHigh)
+    return{lo:itemPriceLow,hi:itemPriceHigh,isRange:true};
+  const p=itemPrice||itemPriceLow||itemPriceHigh;
+  return{lo:p,hi:p,isRange:false};
+}
+
+function formatPrice(r){
+  const {lo,hi,isRange}=getItemPriceRange(r);
+  if(!lo&&!hi)return'—';
+  if(isRange)return`{$${lo.toFixed(2)} — $${hi.toFixed(2)}}`;
+  return`$${lo.toFixed(2)}`;
 }
 
 // ═══ SHORTCUT TOOLTIP ═══
 function updateKbTip(){
-  const tip=document.getElementById('kbTip');if(!tip)return;
-  const shared=[{key:'Ctrl+Q',label:'New transaction'},{key:'Ctrl+K',label:'Focus search'},{key:'Esc',label:'Close modal'}];
-  const adminOnly=[{key:'Ctrl+N',label:'New item'},{key:'Ctrl+E',label:'Export CSV'}];
-  const rows=currentRole==='admin'?[...shared,...adminOnly]:shared;
-  tip.innerHTML=rows.map(r=>'<div class="kb-tip-row"><span class="kb-tip-label">'+r.label+'</span><span class="kb-tip-key">'+r.key+'</span></div>').join('');
+  const tip=document.getElementById('kbTip');
+  if(!tip)return;
+
+  // Shortcuts available to everyone
+  const shared=[
+    {key:'Ctrl+Q', label:'New transaction'},
+    {key:'Ctrl+K', label:'Focus search'},
+    {key:'Esc',    label:'Close modal'},
+  ];
+
+  // Admin-only shortcuts
+  const adminOnly=[
+    {key:'Ctrl+N', label:'New item'},
+    {key:'Ctrl+E', label:'Export CSV'},
+  ];
+
+  const rows=currentRole==='admin'
+    ?[...shared,...adminOnly]
+    :shared;
+
+  tip.innerHTML=rows.map(r=>
+    '<div class="kb-tip-row">'+
+      '<span class="kb-tip-label">'+r.label+'</span>'+
+      '<span class="kb-tip-key">'+r.key+'</span>'+
+    '</div>'
+  ).join('');
 }
-
-// ═══ KEYBOARD HANDLER ═══
-document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){
-    closeItemModal();if(typeof closeLotModal==='function')closeLotModal();closeDelModal();closeSettings();closeVerifyModal();closeImgCapture();stopCam();stopTxCam();
-    document.getElementById('bDelModal')?.classList.remove('open');
-    return;
-  }
-  if(e.key==='Enter'){
-    const ae=document.activeElement;
-    if(ae&&(ae.tagName==='INPUT'||ae.tagName==='SELECT')){
-      if(ae.id==='verifyPinInput'){e.preventDefault();verifySubmit();return;}
-      if(ae.id==='pinInput'){e.preventDefault();submitPin();return;}
-      if(ae.id==='loginPass'||ae.id==='loginEmail'){e.preventDefault();doLogin();return;}
-      const modal=ae.closest('.mo');
-      if(modal){const primary=modal.querySelector('.btn-p');if(primary&&!primary.disabled){e.preventDefault();primary.click();return;}}
-    }
-  }
-  const ae2=document.activeElement;const tag=ae2?.tagName;
-  const isScanLive=ae2?.id==='scanLive';
-  const isTyping=!isScanLive&&(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||ae2?.isContentEditable);
-  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey){
-    switch(e.key.toLowerCase()){
-      case 'k':e.preventDefault();document.getElementById('searchInput')?.focus();document.getElementById('searchInput')?.select();break;
-      case 'q':e.preventDefault();if(!isTyping)openTxModal();break;
-      case 'n':if(!isTyping&&currentRole==='admin'){e.preventDefault();openItemModal();}break;
-      case 'e':if(!isTyping&&currentRole==='admin'){e.preventDefault();document.querySelector('[onclick*="exportCSV"]')?.click();}break;
-    }
-  }
-},true);
-
-
-let clTypeFilter='all';
-function clFilt(type,el){
-  clTypeFilter=type;
-  document.querySelectorAll('.clfb').forEach(b=>b.classList.remove('active'));
-  if(el)el.classList.add('active');
-  renderChangelog();
-}
-function renderChangelog(){
-  const body=document.getElementById('clBody');if(!body)return;
-  const days=parseInt(document.getElementById('cl-date-filter')?.value||'9999');
-  const cutoff=days===9999?0:Date.now()-days*86400000;
-  let entries=[...(window.changeLog||changeLog)];
-  // Date filter
-  if(cutoff>0)entries=entries.filter(e=>new Date(e.ts).getTime()>=cutoff);
-  // Type filter
-  if(clTypeFilter&&clTypeFilter!=='all')entries=entries.filter(e=>e.type===clTypeFilter);
-  entries.sort((a,b)=>new Date(b.ts)-new Date(a.ts));
-  if(!entries.length){
-    body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--text3)">No changes recorded for this filter.</td></tr>';
-    return;
-  }
-  const typeLabel={'add':'Added','edit':'Edited','del':'Deleted','qty':'Qty Change'};
-  const typeCls={'add':'tx-add','edit':'tx-note','del':'tx-remove','qty':'tx-note'};
-  body.innerHTML=entries.slice(0,300).map(e=>{
-    const d=new Date(e.ts);
-    const ts=d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-    const lbl=typeLabel[e.type]||e.type||'Change';
-    const cls=typeCls[e.type]||'tx-note';
-    return '<tr>'
-      +'<td><span class="'+cls+'">'+lbl+'</span></td>'
-      +'<td><strong>'+escH(e.item||'')+'</strong></td>'
-      +'<td style="font-size:12px;color:var(--text2)">'+escH(e.detail||'')+'</td>'
-      +'<td style="font-size:11px;color:var(--text3)">'+ts+'</td>'
-      +'</tr>';
-  }).join('');
-}
-
-function switchTR(days,el){window._trDays=days;document.querySelectorAll('#trPeriodTabs .pt').forEach(b=>b.classList.remove('active'));if(el)el.classList.add('active');renderTrends();}
 // ═══ BOOT ═══
-window.activateRole=function(role,tech){
-  currentRole=role;currentTech=tech;
-  const ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp');
-  if(ls)ls.style.display='none';if(ma)ma.style.display='';
-  const badge=document.getElementById('roleBadge');
-  if(badge){badge.textContent=(role==='admin'?'🔑 Admin':'👤 '+(tech?tech.name:'Staff'));badge.className='rb '+(role==='admin'?'rb-a':'rb-t');badge.style.display='flex';}
-  document.querySelectorAll('.admin-only').forEach(el=>el.style.display=role==='admin'?'':'none');
-  document.querySelectorAll('.tech-only').forEach(el=>el.style.display=role==='tech'?'':'none');
-  const logoutBtn=document.getElementById('logoutBtn');if(logoutBtn)logoutBtn.style.display='';
-  const settingsBtn=document.getElementById('settingsBtn');if(settingsBtn)settingsBtn.style.display=role==='admin'?'':'none';
-  showPage('inventory');updateBadges();applyFilters();updateInactiveBadge();updateKbTip();
-  // Auto-focus scanner on inventory page
-  setTimeout(()=>{const sl=document.getElementById('scanLive');if(sl)sl.focus();},300);
+// Expose functions so Firebase module can call them after data loads
+window.RAW = RAW;
+window.updateBadges = updateBadges;
+window.applyFilters = applyFilters;
+window.renderChangelog = renderChangelog;
+window.renderHistPanel = renderHistPanel;
+window.showRoleScreen = showRoleScreen;
+window.showTechPinScreen = showTechPinScreen;
+window.applyConfig = applyConfig;
+window.activateRole = activateRole;
+window.logChange = logChange;
+window.saveAll = saveAll;
+window.getSkus = getSkus;
+window.calcTotal = calcTotal;
+window.getFefo = getFefo;
+window.findItems = findItems;
+window.findBySku = findBySku;
+// localFallbackBoot: seeds from RAW if Firebase unreachable
+window.localFallbackBoot = function(){
+  if(!window.inventory.length){
+    var seeded=RAW.map(function(r,i){
+      return{id:i+1,item:r.item||'',notes:r.notes||'',expiry:r.expiry||'',
+        skus:r.sku?[r.sku].filter(Boolean):[],
+        lotNums:[],lotDetails:[],quantity:parseFloat(r.quantity)||0,
+        reorder:r.reorder||'OK',price:r.price||0,par:r.par||'',
+        category:r.category||'',vendor:r.vendor||''};
+    });
+    seeded.forEach(function(r){window.inventory.push(r);});
+  }
+  updateBadges();applyFilters();
 };
-window.resetAppState=function(){
-  currentRole=null;currentTech=null;
-  const ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp');
-  if(ls)ls.style.display='flex';if(ma)ma.style.display='none';
-};
-window.getCurrentUserName=function(){
-  if(currentRole==='admin')return'Admin';if(currentTech)return currentTech.name;return'—';
-};
-function getCurrentUserName(){if(currentRole==='admin')return'Admin';if(currentTech)return currentTech.name;return'—';}
-window.localFallbackBoot=function(){if(!loadAll())initInventory();updateBadges();applyFilters();};
 
-// Page helpers
-function showSub(id){
-  document.querySelectorAll('.sub-page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.snt').forEach(t=>t.classList.remove('active'));
-  const page=document.getElementById('sub-'+id),tab=document.getElementById('snt-'+id);
-  if(page)page.classList.add('active');if(tab)tab.classList.add('active');
-  doRefreshAnalytics();
-}
-function goRestock(){showPage('analytics');showSub('restock');}
-function goExpiring(){showPage('analytics');showSub('expiring');}
-function goChangelog(){showPage('changelog');document.getElementById('inv-tab-changelog')&&showInvTab('changelog');}
-function doRefreshAnalytics(){
-  const active=document.querySelector('.sub-page.active');if(!active)return;
-  const id=active.id.replace('sub-','');
-  if(id==='overview')renderOverview();
-  else if(id==='restock')renderRestock();
-  else if(id==='expiring')renderExpiring();
-  else if(id==='trends')renderTrends();
-  else if(id==='savings')renderSavings();
-}
-function submitPin(){if(window.submitTechPin)window.submitTechPin();}
-
-
-function submitPin(){if(window.submitTechPin)window.submitTechPin();}
-
-
-function doRefreshAnalytics(){
-  const active=document.querySelector('.sub-page.active');if(!active)return;
-  const id=active.id.replace('sub-','');
-  if(id==='overview')renderOverview();
-  else if(id==='restock')renderRestock();
-  else if(id==='expiring')renderExpiring();
-  else if(id==='trends')renderTrends();
-  else if(id==='savings')renderSavings();
-}
-function submitPin(){if(window.submitTechPin)window.submitTechPin();}
-
-
-function submitPin(){if(window.submitTechPin)window.submitTechPin();}
-
+// ═══ SELECTION ═══
 
 </script>
 
