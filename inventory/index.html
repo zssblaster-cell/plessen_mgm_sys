@@ -70,21 +70,27 @@ if(typeof firebase==='undefined'){
 // Firebase config loaded from encrypted config.js via crypto.js module above
 // Hardcoded credentials removed — they live in config.js (encrypted)
 // _startInventory is called once window._inventoryFirebaseCfg is populated
+// Declare db and auth here so they're in scope for all functions below.
+// They're initialized inside _startInventory AFTER firebase.initializeApp() runs.
+var db   = null;
+var auth = null;
+
 window._startInventory = function() {
   var cfg = window._inventoryFirebaseCfg;
   if (!cfg) { return; }
   if (!firebase.apps.length) firebase.initializeApp(cfg);
-  window._inventoryFirebaseCfg = null;
+  window._inventoryFirebaseCfg = null; // null immediately after init
+  // Initialize db and auth now that Firebase app exists
+  db   = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
   removePortalOverlay();
   initInventoryApp();
 };
-// If config is already ready (unlikely but safe), start immediately
+// If config is already ready when this script runs, start immediately
 if (window._inventoryConfigReady && window._inventoryFirebaseCfg) {
   window._startInventory();
 }
-var db=firebase.firestore();
-var auth=firebase.auth();
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
 
 function setSS(s){
   var el=document.getElementById('syncStatus'),dot=document.getElementById('syncDot');if(!el)return;
@@ -292,6 +298,7 @@ auth.onAuthStateChanged(function(user){
 });
 
 window.doLogin=function(){
+  if(!auth){var err=document.getElementById('loginErr');if(err)err.textContent='System initialising — please wait a moment.';return;}
   var email=document.getElementById('loginEmail').value.trim();
   var pass=document.getElementById('loginPass').value;
   var err=document.getElementById('loginErr');
