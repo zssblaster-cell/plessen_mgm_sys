@@ -6,109 +6,85 @@
 <title>Plessen Ophthalmology — Clinical Inventory</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <!-- Firebase compat SDKs - official CDN -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js">
-function showPortalBlocked() {
-  const loading=document.getElementById('poLoading');
-  const blocked=document.getElementById('poBlocked');
-  const countdown=document.getElementById('poCountdown');
-  if(loading)loading.style.display='none';
-  if(blocked)blocked.style.display='block';
-  let secs=5;
-  const iv=setInterval(()=>{
-    secs--;
-    if(countdown)countdown.textContent='Redirecting in '+secs+' second'+(secs!==1?'s':'')+'...';
-    if(secs<=0){clearInterval(iv);window.location.href='/';}
-  },1000);
-}
-function removePortalOverlay() {
-  const o=document.getElementById('portalOverlay');
-  if(!o)return; o.style.opacity='0'; setTimeout(()=>o.remove(),320);
-}
-</script>
-<!-- Config loader: decrypts Firebase credentials from config.js at runtime -->
-<script type="module">
-  import { portalAuth, loadConfig } from '/crypto.js';
-  import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-  // Wait for portal auth session, then decrypt config and init inventory Firebase
-  const unsub = onAuthStateChanged(portalAuth, async (portalUser) => {
-    unsub();
-    if (!portalUser) { showPortalBlocked(); window._inventoryConfigReady = false; return; }
-    try {
-      const configs = await loadConfig();
-      const cfg = configs?.inventory;
-      if (!cfg) throw new Error("Inventory config missing");
-      // Store for compat SDK (window scope intentional — compat SDK needs it)
-      window._inventoryFirebaseCfg = {
-        apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
-        storageBucket: cfg.storageBucket, messagingSenderId: cfg.messagingSenderId, appId: cfg.appId
-      };
-      window._inventoryConfigReady = true;
-      // Trigger inventory init now that config is available
-      if (typeof window._startInventory === 'function') window._startInventory();
-    } catch(e) {
-      //("Inventory config load failed:", e.message);
-      window._inventoryConfigReady = false;
-    }
-  });
-</script>
 <!-- Initialize shared arrays before Firebase runs -->
 <script>
 window.inventory = window.inventory || [];
 window.changeLog = window.changeLog || [];
 window.transactions = window.transactions || [];
 </script>
-<script>
+<script type="module">
+// ─── Firebase modular SDK v10.7.1 (matches crypto.js) ──────────────────────
+import { initializeApp, getApps }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
+         setPersistence, browserLocalPersistence }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { getFirestore, doc, getDoc, setDoc, onSnapshot }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { portalAuth, loadConfig } from '/crypto.js';
+
 (function(){
-if(typeof firebase==='undefined'){
-  document.addEventListener('DOMContentLoaded',function(){
-    var ls=document.getElementById('loginScreen');
-    if(ls)ls.innerHTML='<div style="color:#fff;text-align:center;padding:40px;max-width:400px"><h2>Connection Required</h2><p style="margin-top:12px;opacity:.8">This app must be opened from a web server (Vercel) not a local file. Please deploy to Vercel and open the Vercel URL.</p></div>';
-  });return;
-}
-// Firebase config loaded from encrypted config.js via crypto.js module above
-// Hardcoded credentials removed — they live in config.js (encrypted)
-// _startInventory is called once window._inventoryFirebaseCfg is populated
-// Declare db and auth here so they're in scope for all functions below.
-// They're initialized inside _startInventory AFTER firebase.initializeApp() runs.
+// ─── Firebase initialized async via crypto.js → no credentials in this file ─
 var db   = null;
 var auth = null;
 
-window._startInventory = function() {
-  var cfg = window._inventoryFirebaseCfg;
-  if (!cfg) { return; }
-  if (!firebase.apps.length) firebase.initializeApp(cfg);
-  window._inventoryFirebaseCfg = null; // null immediately after init
-  // Initialize db and auth now that Firebase app exists
-  db   = firebase.firestore();
-  auth = firebase.auth();
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
-  removePortalOverlay();
-  // Register auth state listener now that auth is initialised
-  auth.onAuthStateChanged(function(user){
-    var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
-    if(user){
-      if(ls)ls.style.display='none';
-      if(ma)ma.style.display='';
-      if(lb)lb.style.display='flex';
-      var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
-      window._authEmail=user.email;
-      setTimeout(fbLoad,200);
-    } else {
-      if(ls)ls.style.display='flex';
-      if(ma)ma.style.display='none';
-      if(lb)lb.style.display='none';
-      window._fbReady=false;
-      window._authEmail=null;
-      if(window.resetAppState)window.resetAppState();
-    }
-  });
-};
-// If config is already ready when this script runs, start immediately
-if (window._inventoryConfigReady && window._inventoryFirebaseCfg) {
-  window._startInventory();
+// ─── Portal overlay helpers ────────────────────────────────────────────────
+function showPortalBlocked() {
+  var loading=document.getElementById('poLoading');
+  var blocked=document.getElementById('poBlocked');
+  var countdown=document.getElementById('poCountdown');
+  if(loading)loading.style.display='none';
+  if(blocked)blocked.style.display='block';
+  var secs=5;
+  var iv=setInterval(function(){
+    secs--;
+    if(countdown)countdown.textContent='Redirecting in '+secs+' second'+(secs!==1?'s':'')+'...';
+    if(secs<=0){clearInterval(iv);window.location.href='/';}
+  },1000);
 }
+function removePortalOverlay() {
+  var o=document.getElementById('portalOverlay');
+  if(!o)return; o.style.opacity='0'; setTimeout(function(){o.remove();},320);
+}
+
+// ─── Portal auth check + config decrypt (same pattern as equipment) ────────
+function initInventoryFirebase() {
+  return new Promise(function(resolve) {
+    var unsub = onAuthStateChanged(portalAuth, async function(portalUser) {
+      unsub();
+      if (!portalUser) { showPortalBlocked(); resolve(false); return; }
+      try {
+        var configs = await loadConfig();
+        var cfg = configs && configs.inventory;
+        if (!cfg) throw new Error('Inventory config not initialised — run /config-tool first.');
+        var APP = 'plessen-inventory';
+        var existing = getApps().find(function(a){return a.name===APP;});
+        var invApp = existing || initializeApp({
+          apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
+          storageBucket: cfg.storageBucket||'', messagingSenderId: cfg.messagingSenderId||'',
+          appId: cfg.appId
+        }, APP);
+        cfg = null; // null immediately — credentials no longer needed
+        auth = getAuth(invApp);
+        db   = getFirestore(invApp);
+        await setPersistence(auth, browserLocalPersistence);
+        resolve(true);
+      } catch(e) {
+        var el=document.getElementById('loginScreen');if(el)el.style.display='flex';
+        var err=document.getElementById('loginErr');if(err)err.textContent=e.message;
+        resolve(false);
+      }
+    });
+  });
+}
+
+// ─── Boot: verify portal session → decrypt config → init Firebase ──────────
+(async function() {
+  var ready = await initInventoryFirebase();
+  if (!ready) return;
+  removePortalOverlay();
+  startAuth(); // register Firebase auth listener now that auth + db are ready
+})();
 
 function setSS(s){
   var el=document.getElementById('syncStatus'),dot=document.getElementById('syncDot');if(!el)return;
@@ -127,21 +103,21 @@ window.fbSave=function(){
   }
   setSS('saving');
   Promise.all([
-    db.doc('plessen/inventory').set({data:JSON.stringify(window.inventory),ts:new Date().toISOString()}),
-    db.doc('plessen/changelog').set({data:JSON.stringify(window.changeLog),ts:new Date().toISOString()}),
-    db.doc('plessen/transactions').set({data:JSON.stringify(window.transactions),ts:new Date().toISOString()})
+    setDoc(doc(db,'plessen','inventory'),{data:JSON.stringify(window.inventory),ts:new Date().toISOString()}),
+    setDoc(doc(db,'plessen','changelog'),{data:JSON.stringify(window.changeLog),ts:new Date().toISOString()}),
+    setDoc(doc(db,'plessen','transactions'),{data:JSON.stringify(window.transactions),ts:new Date().toISOString()})
   ]).then(function(){setSS('synced');}).catch(function(e){console.error('fbSave error:',e.code,e.message);setSS('error');});
 };
 window.fbSaveDebounced=function(){setSS('saving');clearTimeout(_sq);_sq=setTimeout(window.fbSave,900);};
 window.fbSaveConfig=function(cfg){
   if(!db)return;
-  db.doc('plessen/config').set(cfg).catch(function(e){console.error('config save:',e);});
+  setDoc(doc(db,'plessen','config'),cfg).catch(function(e){console.error('config save:',e);});
 };
 
 // Immediately write just the changelog document (called from logChange)
 window.fbSaveChangelog=function(){
   if(!window._fbReady||!db)return;
-  db.doc('plessen/changelog').set({
+  setDoc(doc(db,'plessen','changelog'),{
     data:JSON.stringify(window.changeLog),
     ts:new Date().toISOString()
   }).catch(function(e){console.error('changelog write error:',e);});
@@ -161,7 +137,7 @@ function mutArr(arr,data){if(!arr||!data)return;arr.length=0;data.forEach(functi
 
 function fbLoad(){
   setSS('loading');
-  Promise.all([db.doc('plessen/inventory').get(),db.doc('plessen/changelog').get(),db.doc('plessen/transactions').get()])
+  Promise.all([getDoc(doc(db,'plessen','inventory')),getDoc(doc(db,'plessen','changelog')),getDoc(doc(db,'plessen','transactions'))])
   .then(function(res){
     var iv=res[0],cl=res[1],tx=res[2];
     if(iv.exists){
@@ -184,7 +160,7 @@ function fbLoad(){
     setSS('synced');
     window._fbReady=true;
     // Load config then route by email
-    db.doc('plessen/config').get().then(function(cfgSnap){
+    getDoc(doc(db,'plessen','config')).then(function(cfgSnap){
       var cfg={adminPinHash:'',techs:[]};
       if(cfgSnap.exists&&cfgSnap.data()){
         cfg.adminPinHash=cfgSnap.data().adminPinHash||'';
@@ -192,46 +168,27 @@ function fbLoad(){
       }
       var applyP=window.applyConfig?window.applyConfig(cfg):Promise.resolve();
       applyP.then(function(){
-        // Check allowedUsers collection, fall back to email for compatibility
-        db.doc('allowedUsers/'+(window._authEmail||'')).get().then(function(aSnap){
-          var role='tech';
-          if(aSnap.exists&&aSnap.data()&&aSnap.data().role==='admin') role='admin';
-          else if(!aSnap.exists&&window._authEmail==='anthony.jolly@plesseneye.com') role='admin';
-          if(window.activateRole)window.activateRole(role,null);
-        }).catch(function(){
-          var em=window._authEmail||'';
-          var role=(em==='anthony.jolly@plesseneye.com')?'admin':'tech';
-          if(window.activateRole)window.activateRole(role,null);
-        });
+        var email=window._authEmail||'';
+        if(email==='anthony.jolly@plesseneye.com'){
+          if(window.activateRole)window.activateRole('admin',null);
+        } else if(email==='examuser@plesseneye.com'){
+          if(window.activateRole)window.activateRole('tech',null);
+        } else { if(window.activateRole)window.activateRole("tech",null); }
       }).catch(function(){
-        // Config load failed — check allowedUsers then fall back to email
-        db.doc('allowedUsers/'+(window._authEmail||'')).get().then(function(aSnap){
-          var role='tech';
-          if(aSnap.exists&&aSnap.data()&&aSnap.data().role==='admin') role='admin';
-          else if(!aSnap.exists&&window._authEmail==='anthony.jolly@plesseneye.com') role='admin';
-          if(window.activateRole)window.activateRole(role,null);
-        }).catch(function(){
-          var em=window._authEmail||'';
-          if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-          else{if(window.activateRole)window.activateRole('tech',null);}
-        });
-      });
-    }).catch(function(){
-      // Config doc fetch failed — check allowedUsers then fall back to email
-      db.doc('allowedUsers/'+(window._authEmail||'')).get().then(function(aSnap){
-        var role='tech';
-        if(aSnap.exists&&aSnap.data()&&aSnap.data().role==='admin') role='admin';
-        else if(!aSnap.exists&&window._authEmail==='anthony.jolly@plesseneye.com') role='admin';
-        if(window.activateRole)window.activateRole(role,null);
-      }).catch(function(){
+        // Config load failed — route by email anyway
         var em=window._authEmail||'';
         if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-        else{if(window.activateRole)window.activateRole('tech',null);}
+        else if(em==='examuser@plesseneye.com'){if(window.activateRole)window.activateRole('tech',null);}
       });
+    }).catch(function(){
+      // Config doc fetch failed — route by email anyway
+      var em=window._authEmail||'';
+      if(em==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
+      else if(em==='examuser@plesseneye.com'){if(window.activateRole)window.activateRole('tech',null);}
     });
     // Listeners
-    db.doc('plessen/inventory').onSnapshot(function(snap){
-      if(!snap.exists||_ru)return;
+    onSnapshot(doc(db,'plessen','inventory'),function(snap){
+      if(!snap.exists()||_ru)return;
       var d=JSON.parse(snap.data().data).map(migrateItem);
       if(JSON.stringify(d)===JSON.stringify(window.inventory))return;
       _ru=true;mutArr(window.inventory,d);
@@ -242,8 +199,8 @@ function fbLoad(){
       if(t){t.textContent='Updated from another device';t.className='toast show';setTimeout(function(){t.classList.remove('show');},3000);}
       setTimeout(function(){_ru=false;},600);
     });
-    db.doc('plessen/changelog').onSnapshot(function(snap){
-      if(!snap.exists)return;
+    onSnapshot(doc(db,'plessen','changelog'),function(snap){
+      if(!snap.exists())return;
       var d=JSON.parse(snap.data().data);
       mutArr(window.changeLog,d);
       if(window.updateBadges)window.updateBadges();
@@ -253,8 +210,8 @@ function fbLoad(){
         window.renderChangelog();
       }
     });
-    db.doc('plessen/transactions').onSnapshot(function(snap){
-      if(!snap.exists)return;
+    onSnapshot(doc(db,'plessen','transactions'),function(snap){
+      if(!snap.exists())return;
       var d=JSON.parse(snap.data().data);
       if(JSON.stringify(d)!==JSON.stringify(window.transactions)){
         mutArr(window.transactions,d);
@@ -264,6 +221,7 @@ function fbLoad(){
       }
     });
   }).catch(function(e){
+    console.error('fbLoad error - details:', e.code, e.message, e);
     setSS('error');
     // Show a banner prompting the user to fix Firestore rules
     var banner=document.getElementById('connectionBanner');
@@ -295,21 +253,40 @@ function fbLoad(){
   });
 }
 
-// auth.onAuthStateChanged moved into _startInventory below
+function startAuth() {
+  onAuthStateChanged(auth, function(user){
+    var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
+    if(user){
+      if(ls)ls.style.display='none';
+      if(ma)ma.style.display='';
+      if(lb)lb.style.display='flex';
+      var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
+      window._authEmail=user.email;
+      setTimeout(fbLoad,200);
+    } else {
+      if(ls)ls.style.display='flex';
+      if(ma)ma.style.display='none';
+      if(lb)lb.style.display='none';
+      window._fbReady=false;
+      window._authEmail=null;
+      if(window.resetAppState)window.resetAppState();
+    }
+  });
+}
 
 window.doLogin=function(){
-  if(!auth){var err=document.getElementById('loginErr');if(err)err.textContent='System initialising — please wait a moment.';return;}
+  if(!auth){var err=document.getElementById('loginErr');if(err)err.textContent='System initialising — please wait.';return;}
   var email=document.getElementById('loginEmail').value.trim();
   var pass=document.getElementById('loginPass').value;
   var err=document.getElementById('loginErr');
   err.textContent='Signing in...';
-  auth.signInWithEmailAndPassword(email,pass).catch(function(e){
+  signInWithEmailAndPassword(auth,email,pass).catch(function(e){
     err.textContent=(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password')?'Incorrect email or password.':e.message;
   });
 };
 window.doLogout=function(){
   window._fbReady=false;
-  auth.signOut();
+  signOut(auth);
 };
 // Real online/offline detection using browser API
 window.addEventListener('online',  function(){ if(window._fbReady)setSS('synced'); });
@@ -944,26 +921,24 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
 .kb-tip-key{font-family:monospace;font-size:11px;background:rgba(255,255,255,.15);
   border-radius:4px;padding:1px 6px;color:#fff;font-weight:600}
 
-    /* ── Portal access overlay ──────────────────────────────── */
-    #portalOverlay{position:fixed;inset:0;background:#0f172a;z-index:9999;
-      display:flex;align-items:center;justify-content:center;transition:opacity .3s}
-    .po-spinner{width:36px;height:36px;border:3px solid #1e293b;border-top-color:#1d4ed8;
-      border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
-    #poLoading{text-align:center;color:#475569;font-size:13px}
-    #poBlocked{text-align:center;max-width:400px;padding:38px;background:#fff;
-      border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
-    .po-lock{font-size:40px;margin-bottom:14px}
-    .po-title{font-size:18px;font-weight:800;color:#0f172a;margin-bottom:8px}
-    .po-sub{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:18px}
-    .po-countdown{font-size:11px;color:#94a3b8;margin-bottom:20px}
-    .po-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;
-      background:#1d4ed8;color:#fff;border-radius:9px;text-decoration:none;
-      font-weight:700;font-size:13px}
-    .po-btn:hover{background:#1e40af}
-  </style>
+  #portalOverlay{position:fixed;inset:0;background:#0d2d5e;z-index:9999;
+    display:flex;align-items:center;justify-content:center;font-family:inherit;transition:opacity .3s}
+  .po-spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;
+    border-radius:50%;animation:poSpin .7s linear infinite;margin:0 auto 12px}
+  @keyframes poSpin{to{transform:rotate(360deg)}}
+  #poLoading{text-align:center;color:rgba(255,255,255,.7);font-size:13px}
+  #poBlocked{text-align:center;max-width:380px;padding:36px;background:#fff;
+    border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .po-lock{font-size:40px;margin-bottom:12px}
+  .po-title{font-size:17px;font-weight:700;color:#0d2d5e;margin-bottom:8px}
+  .po-sub{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:16px}
+  .po-countdown{font-size:11px;color:#94a3b8;margin-bottom:18px}
+  .po-btn{display:inline-block;padding:10px 20px;background:#1a5fb4;color:#fff;
+    border-radius:8px;text-decoration:none;font-weight:700;font-size:13px}
+  .po-btn:hover{background:#0d2d5e}
+</style>
 </head>
 <body>
-<!-- PORTAL ACCESS OVERLAY -->
 <div id="portalOverlay">
   <div id="poLoading"><div class="po-spinner"></div><div>Verifying portal session...</div></div>
   <div id="poBlocked" style="display:none">
@@ -974,7 +949,6 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
     <a href="/" class="po-btn">← Return to Portal</a>
   </div>
 </div>
-
 
 <!-- LOGIN SCREEN -->
 <div id="loginScreen" style="position:fixed;inset:0;background:#0d2d5e;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
@@ -3152,6 +3126,7 @@ function exportCSV(){
 let settingsTechIdx=null;
 function openSettings(){
   if(currentRole!=='admin'){
+    console.log('[Settings] currentRole=',currentRole,'— blocked');
     showToast('Admin access required','error');return;
   }
   renderTechList();
