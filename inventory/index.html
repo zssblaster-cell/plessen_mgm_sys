@@ -85,7 +85,25 @@ window._startInventory = function() {
   auth = firebase.auth();
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
   removePortalOverlay();
-  initInventoryApp();
+  // Register auth state listener now that auth is initialised
+  auth.onAuthStateChanged(function(user){
+    var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
+    if(user){
+      if(ls)ls.style.display='none';
+      if(ma)ma.style.display='';
+      if(lb)lb.style.display='flex';
+      var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
+      window._authEmail=user.email;
+      setTimeout(fbLoad,200);
+    } else {
+      if(ls)ls.style.display='flex';
+      if(ma)ma.style.display='none';
+      if(lb)lb.style.display='none';
+      window._fbReady=false;
+      window._authEmail=null;
+      if(window.resetAppState)window.resetAppState();
+    }
+  });
 };
 // If config is already ready when this script runs, start immediately
 if (window._inventoryConfigReady && window._inventoryFirebaseCfg) {
@@ -277,25 +295,7 @@ function fbLoad(){
   });
 }
 
-auth.onAuthStateChanged(function(user){
-  var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
-  if(user){
-    if(ls)ls.style.display='none';
-    if(ma)ma.style.display='';
-    if(lb)lb.style.display='flex';
-    var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
-    // Determine role from email
-    window._authEmail=user.email;
-    setTimeout(fbLoad,200);
-  } else {
-    if(ls)ls.style.display='flex';
-    if(ma)ma.style.display='none';
-    if(lb)lb.style.display='none';
-    window._fbReady=false;
-    window._authEmail=null;
-    if(window.resetAppState)window.resetAppState();
-  }
-});
+// auth.onAuthStateChanged moved into _startInventory below
 
 window.doLogin=function(){
   if(!auth){var err=document.getElementById('loginErr');if(err)err.textContent='System initialising — please wait a moment.';return;}
