@@ -8,61 +8,79 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script type="module">
-// All Firebase imports use 10.7.1 to match crypto.js
-// Version mismatch causes getFirestore() to return null (app registered in 10.7.1 registry)
-import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+// ─── Firebase modular SDK v10.7.1 (matches crypto.js) ──────────────────────
+import { initializeApp, getApps }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-         sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+         sendPasswordResetEmail }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot,
-         getDoc, getDocs, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { portalAuth, loadConfig } from "/crypto.js";
-// portalAuthState aliased for clarity — same onAuthStateChanged, 10.7.1 consistent
-const portalAuthState = onAuthStateChanged;
+         getDoc, getDocs, query, where, writeBatch }
+  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { portalAuth, loadConfig } from '/crypto.js';
 
-// Firebase config loaded from encrypted config.js — no credentials in this file
+// ─── Firebase initialized async — no credentials in this file ──────────────
 let auth = null;
 let db   = null;
 
+// ─── Portal overlay helpers ─────────────────────────────────────────────────
+function showPortalBlocked() {
+  const loading=document.getElementById('poLoading');
+  const blocked=document.getElementById('poBlocked');
+  const countdown=document.getElementById('poCountdown');
+  if(loading)loading.style.display='none';
+  if(blocked)blocked.style.display='block';
+  let secs=5;
+  const iv=setInterval(()=>{
+    secs--;
+    if(countdown)countdown.textContent=`Redirecting in ${secs} second${secs!==1?'s':''}...`;
+    if(secs<=0){clearInterval(iv);window.location.href='/';}
+  },1000);
+}
+function removePortalOverlay() {
+  const o=document.getElementById('portalOverlay');
+  if(!o)return; o.style.opacity='0'; setTimeout(()=>o.remove(),320);
+}
+
+// ─── Portal auth check + config decrypt (same pattern as equipment) ─────────
 async function initCredentialingFirebase() {
   return new Promise((resolve) => {
-    const unsub = portalAuthState(portalAuth, async (portalUser) => {
+    const unsub = onAuthStateChanged(portalAuth, async (portalUser) => {
       unsub();
       if (!portalUser) { showPortalBlocked(); resolve(false); return; }
       try {
         const configs = await loadConfig();
         let cfg = configs?.credentialing;
-        if (!cfg) throw new Error("Credentialing config not initialised — run /config-tool first.");
-
-        // Initialize using this module's own imports — avoids cross-module
-        // registry mismatch where initSystemApp (crypto.js) creates the app
-        // but getFirestore here can't find it in its module's registry
-        const APP_NAME = "plessen-credentials";
-        const existing = getApps().find(a => a.name === APP_NAME);
-        const crdApp   = existing || initializeApp({
-          apiKey:            cfg.apiKey,
-          authDomain:        cfg.authDomain,
-          projectId:         cfg.projectId,
-          storageBucket:     cfg.storageBucket     || "",
-          messagingSenderId: cfg.messagingSenderId  || "",
-          appId:             cfg.appId,
-          ...(cfg.measurementId ? { measurementId: cfg.measurementId } : {})
-        }, APP_NAME);
+        if (!cfg) throw new Error('Credentialing config not initialised — run /config-tool first.');
+        const APP = 'plessen-credentials';
+        const existing = getApps().find(a => a.name === APP);
+        const crdApp = existing || initializeApp({
+          apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
+          storageBucket: cfg.storageBucket || '', messagingSenderId: cfg.messagingSenderId || '',
+          appId: cfg.appId, ...(cfg.measurementId ? { measurementId: cfg.measurementId } : {})
+        }, APP);
         cfg = null; // null immediately — credentials no longer needed
-
         auth = getAuth(crdApp);
         db   = getFirestore(crdApp);
-
-        if (!db) throw new Error("Firestore failed to initialise. Check Firebase project config.");
+        if (!db) throw new Error('Firestore failed to initialise.');
         resolve(true);
       } catch(e) {
         document.getElementById('auth-screen')?.classList.remove('hidden');
-        const errEl = document.getElementById('a-error');
-        if (errEl) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+        const el=document.getElementById('a-error');
+        if(el){el.textContent=e.message;el.style.display='block';}
         resolve(false);
       }
     });
   });
 }
+
+// ─── Boot: same pattern as equipment ───────────────────────────────────────
+(async () => {
+  const ready = await initCredentialingFirebase();
+  if (!ready) return; // showPortalBlocked already handled
+  removePortalOverlay();
+  startCredApp();
+})();
 
 // ── MASTER KEY (Option C) ──────────────────────────────────────────────────────
 // This key encrypts the admin-set file encryption passphrase stored in Firestore.
@@ -174,7 +192,6 @@ async function aesDecryptToString(b64,passphrase){
 // On every login → fetched from Firestore → decrypted with MASTER_KEY → held in memory
 
 async function loadFileEncKey(){
-  if (!db) return; // db not yet initialised — skip silently
   try{
     const snap=await getDoc(doc(db,'appConfig','fileEncryption'));
     if(!snap.exists()||!snap.data().encryptedKey){
@@ -187,6 +204,7 @@ async function loadFileEncKey(){
     encKeyReady=true;
     updateKeyStatus(true);
   }catch(e){
+    console.error('Key load error:',e);
     encKeyReady=false;
     updateKeyStatus(false);
   }
@@ -337,6 +355,7 @@ async function doUpload(personId,docId,docType,file){
     renderAll();
   }catch(e){
     hideUploadProgress();
+    console.error('Upload error:',e);
     toast('Upload failed: '+e.message,'error');
   }
 }
@@ -406,6 +425,7 @@ window.viewFile=async(fileId)=>{
     setTimeout(()=>hideUploadProgress(),600);
   }catch(e){
     hideUploadProgress();
+    console.error('View error:',e);
     toast('Failed to open file: '+e.message,'error');
   }
 };
@@ -448,17 +468,9 @@ function recordFail(){loginAttempts++;if(loginAttempts>=LOCK_LIMIT){lockUntil=Da
 function resetAttempts(){loginAttempts=0;lockUntil=0;}
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
-// Boot: init Firebase from config, then start auth
-(async()=>{
-  const ready = await initCredentialingFirebase();
-  // If not ready, initCredentialingFirebase() already handled redirect or error
-  if (!ready) return;
-  startCredApp();
-})();
-
-function startCredApp() {
-  removePortalOverlay();
-  onAuthStateChanged(auth,async user=>{
+function startCredApp(){
+  if(!auth||!db){return;}
+onAuthStateChanged(auth,async user=>{
   currentUser=user;
   if(user){
     try{
@@ -483,26 +495,9 @@ function startCredApp() {
     FILE_ENC_KEY='';encKeyReady=false;
     hide('app-screen');show('auth-screen');
   }
-  }); // end onAuthStateChanged
+});
 } // end startCredApp
 
-function showPortalBlocked() {
-  const loading=document.getElementById('poLoading');
-  const blocked=document.getElementById('poBlocked');
-  const countdown=document.getElementById('poCountdown');
-  if(loading)loading.style.display='none';
-  if(blocked)blocked.style.display='block';
-  let secs=5;
-  const iv=setInterval(()=>{
-    secs--;
-    if(countdown)countdown.textContent='Redirecting in '+secs+' second'+(secs!==1?'s':'')+'...';
-    if(secs<=0){clearInterval(iv);window.location.href='/';}
-  },1000);
-}
-function removePortalOverlay() {
-  const o=document.getElementById('portalOverlay');
-  if(!o)return; o.style.opacity='0'; setTimeout(()=>o.remove(),320);
-}
 window.doSignIn=async()=>{
   clrAE();if(!checkRateLimit())return;
   const e=$('a-email').value.trim(),p=$('a-pass').value;
@@ -515,7 +510,7 @@ function authErr(c){return({'auth/invalid-email':'Invalid email.','auth/user-not
 
 // ── Firestore listeners ────────────────────────────────────────────────────────
 function listen(){
-  if(!db){console.error('listen() called with db=null');return;}
+  if(!db){console.error('listen() called before db init');return;}
   if(unsubP)unsubP();if(unsubM)unsubM();if(unsubAU)unsubAU();if(unsubFM)unsubFM();
   unsubP=onSnapshot(collection(db,'people'),
     snap=>{people=snap.docs.map(d=>d.data()).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));renderAll();},
@@ -1018,24 +1013,21 @@ function exportPDF(inclCreds,inclMaint,statusFilter,selectedIds){
     </table>`;
   }
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:32px;color:#0f172a}@media print{body{padding:16px}}
-    /* ── Portal access overlay ──────────────────────────────── */
-    #portalOverlay{position:fixed;inset:0;background:#0f172a;z-index:9999;
-      display:flex;align-items:center;justify-content:center;transition:opacity .3s}
-    .po-spinner{width:36px;height:36px;border:3px solid #1e293b;border-top-color:#1d4ed8;
-      border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
-    #poLoading{text-align:center;color:#475569;font-size:13px}
-    #poBlocked{text-align:center;max-width:400px;padding:38px;background:#fff;
-      border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
-    .po-lock{font-size:40px;margin-bottom:14px}
-    .po-title{font-size:18px;font-weight:800;color:#0f172a;margin-bottom:8px}
-    .po-sub{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:18px}
-    .po-countdown{font-size:11px;color:#94a3b8;margin-bottom:20px}
-    .po-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;
-      background:#1d4ed8;color:#fff;border-radius:9px;text-decoration:none;
-      font-weight:700;font-size:13px}
-    .po-btn:hover{background:#1e40af}
+  #portalOverlay{position:fixed;inset:0;background:#fff;z-index:9999;
+    display:flex;align-items:center;justify-content:center;transition:opacity .3s}
+  .po-spinner{width:36px;height:36px;border:3px solid #dde3ec;border-top-color:#1a5fb4;
+    border-radius:50%;animation:poSpin .7s linear infinite;margin:0 auto 12px}
+  @keyframes poSpin{to{transform:rotate(360deg)}}
+  #poLoading{text-align:center;color:#4a5568;font-size:13px}
+  #poBlocked{text-align:center;max-width:380px;padding:36px;background:#fff;
+    border-radius:12px;box-shadow:0 4px 32px rgba(0,0,0,.12);border:1px solid #dde3ec}
+  .po-lock{font-size:40px;margin-bottom:12px}
+  .po-title{font-size:17px;font-weight:700;color:#0f1923;margin-bottom:8px}
+  .po-sub{font-size:13px;color:#4a5568;line-height:1.6;margin-bottom:16px}
+  .po-countdown{font-size:11px;color:#94a3b8;margin-bottom:18px}
+  .po-btn-crd{display:inline-block;padding:10px 20px;background:#1a5fb4;color:#fff;
+    border-radius:8px;text-decoration:none;font-weight:700;font-size:13px}
   </style></head><body>
-<!-- PORTAL ACCESS OVERLAY -->
 <div id="portalOverlay">
   <div id="poLoading"><div class="po-spinner"></div><div>Verifying portal session...</div></div>
   <div id="poBlocked" style="display:none">
@@ -1043,10 +1035,9 @@ function exportPDF(inclCreds,inclMaint,statusFilter,selectedIds){
     <div class="po-title">Portal Sign-In Required</div>
     <div class="po-sub">This system requires you to sign in through the Plessen Management Portal first.</div>
     <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
-    <a href="/" class="po-btn">← Return to Portal</a>
+    <a href="/" class="po-btn-crd">← Return to Portal</a>
   </div>
 </div>
-
   <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1e3a8a;padding-bottom:16px;margin-bottom:24px">
     <div><div style="font-size:10px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.1em">Plessen Ophthalmology</div><div style="font-size:22px;font-weight:700;color:#1e3a8a">Credential &amp; Maintenance Report</div></div>
     <div style="text-align:right;font-size:12px;color:#64748b">Generated: ${today}</div>
@@ -1341,7 +1332,6 @@ input:focus,select:focus{border-color:var(--bm)}
     <div id="auth-error"></div>
     <button class="abtn" onclick="doSignIn()">Sign in</button>
     <button class="alink" onclick="doReset()">Forgot password?</button>
-    <a href="/" style="display:block;text-align:center;margin-top:12px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
     <div class="auth-note">🔒 Access restricted to authorized Plessen Ophthalmology staff only.</div>
   </div>
 </div>
