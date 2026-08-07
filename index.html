@@ -201,6 +201,20 @@
     @media(max-width:600px){
       .topbar{padding:0 16px}.hero{padding:28px 16px 18px}.cards-grid{padding:0 16px 32px;gap:12px}
     }
+
+    .generic-divider{display:flex;align-items:center;gap:10px;margin:18px 0 14px;
+      font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px}
+    .generic-divider::before,.generic-divider::after{content:'';flex:1;height:1px;background:#e2e8f0}
+    .generic-sys-btn{width:100%;padding:10px 14px;background:#f8faff;border:1px solid #dde3ec;
+      border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;color:#0d2d5e;
+      cursor:pointer;display:flex;align-items:center;gap:10px;text-align:left;
+      transition:all .15s;margin-bottom:6px}
+    .generic-sys-btn:hover{background:#e8f0fe;border-color:#1a5fb4}
+    .generic-sys-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+    .generic-loading{font-size:12px;color:#94a3b8;text-align:center;padding:8px}
+    .generic-session-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;
+      background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:20px;
+      font-size:11px;font-weight:700}
   </style>
 </head>
 <body>
@@ -232,11 +246,6 @@
       <label class="field-label">Password</label>
       <input type="password" id="loginPass" class="field-input" placeholder="Enter password">
       <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
-      <div class="login-footer">Plessen Eye Care · Internal Use Only<br>Unauthorized access is prohibited.</div>
-    </div>
-  </div>
-</div>
-
 <!-- PORTAL SCREEN ───────────────────────────────────────────────────────── -->
 <div id="portalScreen" class="hidden">
   <header class="topbar">
@@ -439,6 +448,38 @@
           Current project ID: <span id="sysProjectIdDisplay" style="font-family:'DM Mono',monospace;color:#a5b4fc">—</span>
         </div>
       </div>
+      <div class="section-label" style="margin-top:16px">Generic Login</div>
+      <div style="background:#0d0d1a;border:1px solid #2e2060;border-radius:9px;padding:14px 16px;margin-bottom:12px">
+        <div style="font-size:12px;color:#94a3b8;line-height:1.6;margin-bottom:12px">
+          Enable if multiple staff share a single device for this system. Generic users always get
+          <strong style="color:#a5b4fc">staff-level access only</strong> — never admin.
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <label class="toggle-wrap">
+            <input type="checkbox" id="sysGenericEnabled" onchange="toggleGenericFields()">
+            <span class="toggle-track"></span>
+          </label>
+          <span style="font-size:13px;font-weight:600;color:#e2e8f0">Enable Generic Login</span>
+        </div>
+        <div id="genericFields" style="display:none">
+          <div class="field-group">
+            <label class="field-label">Generic Account Email <span style="font-weight:400;text-transform:none;color:#64748b">(auto-generated)</span></label>
+            <input type="text" id="sysGenericEmail" class="field-input field-input-sm" readonly
+              style="background:#1e2035;color:#a5b4fc;cursor:default;border-color:#2e2060;font-family:monospace">
+          </div>
+          <div class="field-group">
+            <label class="field-label">Shared Staff Password</label>
+            <div style="display:flex;gap:8px">
+              <input type="password" id="sysGenericPass" class="field-input field-input-sm" style="flex:1"
+                placeholder="Shared password for all staff at this location">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="toggleGenericPassVis()" style="flex-shrink:0">👁</button>
+            </div>
+            <div style="font-size:11px;color:#64748b;margin-top:4px">
+              Share this password with staff at the shared device location. Save to sync the account.
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="md-actions">
         <button class="btn btn-ghost" onclick="backToSystemsList()">← Back</button>
         <button class="btn btn-primary" id="sysFormSaveBtn" onclick="saveSystem()">Save System</button>
@@ -510,6 +551,7 @@ G.openUserForm=openUserForm; G.closeUserForm=closeUserForm;
 G.saveUser=saveUser; G.editUser=editUser; G.deleteUser=deleteUser;
 G.openSystemMgr=openSystemMgr; G.closeSystemMgr=closeSystemMgr;
 G.openSystemForm=openSystemForm; G.backToSystemsList=backToSystemsList;
+G.toggleGenericFields=toggleGenericFields; G.toggleGenericPassVis=toggleGenericPassVis;
 G.saveSystem=saveSystem; G.editSystem=editSystem; G.deleteSystem=deleteSystem;
 G.toggleSystemEnabled=toggleSystemEnabled;
 
@@ -660,6 +702,22 @@ onAuthStateChanged(auth, async (fbUser) => {
   const profile = snap.data();
   if (!profile.active) { await signOut(auth); showLoginErr("Your account has been deactivated."); return; }
   currentUser=fbUser; currentProfile=profile;
+  // Generic users bypass the portal dashboard → redirect straight to their system
+  if (profile.role === 'generic' || window._genericLoginTarget) {
+    const targetKey = profile.genericFor || window._genericLoginTarget;
+    window._genericLoginTarget = null;
+    // Load systems to get the path, then redirect
+    await loadSystems();
+    const targetSys = loadedSystems.find(s => s.key === targetKey);
+    if (targetSys) {
+      // Store credentials in sessionStorage for sub-system auto-login
+      sessionStorage.setItem('_pls_generic', JSON.stringify({
+        email: sessionEmail, pass: sessionPass, system: targetKey
+      }));
+      window.location.href = targetSys.path || '/' + targetKey;
+      return;
+    }
+  }
   const firstRun = await loadSystems();
   showPortal(firstRun);
 });
@@ -696,6 +754,8 @@ function showLogin() {
   document.getElementById("loginBtn").disabled=false;
   document.getElementById("loginBtn").textContent="Sign In";
 }
+
+// ── Generic login helpers ─────────────────────────────────────────────────────
 function showLoginErr(msg) { showEl("loginErr"); document.getElementById("loginErr").textContent=msg; }
 
 function showPortal(isFirstRun) {
@@ -1022,7 +1082,30 @@ function openSystemForm(sys) {
   document.getElementById("sysColor").value=sys?.color||"#1d4ed8";
   document.getElementById("sysAccent").value=sys?.accent||"#dbeafe";
   document.getElementById("colorSwatches").innerHTML=buildColorSwatches(sys?.color||"#1d4ed8");
+  // Generic login fields
+  const genEnabled = sys?.genericLogin?.enabled || false;
+  document.getElementById('sysGenericEnabled').checked = genEnabled;
+  const genEmailEl = document.getElementById('sysGenericEmail');
+  const genKey = sys?.key || document.getElementById('sysKey').value || 'system';
+  if (genEmailEl) genEmailEl.value = sys?.genericLogin?.email || `generic-${genKey}@plesseneye.com`;
+  document.getElementById('sysGenericPass').value = '';
+  document.getElementById('genericFields').style.display = genEnabled ? '' : 'none';
   hideEl("sysFormErr"); hideEl("sysMgrList"); showEl("sysMgrForm");
+}
+
+function toggleGenericFields() {
+  const enabled = document.getElementById('sysGenericEnabled').checked;
+  document.getElementById('genericFields').style.display = enabled ? '' : 'none';
+  if (enabled) {
+    const key = document.getElementById('sysKey').value ||
+                document.getElementById('editSysKey').value || 'system';
+    document.getElementById('sysGenericEmail').value = `generic-${key}@plesseneye.com`;
+  }
+}
+
+function toggleGenericPassVis() {
+  const el = document.getElementById('sysGenericPass');
+  el.type = el.type === 'password' ? 'text' : 'password';
 }
 
 function editSystem(key) {
@@ -1061,6 +1144,9 @@ async function saveSystem() {
   try {
     // Only display settings saved to Firestore — NO Firebase credentials
     // Credentials live exclusively in encrypted config.js (manage via /config-tool)
+    const genericEnabled = document.getElementById('sysGenericEnabled').checked;
+    const genericEmail   = document.getElementById('sysGenericEmail').value.trim();
+    const genericPass    = document.getElementById('sysGenericPass').value;
     const sysData={
       key, label, description:document.getElementById("sysDesc").value.trim(),
       path:document.getElementById("sysPath").value.trim()||`/${key}`,
@@ -1068,10 +1154,34 @@ async function saveSystem() {
       enabled:document.getElementById("sysEnabled").checked,
       color:document.getElementById("sysColor").value||"#1d4ed8",
       accent:document.getElementById("sysAccent").value||"#dbeafe",
+      genericLogin: { enabled: genericEnabled, email: genericEnabled ? genericEmail : '' },
       updatedAt:new Date().toISOString(),
       ...(existingKey?{}:{createdAt:new Date().toISOString()})
     };
     await setDoc(doc(db,"systemConfigs",key), sysData, { merge:true });
+    // If generic login enabled and password provided, sync the generic account
+    if (genericEnabled && genericPass && genericEmail) {
+      try {
+        // Create/update generic account in portal Firebase Auth
+        const results = await syncUserToSystem(
+          { key, apiKey: loadedSystems.find(s=>s.key===key)?.apiKey || '', projectId: key },
+          genericEmail, genericPass, 'generic', 'staff'
+        );
+        // Also create generic user profile in plessen-auth
+        try {
+          const gCred = await createUserWithEmailAndPassword(auth, genericEmail, genericPass);
+          await setDoc(doc(db, 'users', gCred.user.uid), {
+            uid: gCred.user.uid, email: genericEmail,
+            displayName: `Generic - ${label}`, role: 'generic',
+            genericFor: key, active: true, createdAt: new Date().toISOString()
+          });
+        } catch(authErr) {
+          if (authErr.code !== 'auth/email-already-in-use') {
+            console.warn('Generic portal account:', authErr.message);
+          }
+        }
+      } catch(syncErr) { console.warn('Generic sync:', syncErr.message); }
+    }
     // Update local cache
     const idx=loadedSystems.findIndex(s=>s.key===key);
     if (idx>-1) loadedSystems[idx]={...loadedSystems[idx],...sysData};
