@@ -771,6 +771,7 @@ function showLogin() {
 }
 
 // ── Generic login helpers ─────────────────────────────────────────────────────
+function showSysFormErr(msg) { showEl('sysFormErr'); document.getElementById('sysFormErr').textContent=msg; }
 function showLoginErr(msg) { showEl("loginErr"); document.getElementById("loginErr").textContent=msg; }
 
 function showPortal(isFirstRun) {
@@ -1174,44 +1175,71 @@ async function saveSystem() {
       ...(existingKey?{}:{createdAt:new Date().toISOString()})
     };
     await setDoc(doc(db,"systemConfigs",key), sysData, { merge:true });
-    // If generic login enabled and password provided, sync the generic account
+    // Sync generic account if enabled and password provided
     if (genericEnabled && genericPass && genericEmail) {
+      // Validate email format before any REST calls
+      if (!genericEmail.includes('@') || !genericEmail.includes('.')) {
+        showSysFormErr('Generic email is invalid: ' + genericEmail);
+        btn.disabled=false; btn.textContent='Save System'; return;
+      }
+      // Step 1: Create generic user in portal (plessen-auth) via REST
+      // Using REST avoids Firebase SDK signing in as the new user automatically
       try {
-        // Create/update generic account in portal Firebase Auth
-        const targetSysConfig = loadedSystems.find(s=>s.key===key) || {};
-        const results = await syncUserToSystem(
-          { key,
-            apiKey:    targetSysConfig.apiKey    || '',
-            projectId: targetSysConfig.projectId || key  // actual Firebase project ID
-          },
-          genericEmail, genericPass, 'generic', 'staff'
+        // Get portal API key from the initialized app config
+        const portalApiKey = auth.app?.options?.apiKey || currentProfile?._apiKey;
+        if (!portalApiKey) throw new Error('Portal API key unavailable — cannot create generic account.');
+        const createRes = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${portalApiKey}`,
+          { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ email:genericEmail, password:genericPass, returnSecureToken:true }) }
         );
-        // Create generic user in plessen-auth via REST — does NOT change current auth session
-        try {
-          const portalApiKey = portalAuth.app.options.apiKey;
-          const createRes = await fetch(
-            `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${portalApiKey}`,
+        const createData = await createRes.json();
+        if (createRes.ok) {
+          // Write user profile — admin's auth session is still active
+          await setDoc(doc(db, 'users', createData.localId), {
+            uid: createData.localId, email: genericEmail,
+            displayName: `Generic - ${label}`, role: 'generic',
+            genericFor: key, active: true, createdAt: new Date().toISOString()
+          });
+        } else if (createData.error?.message !== 'EMAIL_EXISTS') {
+          throw new Error('Portal account: ' + (createData.error?.message || 'unknown error'));
+        }
+        // If EMAIL_EXISTS — account already set up, just update Firestore profile
+        if (createData.error?.message === 'EMAIL_EXISTS') {
+          // Sign in as generic to get UID, then update profile
+          const signRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${portalApiKey}`,
             { method:'POST', headers:{'Content-Type':'application/json'},
               body: JSON.stringify({ email:genericEmail, password:genericPass, returnSecureToken:true }) }
           );
-          if (createRes.ok) {
-            const data = await createRes.json();
-            // Write user profile using admin's current auth session
-            await setDoc(doc(db, 'users', data.localId), {
-              uid: data.localId, email: genericEmail,
+          if (signRes.ok) {
+            const signData = await signRes.json();
+            await setDoc(doc(db, 'users', signData.localId), {
+              uid: signData.localId, email: genericEmail,
               displayName: `Generic - ${label}`, role: 'generic',
-              genericFor: key, active: true, createdAt: new Date().toISOString()
-            });
-          } else {
-            const err = await createRes.json();
-            if (err.error?.message !== 'EMAIL_EXISTS') {
-              console.warn('Generic portal account error:', err.error?.message);
-            }
+              genericFor: key, active: true, updatedAt: new Date().toISOString()
+            }, { merge: true });
           }
-        } catch(authErr) {
-          console.warn('Generic portal account:', authErr.message);
         }
-      } catch(syncErr) { console.warn('Generic sync:', syncErr.message); }
+      } catch(portalErr) {
+        showSysFormErr('Could not create generic portal account: ' + portalErr.message);
+        btn.disabled=false; btn.textContent='Save System'; return;
+      }
+      // Step 2: Sync generic account to sub-system (requires config.js to be generated first)
+      const targetSysConfig = loadedSystems.find(s=>s.key===key) || {};
+      if (targetSysConfig.apiKey && targetSysConfig.projectId) {
+        const syncResult = await syncUserToSystem(
+          { key, apiKey: targetSysConfig.apiKey, projectId: targetSysConfig.projectId },
+          genericEmail, genericPass, 'generic', 'staff'
+        );
+        if (!syncResult.ok) {
+          // Non-fatal — config-tool may not have been run yet
+          console.warn('Generic sub-system sync failed (run config-tool if credentials not set up):', syncResult.msg);
+        }
+      } else {
+        // Config not generated yet — note this in UI
+        console.info('Generic portal account created. Run config-tool and re-save to sync to ' + label + '.');
+      }
     }
     // Update local cache
     const idx=loadedSystems.findIndex(s=>s.key===key);
