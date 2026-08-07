@@ -42,6 +42,19 @@ onAuthStateChanged(portalAuth,async function(portalUser){
     window._inventoryFirebaseCfg={apiKey:cfg.apiKey,authDomain:cfg.authDomain,projectId:cfg.projectId,
       storageBucket:cfg.storageBucket||'',messagingSenderId:cfg.messagingSenderId||'',appId:cfg.appId};
     cfg=null;
+    // Check for generic session passed from portal via sessionStorage
+    var genericRaw=sessionStorage.getItem('_pls_generic');
+    if(genericRaw){
+      try{
+        var gen=JSON.parse(genericRaw);
+        sessionStorage.removeItem('_pls_generic'); // clear immediately
+        if(gen.system==='inventory'){
+          window._inventoryGenericCreds={email:gen.email,pass:gen.pass};
+          window._inventoryIsGeneric=true;
+        }
+      }catch(e){}
+      genericRaw=null;
+    }
     removePortalOverlay();
     if(typeof window._startInventory==='function')window._startInventory();
   }catch(e){
@@ -249,6 +262,20 @@ function fbLoad(){
 }
 
 function startAuth(){
+  // Auto-login for generic sessions passed from portal
+  if(window._inventoryGenericCreds){
+    var creds=window._inventoryGenericCreds;
+    window._inventoryGenericCreds=null; // clear immediately
+    auth.signInWithEmailAndPassword(creds.email,creds.pass).catch(function(e){
+      // If auto-login fails, show login screen normally
+      window._inventoryIsGeneric=false;
+      var ls=document.getElementById('loginScreen');
+      if(ls)ls.style.display='flex';
+      var err=document.getElementById('loginErr');
+      if(err)err.textContent='Generic session expired. Please sign in again via the portal.';
+    });
+    // onAuthStateChanged below will handle the rest once sign-in completes
+  }
   auth.onAuthStateChanged(function(user){
     var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
     if(user){
@@ -257,25 +284,48 @@ function startAuth(){
       if(lb)lb.style.display='flex';
       var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
       window._authEmail=user.email;
-      // Activate role immediately — don't wait for fbLoad
-      db.collection('allowedUsers').doc(user.email).get().then(function(snap){
-        var role='tech';
-        if(snap.exists&&snap.data()&&snap.data().role==='admin')role='admin';
-        else if(!snap.exists&&user.email==='anthony.jolly@plesseneye.com')role='admin';
-        if(window.activateRole)window.activateRole(role,null);
-      }).catch(function(){
-        if(user.email==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-      });
-      setTimeout(fbLoad,200);
+      // Check if this is a generic session — always staff, never admin
+      var isGeneric=window._inventoryIsGeneric||user.email.indexOf('generic-')===0;
+      if(isGeneric){
+        window._inventoryIsGeneric=true;
+        if(window.activateRole)window.activateRole('tech',null);
+        showGenericSessionBadge();
+        setTimeout(fbLoad,200);
+      } else {
+        // Role check via allowedUsers — doc must exist (created by portal sync)
+        db.collection('allowedUsers').doc(user.email).get().then(function(snap){
+          var role='tech';
+          if(snap.exists&&snap.data()&&snap.data().role==='admin')role='admin';
+          else if(!snap.exists&&user.email==='anthony.jolly@plesseneye.com')role='admin';
+          if(window.activateRole)window.activateRole(role,null);
+          setTimeout(fbLoad,200);
+        }).catch(function(){
+          if(user.email==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
+          setTimeout(fbLoad,200);
+        });
+      }
     } else {
       if(ls)ls.style.display='flex';
       if(ma)ma.style.display='none';
       if(lb)lb.style.display='none';
       window._fbReady=false;
       window._authEmail=null;
+      window._inventoryIsGeneric=false;
       if(window.resetAppState)window.resetAppState();
     }
   });
+}
+
+function showGenericSessionBadge(){
+  // Show a subtle indicator that this is a generic/shared session
+  var topbar=document.getElementById('topbar')||document.querySelector('.topbar');
+  if(!topbar)return;
+  if(document.getElementById('genericBadge'))return; // already shown
+  var badge=document.createElement('div');
+  badge.id='genericBadge';
+  badge.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:20px;font-size:11px;font-weight:700;margin:0 8px';
+  badge.textContent='Generic Session';
+  topbar.appendChild(badge);
 }
 
 window.doLogin=function(){
@@ -2311,7 +2361,7 @@ function renderTable(){
       <td><span class="badge ${reorder?'bre':'bok'}">${reorder?'⚠ Reorder':'✓ OK'}</span></td>
       <td class="hm">${sku}</td>
       <td style="padding:0;display:flex;align-items:stretch">${r.image?`<img src="${r.image}" style="width:auto;max-width:60px;min-height:100%;height:100%;object-fit:contain;flex-shrink:0;background:transparent;display:block;align-self:stretch">`:''}
-        <div style="padding:8px 10px;flex:1;min-width:0"><span class="iname">${nm}</span>${toggleBtn?'<br>'+toggleBtn:''}</div></td>
+        <div style="padding:8px 10px;flex:1;min-width:0;cursor:pointer" onclick="openItemModal(${r.id})" title="Click to edit"><span class="iname" style="text-decoration:underline dotted;text-underline-offset:3px">${nm}</span>${toggleBtn?'<br>'+toggleBtn:''}</div></td>
       <td>${qtyCell}</td><td class="hm">${pi}</td><td class="hm">${cat}</td>
       <td class="hm" style="color:var(--text2)">${r.vendor||'—'}</td>
       <td><div class="abts">
@@ -3130,7 +3180,7 @@ function renderRestock(){
   const items=inventory.filter(r=>r.item&&r.item.trim()&&(!cat||r.category===cat));
   const out=items.filter(r=>calcTotal(r)===0);
   const low=items.filter(r=>calcTotal(r)>0&&calcTotal(r)<=2);
-  const par=items.filter(r=>r.par&&calcTotal(r)>2&&calcTotal(r)<=parseFloat(r.par));
+  const par=items.filter(r=>r.par&&calcTotal(r)>0&&calcTotal(r)<=parseFloat(r.par));
   const manual=items.filter(r=>r.reorder==='REORDER'&&calcTotal(r)>2&&!(r.par&&calcTotal(r)<=parseFloat(r.par)));
   document.getElementById('rsStats').innerHTML=`
     <div class="sc sd"><div class="sl">Out of Stock</div><div class="sv cd">${out.length}</div></div>
