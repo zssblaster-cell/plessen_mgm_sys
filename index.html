@@ -709,6 +709,14 @@ onAuthStateChanged(auth, async (fbUser) => {
   currentUser=fbUser; currentProfile=profile;
   // Generic users bypass the portal dashboard → redirect straight to their system
   if (profile.role === 'generic' || window._genericLoginTarget) {
+    // If no portal-initiated redirect flag, user manually navigated to portal
+    // Sign them out so the login screen shows instead of looping back
+    const fromPortal = sessionStorage.getItem('_pls_generic_from_portal');
+    if (!fromPortal && !window._genericLoginTarget) {
+      await signOut(auth);
+      return;
+    }
+    sessionStorage.removeItem('_pls_generic_from_portal');
     const targetKey = profile.genericFor || window._genericLoginTarget;
     window._genericLoginTarget = null;
     // Load systems to get the path, then redirect
@@ -719,6 +727,8 @@ onAuthStateChanged(auth, async (fbUser) => {
       sessionStorage.setItem('_pls_generic', JSON.stringify({
         email: sessionEmail, pass: sessionPass, system: targetKey
       }));
+      // Mark that this is a portal-initiated generic redirect
+      sessionStorage.setItem('_pls_generic_from_portal', '1');
       window.location.href = targetSys.path || '/' + targetKey;
       return;
     }
@@ -1168,22 +1178,38 @@ async function saveSystem() {
     if (genericEnabled && genericPass && genericEmail) {
       try {
         // Create/update generic account in portal Firebase Auth
+        const targetSysConfig = loadedSystems.find(s=>s.key===key) || {};
         const results = await syncUserToSystem(
-          { key, apiKey: loadedSystems.find(s=>s.key===key)?.apiKey || '', projectId: key },
+          { key,
+            apiKey:    targetSysConfig.apiKey    || '',
+            projectId: targetSysConfig.projectId || key  // actual Firebase project ID
+          },
           genericEmail, genericPass, 'generic', 'staff'
         );
-        // Also create generic user profile in plessen-auth
+        // Create generic user in plessen-auth via REST — does NOT change current auth session
         try {
-          const gCred = await createUserWithEmailAndPassword(auth, genericEmail, genericPass);
-          await setDoc(doc(db, 'users', gCred.user.uid), {
-            uid: gCred.user.uid, email: genericEmail,
-            displayName: `Generic - ${label}`, role: 'generic',
-            genericFor: key, active: true, createdAt: new Date().toISOString()
-          });
-        } catch(authErr) {
-          if (authErr.code !== 'auth/email-already-in-use') {
-            console.warn('Generic portal account:', authErr.message);
+          const portalApiKey = portalAuth.app.options.apiKey;
+          const createRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${portalApiKey}`,
+            { method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ email:genericEmail, password:genericPass, returnSecureToken:true }) }
+          );
+          if (createRes.ok) {
+            const data = await createRes.json();
+            // Write user profile using admin's current auth session
+            await setDoc(doc(db, 'users', data.localId), {
+              uid: data.localId, email: genericEmail,
+              displayName: `Generic - ${label}`, role: 'generic',
+              genericFor: key, active: true, createdAt: new Date().toISOString()
+            });
+          } else {
+            const err = await createRes.json();
+            if (err.error?.message !== 'EMAIL_EXISTS') {
+              console.warn('Generic portal account error:', err.error?.message);
+            }
           }
+        } catch(authErr) {
+          console.warn('Generic portal account:', authErr.message);
         }
       } catch(syncErr) { console.warn('Generic sync:', syncErr.message); }
     }
