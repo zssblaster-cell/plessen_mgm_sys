@@ -1102,8 +1102,8 @@ function openSystemForm(sys) {
   const genEnabled = sys?.genericLogin?.enabled || false;
   document.getElementById('sysGenericEnabled').checked = genEnabled;
   const genEmailEl = document.getElementById('sysGenericEmail');
-  const genKey = sys?.key || document.getElementById('sysKey').value || 'system';
-  if (genEmailEl) genEmailEl.value = sys?.genericLogin?.email || `generic-${genKey}@plesseneye.com`;
+  const genKey = (sys?.key || '').toLowerCase() || 'system';
+  if (genEmailEl) genEmailEl.value = `generic-${genKey}@plesseneye.com`;
   document.getElementById('sysGenericPass').value = '';
   document.getElementById('genericFields').style.display = genEnabled ? '' : 'none';
   hideEl("sysFormErr"); hideEl("sysMgrList"); showEl("sysMgrForm");
@@ -1161,7 +1161,9 @@ async function saveSystem() {
     // Only display settings saved to Firestore — NO Firebase credentials
     // Credentials live exclusively in encrypted config.js (manage via /config-tool)
     const genericEnabled = document.getElementById('sysGenericEnabled').checked;
-    const genericEmail   = document.getElementById('sysGenericEmail').value.trim();
+    // Derive email directly from the system key — never read from the readonly display field
+    // which may be stale or unpopulated
+    const genericEmail   = genericEnabled ? `generic-${key}@plesseneye.com` : '';
     const genericPass    = document.getElementById('sysGenericPass').value;
     const sysData={
       key, label, description:document.getElementById("sysDesc").value.trim(),
@@ -1182,6 +1184,11 @@ async function saveSystem() {
         showSysFormErr('Generic email is invalid: ' + genericEmail);
         btn.disabled=false; btn.textContent='Save System'; return;
       }
+      // Firebase requires passwords to be at least 6 characters
+      if (genericPass.length < 6) {
+        showSysFormErr('Generic password must be at least 6 characters.');
+        btn.disabled=false; btn.textContent='Save System'; return;
+      }
       // Step 1: Create generic user in portal (plessen-auth) via REST
       // Using REST avoids Firebase SDK signing in as the new user automatically
       try {
@@ -1194,6 +1201,10 @@ async function saveSystem() {
             body: JSON.stringify({ email:genericEmail, password:genericPass, returnSecureToken:true }) }
         );
         const createData = await createRes.json();
+        if (!createRes.ok && createData.error?.message !== 'EMAIL_EXISTS') {
+          // Surface the actual Firebase error instead of a generic 400
+          throw new Error(createData.error?.message || ('Request failed (' + createRes.status + ')'));
+        }
         if (createRes.ok) {
           // Write user profile — admin's auth session is still active
           await setDoc(doc(db, 'users', createData.localId), {
@@ -1201,8 +1212,6 @@ async function saveSystem() {
             displayName: `Generic - ${label}`, role: 'generic',
             genericFor: key, active: true, createdAt: new Date().toISOString()
           });
-        } else if (createData.error?.message !== 'EMAIL_EXISTS') {
-          throw new Error('Portal account: ' + (createData.error?.message || 'unknown error'));
         }
         // If EMAIL_EXISTS — account already set up, just update Firestore profile
         if (createData.error?.message === 'EMAIL_EXISTS') {
