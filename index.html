@@ -601,7 +601,11 @@ async function restWriteDoc(projectId, colPath, docId, data, idToken) {
 async function restDeleteDoc(projectId, colPath, docId, idToken) {
   const url=`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
   const res=await fetch(url,{method:"DELETE",headers:{"Authorization":`Bearer ${idToken}`}});
-  return res.ok;
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    throw new Error(err.error?.message || `Delete failed (${res.status})`);
+  }
+  return true;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -676,8 +680,32 @@ async function syncUserToSystem(sys, userEmail, userPassword, role, accessLevel)
 
 async function removeUserFromSystem(sys, userEmail) {
   try {
-    const adminAuth = await restSignIn(sys.apiKey, sessionEmail, sessionPass);
-    await restDeleteDoc(sys.projectId, "allowedUsers", userEmail, adminAuth.idToken);
+    let adminToken;
+    try {
+      // Try signing in as the current portal admin into this sub-project
+      const signedIn = await restSignIn(sys.apiKey, sessionEmail, sessionPass);
+      adminToken = signedIn.idToken;
+    } catch(signInErr) {
+      // Admin has no account in this sub-project yet — self-heal by creating one
+      // (only works if the failure is "account doesn't exist", not "wrong password")
+      if (signInErr.message.includes("EMAIL_NOT_FOUND")) {
+        const created = await restCreateUser(sys.apiKey, sessionEmail, sessionPass);
+        adminToken = created.idToken;
+        // Register self as admin in this sub-project's allowedUsers (self-create is allowed)
+        await restWriteDoc(sys.projectId, "allowedUsers", sessionEmail, {
+          email: sessionEmail, role: "admin", access: "editor", active: true,
+          syncedAt: new Date().toISOString(), syncedFrom: "self-heal"
+        }, adminToken);
+      } else {
+        // Wrong password or other issue — cannot self-heal, surface clear guidance
+        throw new Error(
+          `Your admin account in ${sys.label||sys.key} is out of sync with your current password. ` +
+          `Reset it in Firebase Console → ${sys.projectId} → Authentication → Users, ` +
+          `or re-enter your password when editing your own profile.`
+        );
+      }
+    }
+    await restDeleteDoc(sys.projectId, "allowedUsers", userEmail, adminToken);
     return { ok:true };
   } catch(e) { return { ok:false, msg:e.message }; }
 }
