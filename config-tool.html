@@ -221,9 +221,9 @@ const COLORS = [
 // On first run the form is empty — enter credentials manually from Firebase Console.
 // Subsequent runs pre-populate from the existing decrypted config.js.
 const DEFAULT_SYSTEMS = [
-  { key:"equipment",     label:"Equipment Management",  description:"Track, service, and manage all clinic equipment",      path:"/equipment",     color:"#1d4ed8", accent:"#dbeafe", order:1, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" },
-  { key:"inventory",     label:"Inventory",             description:"Monitor stock levels, medications, and medical supplies", path:"/inventory",   color:"#0369a1", accent:"#e0f2fe", order:2, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" },
-  { key:"credentialing", label:"Credentialing",         description:"Manage staff licenses, certifications, and credentials", path:"/credentialing", color:"#075985", accent:"#f0f9ff", order:3, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" },
+  { key:"equipment",     label:"Equipment Management",  description:"Track, service, and manage all clinic equipment",      path:"/equipment",     color:"#1d4ed8", accent:"#dbeafe", order:1, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"", adminEmail:"", adminPassword:"", secondaryRoleName:"viewer", secondaryEmail:"", secondaryPassword:"" },
+  { key:"inventory",     label:"Inventory",             description:"Monitor stock levels, medications, and medical supplies", path:"/inventory",   color:"#0369a1", accent:"#e0f2fe", order:2, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"", adminEmail:"", adminPassword:"", secondaryRoleName:"tech", secondaryEmail:"", secondaryPassword:"" },
+  { key:"credentialing", label:"Credentialing",         description:"Manage staff licenses, certifications, and credentials", path:"/credentialing", color:"#075985", accent:"#f0f9ff", order:3, enabled:true, apiKey:"", authDomain:"", projectId:"", storageBucket:"", messagingSenderId:"", appId:"", measurementId:"", adminEmail:"", adminPassword:"", secondaryRoleName:"staff", secondaryEmail:"", secondaryPassword:"" },
 ];
 
 // Expose globals
@@ -234,6 +234,7 @@ window.selectColor=selectColor;
 window.saveGithubConfig=saveGithubConfig;
 window.testGithubConnection=testGithubConnection;
 window.toggleTokenVisibility=toggleTokenVisibility;
+window.togglePassVis=togglePassVis;
 window.saveDisplaySettings=saveDisplaySettings;
 window.markDirty=markDirty;
 
@@ -428,6 +429,45 @@ function renderSystemCard(sys, idx) {
       <label class="fl">Measurement ID (optional)</label>
       <input class="fi" value="${sys.measurementId||""}" placeholder="G-XXXXXXXXXX" oninput="systems[${idx}].measurementId=this.value.trim();markDirty()">
     </div>
+
+    <div class="section-div"></div>
+    <div style="font-size:11px;font-weight:700;color:#4a4a7a;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Service Accounts</div>
+    <div style="font-size:11px;color:#64748b;line-height:1.5;margin-bottom:12px">
+      Two fixed accounts control access inside this system — not per-person.
+      The portal decides which one a user's browser signs into, based on their live-verified access level.
+      Create these once in ${sys.projectId||"this project"}'s Firebase Auth, then enter the same credentials here.
+    </div>
+    <div class="grid2" style="margin-bottom:10px">
+      <div>
+        <label class="fl">Admin Account Email *</label>
+        <input class="fi" value="${sys.adminEmail||""}" placeholder="${sys.key||'system'}-admin@plesseneye.com" oninput="systems[${idx}].adminEmail=this.value.trim();markDirty()">
+      </div>
+      <div>
+        <label class="fl">Admin Account Password *</label>
+        <div style="display:flex;gap:6px">
+          <input type="password" class="fi" style="flex:1" value="${sys.adminPassword||""}" placeholder="Password set in Firebase Auth" oninput="systems[${idx}].adminPassword=this.value;markDirty()">
+          <button type="button" class="btn btn-ghost btn-xs" onclick="togglePassVis(this)" style="flex-shrink:0">👁</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div>
+        <label class="fl">Secondary Role Name</label>
+        <input class="fi" value="${sys.secondaryRoleName||"staff"}" placeholder="viewer / tech / staff" oninput="systems[${idx}].secondaryRoleName=this.value.trim().toLowerCase();markDirty()">
+      </div>
+      <div></div>
+      <div>
+        <label class="fl">Secondary Account Email *</label>
+        <input class="fi" value="${sys.secondaryEmail||""}" placeholder="${sys.key||'system'}-${sys.secondaryRoleName||'staff'}@plesseneye.com" oninput="systems[${idx}].secondaryEmail=this.value.trim();markDirty()">
+      </div>
+      <div>
+        <label class="fl">Secondary Account Password *</label>
+        <div style="display:flex;gap:6px">
+          <input type="password" class="fi" style="flex:1" value="${sys.secondaryPassword||""}" placeholder="Password set in Firebase Auth" oninput="systems[${idx}].secondaryPassword=this.value;markDirty()">
+          <button type="button" class="btn btn-ghost btn-xs" onclick="togglePassVis(this)" style="flex-shrink:0">👁</button>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -435,7 +475,8 @@ function addSystem() {
   syncFromDOM();          // preserve existing cards' values before re-render
   systems.push({ key:"", label:"", description:"", path:"", color:"#1d4ed8", accent:"#dbeafe",
     order:systems.length+1, enabled:true, apiKey:"", authDomain:"", projectId:"",
-    storageBucket:"", messagingSenderId:"", appId:"", measurementId:"" });
+    storageBucket:"", messagingSenderId:"", appId:"", measurementId:"",
+    adminEmail:"", adminPassword:"", secondaryRoleName:"staff", secondaryEmail:"", secondaryPassword:"" });
   isDirty = true;
   renderSystems();
   updateSaveStatus();
@@ -561,6 +602,10 @@ async function generateConfig() {
   for (const sys of systems) {
     if (!sys.key||!sys.label||!sys.apiKey||!sys.projectId||!sys.appId) {
       showGlobalErr(`"${sys.label||sys.key||"A system"}" is missing required fields (Key, Label, API Key, Project ID, App ID).`);
+      return;
+    }
+    if (!sys.adminEmail||!sys.adminPassword||!sys.secondaryEmail||!sys.secondaryPassword) {
+      showGlobalErr(`"${sys.label||sys.key}" is missing Service Account credentials — both the admin and secondary accounts must have an email and password.`);
       return;
     }
   }
@@ -798,6 +843,14 @@ async function pushToGitHub(content) {
 function toggleTokenVisibility() {
   const inp = document.getElementById("ghToken");
   inp.type  = inp.type === "password" ? "text" : "password";
+}
+
+// Generic toggle for any password input preceded by its toggle button —
+// used by the Service Account admin/secondary password fields
+function togglePassVis(btn) {
+  const inp = btn.previousElementSibling;
+  if (!inp) return;
+  inp.type = inp.type === "password" ? "text" : "password";
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
