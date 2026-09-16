@@ -12,56 +12,70 @@
   <div id="poBlocked" style="display:none">
     <div class="po-lock">🔒</div>
     <div class="po-title">Portal Sign-In Required</div>
-    <div class="po-sub">This system requires you to sign in through the Plessen Management Portal first.</div>
+    <div class="po-sub" id="poSub">This system requires you to sign in through the Plessen Management Portal first.</div>
     <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
     <a href="/" class="po-btn">← Return to Portal</a>
   </div>
 </div>
 
-<!-- Module script: portal auth check + config decrypt only.
-     Main script stays non-module so all inventory functions remain global. -->
+<!-- Module script: portal-only auth. Watches the person's own portal profile
+     LIVE for the whole session — not a one-time check. Main script stays
+     non-module so all inventory functions remain global. -->
 <script type="module">
-import { portalAuth, loadConfig } from '/crypto.js';
-import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { portalAuth, portalDb, loadConfig } from '/crypto.js';
+import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-function showPortalBlocked(){
-  var l=document.getElementById('poLoading'),b=document.getElementById('poBlocked'),c=document.getElementById('poCountdown');
+var poCountdownIv=null;
+function showPortalBlocked(message){
+  var o=document.getElementById('portalOverlay');
+  var l=document.getElementById('poLoading'),b=document.getElementById('poBlocked'),
+      c=document.getElementById('poCountdown'),s2=document.getElementById('poSub');
+  if(o){o.style.display='flex';o.style.opacity='1';}
   if(l)l.style.display='none';if(b)b.style.display='block';
-  var s=5,iv=setInterval(function(){s--;if(c)c.textContent='Redirecting in '+s+' second'+(s!==1?'s':'')+'...';if(s<=0){clearInterval(iv);window.location.href='/';}},1000);
+  if(s2&&message)s2.textContent=message;
+  if(window._teardownInventoryService)window._teardownInventoryService();
+  if(poCountdownIv)clearInterval(poCountdownIv);
+  var s=5;
+  poCountdownIv=setInterval(function(){s--;if(c)c.textContent='Redirecting in '+s+' second'+(s!==1?'s':'')+'...';if(s<=0){clearInterval(poCountdownIv);window.location.href='/';}},1000);
 }
 function removePortalOverlay(){
   var o=document.getElementById('portalOverlay');if(!o)return;o.style.opacity='0';setTimeout(function(){o.remove();},320);
 }
 
-onAuthStateChanged(portalAuth,async function(portalUser){
-  if(!portalUser){showPortalBlocked();return;}
-  try{
-    var configs=await loadConfig();
-    var cfg=configs&&configs.inventory;
-    if(!cfg)throw new Error('Inventory config not initialised — run /config-tool first.');
-    window._inventoryFirebaseCfg={apiKey:cfg.apiKey,authDomain:cfg.authDomain,projectId:cfg.projectId,
-      storageBucket:cfg.storageBucket||'',messagingSenderId:cfg.messagingSenderId||'',appId:cfg.appId};
-    cfg=null;
-    // Check for generic session passed from portal via sessionStorage
-    var genericRaw=sessionStorage.getItem('_pls_generic');
-    if(genericRaw){
-      try{
-        var gen=JSON.parse(genericRaw);
-        sessionStorage.removeItem('_pls_generic'); // clear immediately
-        if(gen.system==='inventory'){
-          window._inventoryGenericCreds={email:gen.email,pass:gen.pass};
-          window._inventoryIsGeneric=true;
-        }
-      }catch(e){}
-      genericRaw=null;
-    }
-    removePortalOverlay();
-    if(typeof window._startInventory==='function')window._startInventory();
-  }catch(e){
-    removePortalOverlay();
-    var ls=document.getElementById('loginScreen');if(ls)ls.style.display='flex';
-    var err=document.getElementById('loginErr');if(err)err.textContent=e.message;
+// Bridge used by the compat-SDK main script to sign into the portal account
+// itself needs no bridge (portalAuth is only touched here), but Sign Out
+// inside the app needs to end the PORTAL session, not just this tab's.
+window._portalSignOut=async function(){ await signOut(portalAuth); window.location.href='/'; };
+
+var profileUnsub=null;
+onAuthStateChanged(portalAuth,function(portalUser){
+  if(profileUnsub){profileUnsub();profileUnsub=null;}
+  if(!portalUser){
+    showPortalBlocked("Sign in through the Plessen Management Portal to access Inventory.");
+    return;
   }
+  // Live listener — fires instantly on any change, not just next login.
+  profileUnsub=onSnapshot(doc(portalDb,'users',portalUser.uid),function(snap){
+    if(!snap.exists()||snap.data().active===false){
+      showPortalBlocked("Your account is not active. Contact your administrator.");
+      return;
+    }
+    var level=snap.data().access&&snap.data().access.inventory||'none';
+    if(level==='none'){
+      showPortalBlocked("You don't have access to Inventory. Contact your administrator.");
+      return;
+    }
+    var isGeneric=snap.data().role==='generic';
+    var targetRole=level==='editor'?'admin':'tech';
+    if(typeof window._ensureInventoryService==='function'){
+      window._ensureInventoryService(targetRole,isGeneric,loadConfig).then(function(ok){
+        if(ok)removePortalOverlay();
+      });
+    }
+  },function(){
+    showPortalBlocked("Could not verify your access. Please sign in again through the Portal.");
+  });
 });
 </script>
 
@@ -78,24 +92,75 @@ window.transactions = window.transactions || [];
 (function(){
 if(typeof firebase==='undefined'){
   document.addEventListener('DOMContentLoaded',function(){
-    var ls=document.getElementById('loginScreen');
-    if(ls)ls.innerHTML='<div style="color:#fff;text-align:center;padding:40px;max-width:400px"><h2>Connection Required</h2><p style="margin-top:12px;opacity:.8">This app must be opened from a web server (Vercel) not a local file. Please deploy to Vercel and open the Vercel URL.</p></div>';
+    var sub=document.getElementById('poSub');
+    if(sub)sub.textContent='Connection Required — this app must be opened from a web server (Vercel), not a local file.';
+    var cd=document.getElementById('poCountdown');if(cd)cd.style.display='none';
   });return;
 }
 // Firebase config comes from encrypted config.js — no credentials in this file.
-// _startInventory() is called by the module script above once config is decrypted.
+// _ensureInventoryService(role) is called by the module script above whenever
+// the portal's LIVE-verified access level says this session should be
+// 'admin' or 'tech'. There is no login screen — the two fixed service
+// accounts below are the only identities this project's Firebase Auth ever
+// sees; which one gets signed into is decided entirely by the portal.
 var db   = null;
 var auth = null;
+var currentServiceRole = null; // 'admin' | 'tech' | null
+var fbLoadRanOnce = false;
 
-window._startInventory = function(){
-  var cfg=window._inventoryFirebaseCfg;
-  if(!cfg)return;
-  if(!firebase.apps.length)firebase.initializeApp(cfg);
-  window._inventoryFirebaseCfg=null;
-  db=firebase.firestore();
-  auth=firebase.auth();
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
-  startAuth();
+window._ensureInventoryService = function(targetRole, isGeneric, loadConfig){
+  // Already on the correct account — skip re-auth on unrelated profile changes
+  if(currentServiceRole===targetRole && auth && auth.currentUser){
+    return Promise.resolve(true);
+  }
+  return loadConfig().then(function(configs){
+    var cfg=configs&&configs.inventory;
+    if(!cfg)throw new Error('Inventory config not initialised — run /config-tool first.');
+    var email = targetRole==='admin' ? cfg.adminEmail    : cfg.secondaryEmail;
+    var pass  = targetRole==='admin' ? cfg.adminPassword : cfg.secondaryPassword;
+    var fbCfg = {apiKey:cfg.apiKey,authDomain:cfg.authDomain,projectId:cfg.projectId,
+      storageBucket:cfg.storageBucket||'',messagingSenderId:cfg.messagingSenderId||'',appId:cfg.appId};
+    cfg=null; // null immediately — credentials no longer needed
+    if(!email||!pass)throw new Error('Service account credentials missing — run /config-tool.');
+
+    var appName='plessen-inventory';
+    var app = firebase.apps.find(function(a){return a.name===appName;});
+    if(!app) app = firebase.initializeApp(fbCfg, appName);
+    var newAuth = app.auth();
+
+    return newAuth.setPersistence(firebase.auth.Auth.Persistence.NONE).then(function(){
+      var signOutP = (auth && auth.currentUser) ? auth.signOut().catch(function(){}) : Promise.resolve();
+      return signOutP.then(function(){ return newAuth.signInWithEmailAndPassword(email,pass); });
+    }).then(function(){
+      auth = newAuth;
+      db   = app.firestore();
+      currentServiceRole = targetRole;
+      window._authEmail = email;
+
+      var ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
+      if(ma)ma.style.display='';
+      if(lb)lb.style.display='flex';
+
+      if(isGeneric){ showGenericSessionBadge(); } else { hideGenericSessionBadge(); }
+      if(window.activateRole) window.activateRole(targetRole,null);
+      if(!fbLoadRanOnce){ fbLoadRanOnce=true; setTimeout(fbLoad,200); }
+      return true;
+    });
+  }).catch(function(e){
+    window._teardownInventoryService();
+    return false;
+  });
+};
+
+window._teardownInventoryService = function(){
+  fbLoadRanOnce=false;
+  if(auth && auth.currentUser){ auth.signOut().catch(function(){}); }
+  auth=null; db=null; currentServiceRole=null;
+  window._fbReady=false; window._authEmail=null;
+  var ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
+  if(ma)ma.style.display='none';
+  if(lb)lb.style.display='none';
+  if(window.resetAppState)window.resetAppState();
 };
 
 function setSS(s){
@@ -171,28 +236,15 @@ function fbLoad(){
     if(dirty)window.fbSave();
     setSS('synced');
     window._fbReady=true;
-    // Load config then route by email
+    // Load config (PIN hashes, tech roster) — role is already active by this
+    // point, established by _ensureInventoryService before fbLoad ever runs.
     db.doc('plessen/config').get().then(function(cfgSnap){
       var cfg={adminPinHash:'',techs:[]};
       if(cfgSnap.exists&&cfgSnap.data()){
         cfg.adminPinHash=cfgSnap.data().adminPinHash||'';
         cfg.techs=cfgSnap.data().techs||[];
       }
-      var applyP=window.applyConfig?window.applyConfig(cfg):Promise.resolve();
-      applyP.then(function(){
-        var email=window._authEmail||'';
-        if(email==='anthony.jolly@plesseneye.com'){
-          if(window.activateRole)window.activateRole('admin',null);
-        } else if(email==='examuser@plesseneye.com'){
-          if(window.activateRole)window.activateRole('tech',null);
-        } else {
-          if(window.showRoleScreen)window.showRoleScreen();
-        }
-      }).catch(function(){
-        if(window.showRoleScreen)window.showRoleScreen();
-      });
-    }).catch(function(){
-      if(window.showRoleScreen)window.showRoleScreen();
+      if(window.applyConfig)window.applyConfig(cfg);
     });
     // Listeners
     db.doc('plessen/inventory').onSnapshot(function(snap){
@@ -240,84 +292,17 @@ function fbLoad(){
       banner.style.borderColor='#d97706';
       banner.innerHTML='⚠ Firestore permission error — check your Firestore rules in the Firebase Console. <a href="https://console.firebase.google.com" target="_blank" style="color:#92400e;font-weight:700">Open Firebase Console →</a>';
     }
-    // Still route by email so UI activates correctly
-    // even when Firestore rules block access
+    // Still allow local fallback so the UI isn't fully dead on a rules issue —
+    // role stays whatever _ensureInventoryService already activated.
     if(window.localFallbackBoot)window.localFallbackBoot();
-    var email=window._authEmail||'';
-    // Apply empty config so PIN hashes default to '1234'
-    if(window.applyConfig){
-      window.applyConfig({adminPinHash:'',techs:[]}).then(function(){
-        if(email==='anthony.jolly@plesseneye.com'){
-          if(window.activateRole)window.activateRole('admin',null);
-        } else if(email==='examuser@plesseneye.com'){
-          if(window.showTechPinScreen)window.showTechPinScreen();
-        }
-      });
-    } else {
-      if(email==='anthony.jolly@plesseneye.com'){
-        if(window.activateRole)window.activateRole('admin',null);
-      }
-    }
-  });
-}
-
-function startAuth(){
-  // Auto-login for generic sessions passed from portal
-  if(window._inventoryGenericCreds){
-    var creds=window._inventoryGenericCreds;
-    window._inventoryGenericCreds=null; // clear immediately
-    auth.signInWithEmailAndPassword(creds.email,creds.pass).catch(function(e){
-      // If auto-login fails, show login screen normally
-      window._inventoryIsGeneric=false;
-      var ls=document.getElementById('loginScreen');
-      if(ls)ls.style.display='flex';
-      var err=document.getElementById('loginErr');
-      if(err)err.textContent='Generic session expired. Please sign in again via the portal.';
-    });
-    // onAuthStateChanged below will handle the rest once sign-in completes
-  }
-  auth.onAuthStateChanged(function(user){
-    var ls=document.getElementById('loginScreen'),ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
-    if(user){
-      if(ls)ls.style.display='none';
-      if(ma)ma.style.display='';
-      if(lb)lb.style.display='flex';
-      var errEl=document.getElementById('loginErr');if(errEl)errEl.textContent='';
-      window._authEmail=user.email;
-      // Check if this is a generic session — always staff, never admin
-      var isGeneric=window._inventoryIsGeneric||user.email.indexOf('generic-')===0;
-      if(isGeneric){
-        window._inventoryIsGeneric=true;
-        if(window.activateRole)window.activateRole('tech',null);
-        showGenericSessionBadge();
-        setTimeout(fbLoad,200);
-      } else {
-        // Role check via allowedUsers — doc must exist (created by portal sync)
-        db.collection('allowedUsers').doc(user.email).get().then(function(snap){
-          var role='tech';
-          if(snap.exists&&snap.data()&&snap.data().role==='admin')role='admin';
-          else if(!snap.exists&&user.email==='anthony.jolly@plesseneye.com')role='admin';
-          if(window.activateRole)window.activateRole(role,null);
-          setTimeout(fbLoad,200);
-        }).catch(function(){
-          if(user.email==='anthony.jolly@plesseneye.com'){if(window.activateRole)window.activateRole('admin',null);}
-          setTimeout(fbLoad,200);
-        });
-      }
-    } else {
-      if(ls)ls.style.display='flex';
-      if(ma)ma.style.display='none';
-      if(lb)lb.style.display='none';
-      window._fbReady=false;
-      window._authEmail=null;
-      window._inventoryIsGeneric=false;
-      if(window.resetAppState)window.resetAppState();
-    }
+    if(window.applyConfig)window.applyConfig({adminPinHash:'',techs:[]});
   });
 }
 
 function showGenericSessionBadge(){
-  // Show a subtle indicator that this is a generic/shared session
+  // Shown when the PORTAL profile is a generic/shared-device account —
+  // driven by the live listener, not by which service account is signed in
+  // (both admin and tech service accounts are shared identities now).
   var topbar=document.getElementById('topbar')||document.querySelector('.topbar');
   if(!topbar)return;
   if(document.getElementById('genericBadge'))return; // already shown
@@ -327,20 +312,16 @@ function showGenericSessionBadge(){
   badge.textContent='Generic Session';
   topbar.appendChild(badge);
 }
+function hideGenericSessionBadge(){
+  var badge=document.getElementById('genericBadge');
+  if(badge)badge.remove();
+}
 
-window.doLogin=function(){
-  if(!auth){var e=document.getElementById('loginErr');if(e)e.textContent='System initialising — please wait.';return;}
-  var email=document.getElementById('loginEmail').value.trim();
-  var pass=document.getElementById('loginPass').value;
-  var err=document.getElementById('loginErr');
-  err.textContent='Signing in...';
-  auth.signInWithEmailAndPassword(email,pass).catch(function(e){
-    err.textContent=(e.code==='auth/invalid-credential'||e.code==='auth/wrong-password')?'Incorrect email or password.':e.message;
-  });
-};
+// Sign Out now ends the PORTAL session (the only real session left) —
+// ending it here ends it everywhere, not just this tab.
 window.doLogout=function(){
   window._fbReady=false;
-  auth.signOut();
+  if(window._portalSignOut) window._portalSignOut();
 };
 // Real online/offline detection using browser API
 window.addEventListener('online',  function(){ if(window._fbReady)setSS('synced'); });
@@ -993,34 +974,6 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
 </style>
 </head>
 <body>
-
-<!-- LOGIN SCREEN -->
-<div id="loginScreen" style="position:fixed;inset:0;background:#0d2d5e;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
-  <div style="background:#fff;border-radius:16px;padding:36px 32px;width:100%;max-width:360px;box-shadow:0 24px 64px rgba(0,0,0,.4)">
-    <div style="text-align:center;margin-bottom:24px">
-      <img src="data:image/jpeg;base64,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" alt="Plessen Ophthalmology" style="height:60px;width:auto;object-fit:contain;display:block;margin:0 auto 8px;background:#fff">
-      <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.08em">Clinical Inventory System</div>
-    </div>
-    <div style="margin-bottom:13px">
-      <label style="display:block;font-size:12px;font-weight:600;color:#4a5568;margin-bottom:4px">Email</label>
-      <input type="email" id="loginEmail" placeholder="clinic@email.com" autocomplete="username"
-        style="width:100%;padding:10px 12px;border:1px solid #dde3ec;border-radius:8px;font-size:14px;outline:none;color:#0f1923;background:#f0f4f8;box-sizing:border-box"
-        onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
-    </div>
-    <div style="margin-bottom:6px">
-      <label style="display:block;font-size:12px;font-weight:600;color:#4a5568;margin-bottom:4px">Password</label>
-      <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"
-        style="width:100%;padding:10px 12px;border:1px solid #dde3ec;border-radius:8px;font-size:14px;outline:none;color:#0f1923;background:#f0f4f8;box-sizing:border-box"
-        onkeydown="if(event.key==='Enter')window.doLogin()">
-    </div>
-    <div id="loginErr" style="color:#b91c1c;font-size:12px;min-height:18px;margin-bottom:6px;font-weight:500"></div>
-    <button onclick="window.doLogin()"
-      style="width:100%;padding:11px;background:#1a5fb4;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">
-      Sign In
-    </button>
-    <a href="/" style="display:block;text-align:center;margin-top:16px;font-size:12px;color:#94a3b8;text-decoration:none">← Return to Portal</a>
-  </div>
-</div>
 
 <!-- MAIN APP -->
 <div id="mainApp" style="display:none">
@@ -3357,9 +3310,6 @@ document.addEventListener('keydown',e=>{
     // PIN inputs specifically
     if(ae&&ae.id==='verifyPinInput'){e.preventDefault();verifySubmit();return;}
     if(ae&&ae.id==='pinInput'){e.preventDefault();submitPin();return;}
-    if(ae&&(ae.id==='loginEmail'||ae.id==='loginPass')){
-      e.preventDefault();doLogin();return;
-    }
   }
 
   // ── Ctrl/Cmd shortcuts ──
