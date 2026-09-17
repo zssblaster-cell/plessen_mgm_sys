@@ -374,8 +374,6 @@
     </div>
     <div class="section-label">System Access</div>
     <div id="systemAccessFields"><div style="font-size:13px;color:#94a3b8">Loading systems...</div></div>
-    <div class="section-label" style="margin-top:14px">Sync Results</div>
-    <div id="syncResultsDiv"><div style="font-size:12px;color:#94a3b8">Results will appear here after saving.</div></div>
     <div class="md-actions">
       <button class="btn btn-ghost" onclick="closeUserForm()">Cancel</button>
       <button class="btn btn-primary" id="userFormSaveBtn" onclick="saveUser()">Create User</button>
@@ -540,8 +538,6 @@ const COLOR_PALETTE = [
 // ════════════════════════════════════════════════════════════════════════════
 let currentUser    = null;
 let currentProfile = null;
-let sessionPass    = "";
-let sessionEmail   = "";
 let loadedSystems  = [];   // populated from Firestore systemConfigs
 let allUsers       = [];
 
@@ -563,51 +559,6 @@ G.toggleSystemEnabled=toggleSystemEnabled;
 // ════════════════════════════════════════════════════════════════════════════
 // REST API HELPERS
 // ════════════════════════════════════════════════════════════════════════════
-async function restPost(url, body) {
-  const res  = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  return data;
-}
-async function restSignIn(apiKey, email, password) {
-  return restPost(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
-    { email, password, returnSecureToken:true });
-}
-async function restCreateUser(apiKey, email, password) {
-  return restPost(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
-    { email, password, returnSecureToken:true });
-}
-function toFSVal(v) {
-  if (v===null||v===undefined) return { nullValue:null };
-  if (typeof v==="boolean")    return { booleanValue:v };
-  if (typeof v==="number")     return Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v};
-  if (typeof v==="string")     return { stringValue:v };
-  if (Array.isArray(v))        return { arrayValue:{ values:v.map(toFSVal) } };
-  if (typeof v==="object")     return { mapValue:{ fields:toFSFields(v) } };
-  return { stringValue:String(v) };
-}
-function toFSFields(obj) {
-  const f={};
-  for (const [k,v] of Object.entries(obj)) f[k]=toFSVal(v);
-  return f;
-}
-async function restWriteDoc(projectId, colPath, docId, data, idToken) {
-  const url=`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
-  const res=await fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json","Authorization":`Bearer ${idToken}`},body:JSON.stringify({fields:toFSFields(data)})});
-  const result=await res.json();
-  if (result.error) throw new Error(result.error.message);
-  return result;
-}
-async function restDeleteDoc(projectId, colPath, docId, idToken) {
-  const url=`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${colPath}/${encodeURIComponent(docId)}`;
-  const res=await fetch(url,{method:"DELETE",headers:{"Authorization":`Bearer ${idToken}`}});
-  if (!res.ok) {
-    const err = await res.json().catch(()=>({}));
-    throw new Error(err.error?.message || `Delete failed (${res.status})`);
-  }
-  return true;
-}
-
 // ════════════════════════════════════════════════════════════════════════════
 // SYSTEM CONFIGS — load display settings from Firestore + credentials from
 // encrypted config.js via crypto.js. Merge into loadedSystems at runtime.
@@ -662,53 +613,10 @@ function updateLoginPanel() {
   ).join("");
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// USER ↔ SYSTEM SYNC
-// ════════════════════════════════════════════════════════════════════════════
-async function syncUserToSystem(sys, userEmail, userPassword, role, accessLevel) {
-  try {
-    try { await restCreateUser(sys.apiKey, userEmail, userPassword); }
-    catch(e) { if (!e.message.includes("EMAIL_EXISTS")) throw e; }
-    const adminAuth = await restSignIn(sys.apiKey, sessionEmail, sessionPass);
-    await restWriteDoc(sys.projectId, "allowedUsers", userEmail, {
-      email:userEmail, role, access:accessLevel, active:true,
-      syncedAt:new Date().toISOString(), syncedFrom:"portal"
-    }, adminAuth.idToken);
-    return { ok:true };
-  } catch(e) { return { ok:false, msg:e.message }; }
-}
-
-async function removeUserFromSystem(sys, userEmail) {
-  try {
-    let adminToken;
-    try {
-      // Try signing in as the current portal admin into this sub-project
-      const signedIn = await restSignIn(sys.apiKey, sessionEmail, sessionPass);
-      adminToken = signedIn.idToken;
-    } catch(signInErr) {
-      // Admin has no account in this sub-project yet — self-heal by creating one
-      // (only works if the failure is "account doesn't exist", not "wrong password")
-      if (signInErr.message.includes("EMAIL_NOT_FOUND")) {
-        const created = await restCreateUser(sys.apiKey, sessionEmail, sessionPass);
-        adminToken = created.idToken;
-        // Register self as admin in this sub-project's allowedUsers (self-create is allowed)
-        await restWriteDoc(sys.projectId, "allowedUsers", sessionEmail, {
-          email: sessionEmail, role: "admin", access: "editor", active: true,
-          syncedAt: new Date().toISOString(), syncedFrom: "self-heal"
-        }, adminToken);
-      } else {
-        // Wrong password or other issue — cannot self-heal, surface clear guidance
-        throw new Error(
-          `Your admin account in ${sys.label||sys.key} is out of sync with your current password. ` +
-          `Reset it in Firebase Console → ${sys.projectId} → Authentication → Users, ` +
-          `or re-enter your password when editing your own profile.`
-        );
-      }
-    }
-    await restDeleteDoc(sys.projectId, "allowedUsers", userEmail, adminToken);
-    return { ok:true };
-  } catch(e) { return { ok:false, msg:e.message }; }
-}
+// Access control is no longer synced into each sub-project — every sub-system
+// now watches this person's own portal profile document LIVE and reads
+// access.{systemKey} directly. Setting it here (in saveUser, below) is the
+// only step needed; there is nothing left to push out to sub-projects.
 
 // ════════════════════════════════════════════════════════════════════════════
 // AUTH STATE
@@ -735,31 +643,15 @@ onAuthStateChanged(auth, async (fbUser) => {
   const profile = snap.data();
   if (!profile.active) { await signOut(auth); showLoginErr("Your account has been deactivated."); return; }
   currentUser=fbUser; currentProfile=profile;
-  // Generic users bypass the portal dashboard → redirect straight to their system
-  if (profile.role === 'generic' || window._genericLoginTarget) {
-    // If no portal-initiated redirect flag, user manually navigated to portal
-    // Sign them out so the login screen shows instead of looping back
-    const fromPortal = sessionStorage.getItem('_pls_generic_from_portal');
-    if (!fromPortal && !window._genericLoginTarget) {
-      await signOut(auth);
-      return;
-    }
-    sessionStorage.removeItem('_pls_generic_from_portal');
-    const targetKey = profile.genericFor || window._genericLoginTarget;
-    window._genericLoginTarget = null;
-    // Load systems to get the path, then redirect
+  // Generic accounts bypass the portal dashboard entirely — every visit to
+  // the portal sends them straight to their assigned system. Sub-systems
+  // verify the live portal session themselves (no credentials to hand off),
+  // so there's nothing more to do here than redirect. "Sign Out" inside the
+  // sub-system is the correct way to end a generic session, not this page.
+  if (profile.role === 'generic') {
     await loadSystems();
-    const targetSys = loadedSystems.find(s => s.key === targetKey);
-    if (targetSys) {
-      // Store credentials in sessionStorage for sub-system auto-login
-      sessionStorage.setItem('_pls_generic', JSON.stringify({
-        email: sessionEmail, pass: sessionPass, system: targetKey
-      }));
-      // Mark that this is a portal-initiated generic redirect
-      sessionStorage.setItem('_pls_generic_from_portal', '1');
-      window.location.href = targetSys.path || '/' + targetKey;
-      return;
-    }
+    const targetSys = loadedSystems.find(s => s.key === profile.genericFor);
+    if (targetSys) { window.location.href = targetSys.path || '/' + profile.genericFor; return; }
   }
   const firstRun = await loadSystems();
   showPortal(firstRun);
@@ -777,7 +669,6 @@ async function doLogin() {
   hideEl("loginErr");
   try {
     await signInWithEmailAndPassword(auth, email, pass);
-    sessionEmail=email; sessionPass=pass;
   } catch(e) {
     const msgs={"auth/wrong-password":"Incorrect password.","auth/user-not-found":"No account found.","auth/invalid-credential":"Invalid email or password.","auth/too-many-requests":"Too many attempts. Please wait."};
     showLoginErr(msgs[e.code]||e.message);
@@ -787,7 +678,7 @@ async function doLogin() {
 document.getElementById("loginPass").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 document.getElementById("loginEmail").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("loginPass").focus();});
 
-async function doSignOut() { sessionPass=""; sessionEmail=""; await signOut(auth); }
+async function doSignOut() { await signOut(auth); }
 
 // ════════════════════════════════════════════════════════════════════════════
 // SHOW SCREENS
@@ -899,7 +790,7 @@ async function doChangePw() {
   try {
     await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, cur));
     await updatePassword(currentUser, nw);
-    sessionPass=nw; showEl("pwOk"); setTimeout(closeChangePw,2000);
+    showEl("pwOk"); setTimeout(closeChangePw,2000);
   } catch(e) {
     showEl("pwErr");
     document.getElementById("pwErr").textContent=e.code==="auth/wrong-password"?"Current password incorrect.":e.message;
@@ -975,7 +866,6 @@ function openUserForm(uid) {
     document.getElementById("passHint").textContent="Required for new users";
     document.getElementById("systemAccessFields").innerHTML=buildAccessFields({});
   }
-  document.getElementById("syncResultsDiv").innerHTML=`<div style="font-size:12px;color:#94a3b8">Results will appear after saving.</div>`;
   hideEl("userFormErr"); showEl("userFormModal");
 }
 
@@ -993,15 +883,15 @@ function editUser(uid) {
   document.getElementById("locSTT").checked=(u.locations||[]).includes("STT");
   document.getElementById("passHint").textContent="Leave blank to keep current password";
   document.getElementById("systemAccessFields").innerHTML=buildAccessFields(u.access||{});
-  document.getElementById("syncResultsDiv").innerHTML=`<div style="font-size:12px;color:#94a3b8">Click Save to re-sync access.</div>`;
   hideEl("userFormErr"); showEl("userFormModal");
 }
 
 async function deleteUser(uid, email) {
   if (!confirm(`Remove ${email}? This will revoke portal access and remove them from all systems.`)) return;
   try {
+    // active:false is watched LIVE by every sub-system's own profile listener —
+    // this alone revokes access everywhere, instantly, no per-system sync needed.
     await updateDoc(doc(db,"users",uid), { active:false });
-    await Promise.all(loadedSystems.map(s=>removeUserFromSystem(s, email)));
     await loadUsers();
   } catch(e) { alert("Error: "+e.message); }
 }
@@ -1026,34 +916,29 @@ async function saveUser() {
   try {
     let fbUid=uid;
     if (!uid) {
-      const cred=await createUserWithEmailAndPassword(auth, email, pass);
-      fbUid=cred.user.uid;
-      await signInWithEmailAndPassword(auth, sessionEmail, sessionPass);
+      // Created via REST so the admin's own signed-in session is never disturbed —
+      // createUserWithEmailAndPassword would otherwise auto-sign-in as the new user.
+      const portalApiKey = auth.app?.options?.apiKey;
+      if (!portalApiKey) throw new Error("Portal API key unavailable.");
+      const createRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${portalApiKey}`,
+        { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ email, password:pass, returnSecureToken:true }) }
+      );
+      const createData = await createRes.json();
+      if (!createRes.ok) throw new Error(createData.error?.message || "Could not create account.");
+      fbUid = createData.localId;
     }
+    // This is the ONLY step that matters now — every sub-system watches this
+    // document LIVE and reads access.{systemKey} directly. There is nothing
+    // left to sync out to sub-projects.
     await setDoc(doc(db,"users",fbUid),{
       uid:fbUid, email, displayName:name, role, locations:locs, access, active:true,
       updatedAt:new Date().toISOString(), ...(uid?{}:{createdAt:new Date().toISOString()})
     },{merge:true});
-    // Sync to sub-projects
-    const results={};
-    document.getElementById("syncResultsDiv").innerHTML=`<span style="font-size:12px;color:#64748b">Syncing...</span>`;
-    for (const s of loadedSystems.filter(s=>s.enabled)) {
-      if (access[s.key]!=="none") {
-        results[s.key]=await syncUserToSystem(s, email, pass||"plessen2024", role, access[s.key]);
-      } else {
-        const r=await removeUserFromSystem(s, email);
-        results[s.key]={ok:r.ok, removed:true};
-      }
-    }
-    document.getElementById("syncResultsDiv").innerHTML=loadedSystems.filter(s=>s.enabled).map(s=>{
-      const r=results[s.key]||{ok:false,msg:"Not attempted"};
-      const cls=r.ok?"sync-ok":"sync-err";
-      const lbl=r.ok?(r.removed?"Removed":"Synced"):"Failed: "+(r.msg||"error");
-      return `<div class="sync-row"><span style="font-weight:600">${s.label}</span><span class="${cls}">${lbl}</span></div>`;
-    }).join("");
     btn.textContent="✓ Saved";
     await loadUsers();
-    setTimeout(()=>{ btn.disabled=false; btn.textContent=uid?"Save Changes":"Create User"; },2000);
+    setTimeout(()=>{ btn.disabled=false; btn.textContent=uid?"Save Changes":"Create User"; },1200);
   } catch(e) {
     showEl("userFormErr"); document.getElementById("userFormErr").textContent=e.message;
     btn.disabled=false; btn.textContent=uid?"Save Changes":"Create User";
@@ -1235,10 +1120,13 @@ async function saveSystem() {
         }
         if (createRes.ok) {
           // Write user profile — admin's auth session is still active
+          // access is always 'viewer' for generic accounts — never admin,
+          // matches how every sub-system's live listener reads this field.
           await setDoc(doc(db, 'users', createData.localId), {
             uid: createData.localId, email: genericEmail,
             displayName: `Generic - ${label}`, role: 'generic',
-            genericFor: key, active: true, createdAt: new Date().toISOString()
+            genericFor: key, access: { [key]: 'viewer' },
+            active: true, createdAt: new Date().toISOString()
           });
         }
         // If EMAIL_EXISTS — account already set up, just update Firestore profile
@@ -1254,7 +1142,8 @@ async function saveSystem() {
             await setDoc(doc(db, 'users', signData.localId), {
               uid: signData.localId, email: genericEmail,
               displayName: `Generic - ${label}`, role: 'generic',
-              genericFor: key, active: true, updatedAt: new Date().toISOString()
+              genericFor: key, access: { [key]: 'viewer' },
+              active: true, updatedAt: new Date().toISOString()
             }, { merge: true });
           }
         }
@@ -1262,21 +1151,9 @@ async function saveSystem() {
         showSysFormErr('Could not create generic portal account: ' + portalErr.message);
         btn.disabled=false; btn.textContent='Save System'; return;
       }
-      // Step 2: Sync generic account to sub-system (requires config.js to be generated first)
-      const targetSysConfig = loadedSystems.find(s=>s.key===key) || {};
-      if (targetSysConfig.apiKey && targetSysConfig.projectId) {
-        const syncResult = await syncUserToSystem(
-          { key, apiKey: targetSysConfig.apiKey, projectId: targetSysConfig.projectId },
-          genericEmail, genericPass, 'generic', 'staff'
-        );
-        if (!syncResult.ok) {
-          // Non-fatal — config-tool may not have been run yet
-          console.warn('Generic sub-system sync failed (run config-tool if credentials not set up):', syncResult.msg);
-        }
-      } else {
-        // Config not generated yet — note this in UI
-        console.info('Generic portal account created. Run config-tool and re-save to sync to ' + label + '.');
-      }
+      // That's it — no sub-system sync needed. Every sub-system watches this
+      // portal profile LIVE and reads access.{key} directly the moment the
+      // generic account signs in.
     }
     // Update local cache
     const idx=loadedSystems.findIndex(s=>s.key===key);
