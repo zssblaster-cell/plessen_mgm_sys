@@ -12,29 +12,38 @@
 import { initializeApp, getApps }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-         sendPasswordResetEmail }
+         setPersistence, inMemoryPersistence }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot,
          getDoc, getDocs, query, where, writeBatch }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-import { portalAuth, loadConfig } from '/crypto.js';
+import { portalAuth, portalDb, loadConfig } from '/crypto.js';
 
-// ─── Firebase initialized async — no credentials in this file ──────────────
+// ─── Portal-only auth. No login screen, no per-person accounts — access is
+// decided LIVE by the portal for the whole session, not checked once. ───────
 let auth = null;
 let db   = null;
+let currentServiceRole = null; // 'admin' | 'staff' | null
+let profileUnsub = null;
 
-// ─── Portal overlay helpers ─────────────────────────────────────────────────
-function showPortalBlocked() {
+let poCountdownIv=null;
+function showPortalBlocked(message) {
+  const overlay=document.getElementById('portalOverlay');
   const loading=document.getElementById('poLoading');
   const blocked=document.getElementById('poBlocked');
+  const sub=document.getElementById('poSub');
   const countdown=document.getElementById('poCountdown');
+  if(overlay){overlay.style.display='flex';overlay.style.opacity='1';}
   if(loading)loading.style.display='none';
   if(blocked)blocked.style.display='block';
+  if(sub&&message)sub.textContent=message;
+  teardownServiceSession();
+  if(poCountdownIv)clearInterval(poCountdownIv);
   let secs=5;
-  const iv=setInterval(()=>{
+  poCountdownIv=setInterval(()=>{
     secs--;
     if(countdown)countdown.textContent=`Redirecting in ${secs} second${secs!==1?'s':''}...`;
-    if(secs<=0){clearInterval(iv);window.location.href='/';}
+    if(secs<=0){clearInterval(poCountdownIv);window.location.href='/';}
   },1000);
 }
 function removePortalOverlay() {
@@ -42,45 +51,84 @@ function removePortalOverlay() {
   if(!o)return; o.style.opacity='0'; setTimeout(()=>o.remove(),320);
 }
 
-// ─── Portal auth check + config decrypt (same pattern as equipment) ─────────
-async function initCredentialingFirebase() {
-  return new Promise((resolve) => {
-    const unsub = onAuthStateChanged(portalAuth, async (portalUser) => {
-      unsub();
-      if (!portalUser) { showPortalBlocked(); resolve(false); return; }
-      try {
-        const configs = await loadConfig();
-        let cfg = configs?.credentialing;
-        if (!cfg) throw new Error('Credentialing config not initialised — run /config-tool first.');
-        const APP = 'plessen-credentials';
-        const existing = getApps().find(a => a.name === APP);
-        const crdApp = existing || initializeApp({
-          apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
-          storageBucket: cfg.storageBucket || '', messagingSenderId: cfg.messagingSenderId || '',
-          appId: cfg.appId, ...(cfg.measurementId ? { measurementId: cfg.measurementId } : {})
-        }, APP);
-        cfg = null; // null immediately — credentials no longer needed
-        auth = getAuth(crdApp);
-        db   = getFirestore(crdApp);
-        if (!db) throw new Error('Firestore failed to initialise.');
-        resolve(true);
-      } catch(e) {
-        document.getElementById('auth-screen')?.classList.remove('hidden');
-        const el=document.getElementById('a-error');
-        if(el){el.textContent=e.message;el.style.display='block';}
-        resolve(false);
-      }
-    });
-  });
+window._portalSignOut=async()=>{ await signOut(portalAuth); window.location.href='/'; };
+
+async function ensureServiceSession(targetRole){
+  if(currentServiceRole===targetRole && auth?.currentUser) return true;
+  try{
+    const configs = await loadConfig();
+    let cfg = configs?.credentialing;
+    if(!cfg) throw new Error('Credentialing config not initialised — run /config-tool first.');
+
+    const email = targetRole==='admin' ? cfg.adminEmail    : cfg.secondaryEmail;
+    const pass  = targetRole==='admin' ? cfg.adminPassword : cfg.secondaryPassword;
+    const APP='plessen-credentials';
+    const existing=getApps().find(a=>a.name===APP);
+    const crdApp=existing||initializeApp({
+      apiKey:cfg.apiKey, authDomain:cfg.authDomain, projectId:cfg.projectId,
+      storageBucket:cfg.storageBucket||'', messagingSenderId:cfg.messagingSenderId||'',
+      appId:cfg.appId, ...(cfg.measurementId?{measurementId:cfg.measurementId}:{})
+    }, APP);
+    cfg=null; // null immediately — credentials no longer needed
+    if(!email||!pass) throw new Error('Service account credentials missing — run /config-tool.');
+
+    const newAuth=getAuth(crdApp);
+    await setPersistence(newAuth, inMemoryPersistence); // never persist a service session
+    const newDb=getFirestore(crdApp);
+
+    if(auth?.currentUser){ try{ await signOut(auth); }catch(e){} }
+    await signInWithEmailAndPassword(newAuth,email,pass);
+
+    auth=newAuth; db=newDb; currentServiceRole=targetRole;
+    isAdmin = targetRole==='admin';
+    currentUser = newAuth.currentUser;
+
+    removePortalOverlay();
+    if(isAdmin)show('admin-btn'); else hide('admin-btn');
+    const roleEl=document.getElementById('user-email');
+    if(roleEl)roleEl.textContent=isAdmin?'Admin':'Staff';
+    show('app-screen');
+    listen();
+    await loadFileEncKey();
+    return true;
+  }catch(e){
+    teardownServiceSession();
+    showPortalBlocked("System configuration issue — contact your administrator.");
+    return false;
+  }
 }
 
-// ─── Boot: same pattern as equipment ───────────────────────────────────────
-(async () => {
-  const ready = await initCredentialingFirebase();
-  if (!ready) return; // showPortalBlocked already handled
-  removePortalOverlay();
-  startCredApp();
-})();
+function teardownServiceSession(){
+  if(unsubP){unsubP();unsubP=null;}if(unsubM){unsubM();unsubM=null;}if(unsubFM){unsubFM();unsubFM=null;}
+  people=[];maint=[];fileMetas=[];
+  FILE_ENC_KEY='';encKeyReady=false;
+  if(auth?.currentUser){ signOut(auth).catch(()=>{}); }
+  auth=null; db=null; currentServiceRole=null; currentUser=null;
+  hide('app-screen');
+}
+
+onAuthStateChanged(portalAuth,(portalUser)=>{
+  if(profileUnsub){profileUnsub();profileUnsub=null;}
+  if(!portalUser){
+    showPortalBlocked("Sign in through the Plessen Management Portal to access Credentialing.");
+    return;
+  }
+  profileUnsub=onSnapshot(doc(portalDb,'users',portalUser.uid),(snap)=>{
+    if(!snap.exists()||snap.data().active===false){
+      showPortalBlocked("Your account is not active. Contact your administrator.");
+      return;
+    }
+    const level=snap.data().access?.credentialing||'none';
+    if(level==='none'){
+      showPortalBlocked("You don't have access to Credentialing. Contact your administrator.");
+      return;
+    }
+    ensureServiceSession(level==='editor'?'admin':'staff');
+  },()=>{
+    showPortalBlocked("Could not verify your access. Please sign in again through the Portal.");
+  });
+});
+
 
 // ── MASTER KEY (Option C) ──────────────────────────────────────────────────────
 // This key encrypts the admin-set file encryption passphrase stored in Firestore.
@@ -133,8 +181,8 @@ const MAINT_ICON={'Diagnostic Equipment':'🔬','Surgical Equipment':'🩺','IT 
 const CHUNK_SIZE=500*1024; // 500KB per chunk — safe under Firestore 1MB doc limit after base64 overhead
 
 // ── State ──────────────────────────────────────────────────────────────────────
-let people=[],maint=[],allowedUsers=[],fileMetas=[],currentUser=null,isAdmin=false;
-let unsubP=null,unsubM=null,unsubAU=null,unsubFM=null;
+let people=[],maint=[],fileMetas=[],currentUser=null,isAdmin=false;
+let unsubP=null,unsubM=null,unsubFM=null;
 let mainTab='credentials',credTab='all',metricFilter=null;
 let editId=null,editMId=null,addDocPersonId=null,rowCtr=0;
 let rF={expired:true,danger:true,warn:false},lastHtml='';
@@ -147,8 +195,6 @@ let encKeyReady=false;
 const $=id=>document.getElementById(id);
 function show(id){$(id).style.display='block';}
 function hide(id){$(id).style.display='none';}
-function setAE(m){$('auth-error').textContent=m;}
-function clrAE(){$('auth-error').textContent='';}
 function toast(msg,type='ok'){const t=$('toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.className='toast',3500);}
 window.openModal=id=>$(id).classList.add('open');
 window.closeModal=id=>$(id).classList.remove('open');
@@ -460,58 +506,15 @@ function renderFilePills(personId,docId,docType){
   return `<div class="doc-files">${pills}${uploadBtn}</div>`;
 }
 
-// ── Brute force protection ─────────────────────────────────────────────────────
-const LOCK_LIMIT=5,LOCK_MS=15*60*1000;
-let loginAttempts=0,lockUntil=0;
-function checkRateLimit(){const now=Date.now();if(now<lockUntil){const m=Math.ceil((lockUntil-now)/60000);setAE('Too many failed attempts. Try again in '+m+' minute'+(m>1?'s':'')+'.'); return false;}return true;}
-function recordFail(){loginAttempts++;if(loginAttempts>=LOCK_LIMIT){lockUntil=Date.now()+LOCK_MS;loginAttempts=0;}}
-function resetAttempts(){loginAttempts=0;lockUntil=0;}
-
 // ── Auth ───────────────────────────────────────────────────────────────────────
-function startCredApp(){
-  if(!auth||!db){return;}
-onAuthStateChanged(auth,async user=>{
-  currentUser=user;
-  if(user){
-    try{
-      const allowed=await getDoc(doc(db,'allowedUsers',user.email));
-      if(!allowed.exists()){await signOut(auth);setAE('Access denied. Contact your administrator.');return;}
-      isAdmin=allowed.data().role==='admin';
-      $('user-email').textContent=user.email;
-      if(isAdmin)show('admin-btn'); else hide('admin-btn');
-      listen();
-      // Load file encryption key silently
-      await loadFileEncKey();
-      hide('auth-screen');show('app-screen');
-      resetAttempts();
-    }catch(err){
-      if(err.code==='permission-denied'){await signOut(auth);setAE('Access denied. Contact your administrator.');}
-      else{console.error(err);setAE('Error verifying access: '+err.message);}
-    }
-  } else {
-    if(unsubP){unsubP();unsubP=null;}if(unsubM){unsubM();unsubM=null;}
-    if(unsubAU){unsubAU();unsubAU=null;}if(unsubFM){unsubFM();unsubFM=null;}
-    people=[];maint=[];allowedUsers=[];fileMetas=[];
-    FILE_ENC_KEY='';encKeyReady=false;
-    hide('app-screen');show('auth-screen');
-  }
-});
-} // end startCredApp
-
-window.doSignIn=async()=>{
-  clrAE();if(!checkRateLimit())return;
-  const e=$('a-email').value.trim(),p=$('a-pass').value;
-  if(!e||!p){setAE('Please enter email and password.');return;}
-  try{await signInWithEmailAndPassword(auth,e,p);}catch(err){recordFail();setAE(authErr(err.code));}
-};
-window.doSignOut=async()=>{await signOut(auth);};
-window.doReset=async()=>{const e=$('a-email').value.trim();if(!e){setAE('Enter your email first.');return;}try{await sendPasswordResetEmail(auth,e);setAE('Reset email sent.');}catch(e){setAE(authErr(e.code));}};
-function authErr(c){return({'auth/invalid-email':'Invalid email.','auth/user-not-found':'No account found.','auth/wrong-password':'Incorrect password.','auth/too-many-requests':'Too many attempts — wait a moment.','auth/invalid-credential':'Incorrect email or password.','auth/network-request-failed':'Network error.'})[c]||'Something went wrong.';}
+// Sign Out now ends the PORTAL session (the only real session left) —
+// ending it here ends it everywhere, not just this tab.
+window.doSignOut=async()=>{ if(window._portalSignOut) window._portalSignOut(); };
 
 // ── Firestore listeners ────────────────────────────────────────────────────────
 function listen(){
   if(!db){console.error('listen() called before db init');return;}
-  if(unsubP)unsubP();if(unsubM)unsubM();if(unsubAU)unsubAU();if(unsubFM)unsubFM();
+  if(unsubP)unsubP();if(unsubM)unsubM();if(unsubFM)unsubFM();
   unsubP=onSnapshot(collection(db,'people'),
     snap=>{people=snap.docs.map(d=>d.data()).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));renderAll();},
     err=>{console.error('People:',err);toast('Data error: '+err.message,'error');}
@@ -524,12 +527,6 @@ function listen(){
     snap=>{fileMetas=snap.docs.map(d=>d.data());renderAll();},
     err=>console.error('FileMeta:',err)
   );
-  if(isAdmin){
-    unsubAU=onSnapshot(collection(db,'allowedUsers'),
-      snap=>{allowedUsers=snap.docs.map(d=>({email:d.id,...d.data()}));renderAdminList();},
-      err=>console.error('AllowedUsers:',err)
-    );
-  }
   renderAll();
 }
 async function savePerson(p){await setDoc(doc(db,'people',p.id),p);}
@@ -913,26 +910,10 @@ window.markDone=async id=>{
 window.confirmDelM=async(id,name)=>{if(!confirm(`Remove "${name}"?`))return;try{await deleteMaintItem(id);toast('Item removed.');}catch(e){toast('Error.','error');}};
 
 // ── Admin panel ────────────────────────────────────────────────────────────────
-window.openAdminPanel=()=>{renderAdminList();openModal('admin-modal');};
-function renderAdminList(){
-  const el=$('admin-user-list');if(!el)return;
-  el.innerHTML=allowedUsers.length?allowedUsers.map(u=>`
-    <div class="admin-user-row">
-      <div><div style="font-size:13px;font-weight:600">${esc(u.email)}</div>
-      <div style="font-size:11px;color:var(--t3)">${esc(u.role||'user')} · Added ${fmtDate((u.addedAt||'').split('T')[0])}</div></div>
-      ${u.email!==currentUser.email?`<button class="bg bdel" onclick="removeUser('${esc(u.email)}')">Remove</button>`:'<span style="font-size:11px;color:var(--t3)">(you)</span>'}
-    </div>`).join(''):'<div style="font-size:13px;color:var(--t3);padding:8px">No users yet.</div>';
-}
-window.addAllowedUser=async()=>{
-  const email=$('admin-new-email').value.trim().toLowerCase(),role=$('admin-new-role').value;
-  if(!email){alert('Please enter an email.');return;}
-  try{await setDoc(doc(db,'allowedUsers',email),{role,addedAt:new Date().toISOString()});$('admin-new-email').value='';toast('User added: '+email);}
-  catch(e){toast('Error: '+e.message,'error');}
-};
-window.removeUser=async email=>{
-  if(!confirm(`Remove access for ${email}?`))return;
-  try{await deleteDoc(doc(db,'allowedUsers',email));toast('User removed.');}catch(e){toast('Error.','error');}
-};
+// Access control (who can use Credentialing, admin vs staff) is decided
+// entirely by the Portal now — there is no in-app user list to manage here.
+// This panel is for File Encryption Key setup only (admin-only).
+window.openAdminPanel=()=>{openModal('admin-modal');};
 
 // ── Export ─────────────────────────────────────────────────────────────────────
 window.openExportModal=()=>{
@@ -1033,7 +1014,7 @@ function exportPDF(inclCreds,inclMaint,statusFilter,selectedIds){
   <div id="poBlocked" style="display:none">
     <div class="po-lock">🔒</div>
     <div class="po-title">Portal Sign-In Required</div>
-    <div class="po-sub">This system requires you to sign in through the Plessen Management Portal first.</div>
+    <div class="po-sub" id="poSub">This system requires you to sign in through the Plessen Management Portal first.</div>
     <div class="po-countdown" id="poCountdown">Redirecting in 5 seconds...</div>
     <a href="/" class="po-btn-crd">← Return to Portal</a>
   </div>
@@ -1107,7 +1088,7 @@ body{font-family:var(--ff);background:var(--bg);color:var(--t1);font-size:15px;l
 input,select,button{font-family:var(--ff);font-size:14px}button{cursor:pointer}
 
 /* Auth */
-#auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+/* auth-screen removed — portal overlay is now the sole gate */
 .abox{background:var(--surf);border:1.5px solid var(--bb);border-radius:20px;padding:44px 40px;width:100%;max-width:420px;box-shadow:0 8px 40px rgba(30,58,138,.12)}
 .aey{font-size:10px;font-weight:700;color:var(--bm);text-transform:uppercase;letter-spacing:.12em;margin-bottom:6px}
 .alogo{font-size:22px;font-weight:700;color:var(--bd);letter-spacing:-.5px;margin-bottom:2px}
@@ -1320,29 +1301,13 @@ input:focus,select:focus{border-color:var(--bm)}
 </head>
 <body>
 
-<!-- Auth -->
-<div id="auth-screen">
-  <div class="abox">
-    <div class="aey">Plessen Ophthalmology</div>
-    <div class="alogo">Credential &amp; Maintenance Tracker</div>
-    <div class="asub">Staff credentials · Equipment · Business documents</div>
-    <h2 id="auth-title">Sign in</h2>
-    <div class="afield"><label>Email address</label><input type="email" id="a-email" placeholder="you@plessenoph.com" onkeydown="if(event.key==='Enter')doSignIn()"></div>
-    <div class="afield"><label>Password</label><input type="password" id="a-pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doSignIn()"></div>
-    <div id="auth-error"></div>
-    <button class="abtn" onclick="doSignIn()">Sign in</button>
-    <button class="alink" onclick="doReset()">Forgot password?</button>
-    <div class="auth-note">🔒 Access restricted to authorized Plessen Ophthalmology staff only.</div>
-  </div>
-</div>
-
 <!-- App -->
 <div id="app-screen">
   <header>
     <div class="hinner">
       <div><div class="hey">Plessen Ophthalmology</div><div class="hlogo">Credential &amp; Maintenance Tracker</div></div>
       <div class="spacer"></div>
-      <div class="upill"><span class="sdot"></span><span id="user-email"></span></div>
+      <div class="upill"><span class="sdot"></span><span id="user-email">Credentialing</span></div>
       <span id="enc-key-status" class="enc-status-pill" style="color:#fca5a5">⚠️ Encryption not set</span>
       <button class="hbtn hbtn-admin" id="admin-btn" onclick="openAdminPanel()" style="display:none">⚙ Admin</button>
       <button class="hbtn" onclick="openExportModal()">⬇ Export</button>
@@ -1507,10 +1472,10 @@ input:focus,select:focus{border-color:var(--bm)}
   <div class="modal" style="max-width:520px">
     <button class="modal-close-btn" onclick="closeModal('admin-modal')">✕</button>
     <h2>⚙ Admin Panel</h2>
-    <p class="sub">Manage user access and file encryption settings.</p>
+    <p class="sub">File encryption settings.</p>
     <div class="security-note">
-      <strong>🔒 Three-layer security active</strong>
-      Layer 1: Firebase Authentication. Layer 2: Allowlist checked server-side in Firestore rules. Layer 3: AES-256 file encryption — files are encrypted before leaving the browser.
+      <strong>🔒 Access control</strong>
+      Who can use Credentialing, and at what level, is managed entirely through the Plessen Management Portal. Files are additionally protected with AES-256 encryption before leaving the browser.
     </div>
 
     <!-- File Encryption Setup -->
@@ -1525,15 +1490,6 @@ input:focus,select:focus{border-color:var(--bm)}
       <p style="font-size:11px;color:var(--t3);margin-top:8px">⚠️ Changing the key means existing files can no longer be decrypted. Only change if starting fresh.</p>
     </div>
 
-    <div class="slbl">Authorized Users</div>
-    <div id="admin-user-list"></div>
-    <div class="slbl">Add new user</div>
-    <div class="admin-add-row">
-      <input type="email" id="admin-new-email" placeholder="newuser@plessenoph.com">
-      <select id="admin-new-role"><option value="user">User</option><option value="admin">Admin</option></select>
-      <button class="bsurf-p" onclick="addAllowedUser()">Add</button>
-    </div>
-    <p style="font-size:11px;color:var(--t3);margin-top:10px">Note: You must also create their login account in Firebase Console → Authentication.</p>
     <div class="mfooter"><button class="bsurf" onclick="closeModal('admin-modal')">Close</button></div>
   </div>
 </div>
