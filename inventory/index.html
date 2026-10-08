@@ -276,6 +276,13 @@ function fbLoad(){
     if(dirty)window.fbSave();
     setSS('synced');
     window._fbReady=true;
+    // Redraw now that the data is in memory. The role (and its first render)
+    // was activated BEFORE this load ran, so without this the screen keeps
+    // showing the empty pre-load state until some other action redraws it.
+    if(typeof updateBadges==='function')updateBadges();
+    if(typeof applyFilters==='function')applyFilters();
+    var activePage=document.querySelector('.page.active');
+    if(activePage&&activePage.id==='page-changelog'&&typeof renderChangelog==='function')renderChangelog();
     // Load config (PIN hashes, tech roster) — role is already active by this
     // point, established by _ensureInventoryService before fbLoad ever runs.
     db.doc('plessen/config').get().then(function(cfgSnap){
