@@ -160,7 +160,7 @@
 
     <!-- Result area (shown after generate) -->
     <div id="downloadArea" class="hidden card">
-      <div class="card-title" id="resultTitle">✅ Config Generated</div>
+      <div class="card-title" id="resultTitle">Publishing Config…</div>
       <div id="pushStatusArea">
         <div style="display:flex;align-items:center;gap:10px;padding:14px;background:#0a0a1a;border:1px solid #2e2060;border-radius:9px;margin-bottom:14px">
           <div id="pushSpinner" style="width:16px;height:16px;border:2px solid #4a4a7a;border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0"></div>
@@ -168,9 +168,17 @@
         </div>
       </div>
       <div style="margin-top:4px">
-        <div class="step-row"><span class="step-badge" style="background:#22c55e">✓</span>Encryption key written to Firestore <span class="mono">system/keyFragment</span></div>
-        <div class="step-row"><span class="step-badge" style="background:#22c55e">✓</span>Crypto script written to Firestore <span class="mono">system/crypto</span></div>
-        <div class="step-row" id="pushResultRow"><span class="step-badge" id="pushStepBadge">3</span><span id="pushResultMsg">Pushing config.js to GitHub...</span></div>
+        <div class="step-row"><span class="step-badge" id="stepPushBadge">1</span><span id="stepPushMsg">Push config.js to GitHub</span></div>
+        <div class="step-row"><span class="step-badge" id="stepKeyBadge">2</span><span id="stepKeyMsg">Activate new key in Firestore <span class="mono">system/keyFragment</span> (previous key kept for the deploy window)</span></div>
+        <div class="step-row"><span class="step-badge" id="stepLiveBadge">3</span><span id="stepLiveMsg">Live on Vercel</span></div>
+      </div>
+      <div id="pushFailActions" class="hidden" style="margin-top:14px;padding:12px;border:1px solid #7f1d1d55;background:#7f1d1d22;border-radius:9px;font-size:12px;color:#fca5a5;line-height:1.6">
+        The push failed, so <strong>nothing was changed</strong> — the live system is still running on the current key.<br>
+        Fix the GitHub settings and retry, or download config.js and upload it to the repo yourself.
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="retryPush()">↻ Retry push</button>
+          <button class="btn btn-ghost btn-sm" onclick="manualActivate()">⬇ Manual upload — download &amp; activate key</button>
+        </div>
       </div>
       <div style="margin-top:14px;display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="downloadConfig()">⬇ Download config.js (backup)</button>
@@ -186,6 +194,8 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+// Version helpers shared with every system (single source of truth)
+import { readConfigVersion, selectKeyForFile, LEGACY_VERSION } from '/crypto.js';
 
 // ── Portal bootstrap (same as crypto.js) ─────────────────────────────────────
 const PORTAL_MIN = {
@@ -201,6 +211,8 @@ const db   = getFirestore(app);
 let currentUser   = null;
 let systems       = [];      // array of system config objects
 let generatedBlob = null;    // the generated config.js content
+let pending       = null;    // { keyHex, ver, prevK, prevVer, cryptoScript } — not yet activated
+let livePollIv    = null;
 let isDirty       = false;   // unsaved changes flag
 let lastSaved     = null;    // HH:MM of last save
 
@@ -230,6 +242,7 @@ const DEFAULT_SYSTEMS = [
 window.doLogin=doLogin; window.doSignOut=doSignOut;
 window.addSystem=addSystem; window.removeSystem=removeSystem;
 window.generateConfig=generateConfig; window.downloadConfig=downloadConfig;
+window.retryPush=retryPush; window.manualActivate=manualActivate;
 window.selectColor=selectColor;
 window.saveGithubConfig=saveGithubConfig;
 window.testGithubConnection=testGithubConnection;
@@ -296,9 +309,9 @@ async function loadExistingConfig() {
       const res = await fetch("/config.js?v=" + Date.now());
       if (res.ok) {
         const blob = await res.text();
-        if (!blob.includes("PLACEHOLDER")) {
+        if (!blob.includes("PLACEHOLDER_RUN_CONFIG_TOOL")) {
           const decryptFn = (new Function("return (" + cryptoSnap.data().script + ")"))();
-          credentials = await decryptFn(blob, keySnap.data()) || {};
+          credentials = await decryptFn(blob, selectKeyForFile(blob, keySnap.data())) || {};
           credSource  = "config.js";
         } else {
           credSource = "placeholder";
@@ -306,7 +319,8 @@ async function loadExistingConfig() {
       }
     }
   } catch(e) {
-    console.warn("Could not decrypt config.js (ok if first run):", e.message);
+    console.warn("Could not decrypt config.js (ok if first run):", e.code || e.name, e.message);
+    credSource = "unreadable";
   }
 
   // ── Step 3: Merge and render ───────────────────────────────────────────────
@@ -318,6 +332,8 @@ async function loadExistingConfig() {
     }));
     const credMsg = credSource === "config.js"
       ? " + credentials from config.js"
+      : credSource === "unreadable"
+        ? " — ⚠ live config.js could not be decrypted: re-enter credentials, then Generate"
       : credSource === "placeholder"
         ? " — run Generate to add credentials"
         : " — credentials not yet generated";
@@ -637,59 +653,156 @@ async function generateConfig() {
     // The decryption script (stored in Firestore, executed at runtime)
     const cryptoScript = `async(c,k)=>{const m=c.match(/PLESSEN_ENCRYPTED_CONFIG="([^"]+)"/);if(!m)throw new Error('Invalid config.js');const b=Uint8Array.from(atob(m[1]),x=>x.charCodeAt(0));const iv=b.slice(0,12),ct=b.slice(12),kb=new Uint8Array(k.k.match(/.{2}/g).map(h=>parseInt(h,16))),ck=await crypto.subtle.importKey('raw',kb,{name:'AES-GCM'},false,['decrypt']),pt=await crypto.subtle.decrypt({name:'AES-GCM',iv},ck,ct);return JSON.parse(new TextDecoder().decode(pt))}`;
 
-    // Write to Firestore
+    // Version label — plain, non-secret; ties this file to this key
+    const ver = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+
+    // The key that matches what's LIVE right now becomes the "previous" key,
+    // so the site keeps working until the new file finishes deploying.
+    const prev = await findLiveKey();
+
+    generatedBlob = `// config.js — Plessen Encrypted System Configuration\n// Generated by /config-tool on ${new Date().toISOString()}\n// Do not edit manually. Re-run config-tool to update.\nconst PLESSEN_CONFIG_VERSION="${ver}";\nconst PLESSEN_ENCRYPTED_CONFIG="${blob}";`;
+    pending = { keyHex, ver, prevK: prev.k, prevVer: prev.ver, cryptoScript };
+
+    resetPublishUI();
+    showEl("downloadArea");
+    await attemptPush();
+
+  } catch(e) {
+    showGlobalErr("Generation failed: " + e.message);
+  }
+}
+
+// Which key decrypts the config.js that is live right now?
+// Returns { k, ver } (both null if nothing usable exists yet).
+async function findLiveKey() {
+  const none = { k: null, ver: null };
+  try {
+    const keySnap = await getDoc(doc(db, "system", "keyFragment"));
+    if (!keySnap.exists()) return none;
+    const kd = keySnap.data();
+    const res = await fetch("/config.js?v=" + Date.now());
+    const liveVer = res.ok ? readConfigVersion(await res.text()) : null;
+    const curVer  = kd.ver || LEGACY_VERSION;
+    if (liveVer === curVer)                              return { k: kd.k, ver: curVer };
+    if (kd.prevK && liveVer === (kd.prevVer || LEGACY_VERSION)) return { k: kd.prevK, ver: kd.prevVer || LEGACY_VERSION };
+    // Live file matches neither key (already out of sync) — keep the current
+    // key as "previous" so at least the most recent state is preserved.
+    return { k: kd.k || null, ver: curVer };
+  } catch(e) {
+    console.warn("findLiveKey:", e.code || e.name, e.message);
+    return none;
+  }
+}
+
+// Step 1 → push. Only on success does step 2 (activate key) run.
+async function attemptPush() {
+  if (!pending) return;
+  hideEl("pushFailActions");
+  setStep("Push", "…", "#6366f1", "Pushing config.js to GitHub...");
+  setPushStatus("Pushing config.js to GitHub...", "#94a3b8", true);
+  try {
+    await pushToGitHub(generatedBlob);
+    setStep("Push", "✓", "#22c55e", "Pushed config.js to GitHub (v" + pending.ver + ")");
+  } catch(pushErr) {
+    setStep("Push", "✗", "#ef4444", "GitHub push failed: " + pushErr.message);
+    setPushStatus("✗ GitHub push failed: " + pushErr.message + " — nothing changed, live system unaffected.", "#fca5a5", false);
+    document.getElementById("resultTitle").textContent = "⚠ Push Failed — Nothing Changed";
+    showEl("pushFailActions");
+    return;
+  }
+  await activatePending("Pushed to GitHub — waiting for Vercel to deploy v" + pending.ver + "...");
+}
+
+async function retryPush() { await attemptPush(); }
+
+// Push is broken — hand over the file and activate the key. Safe because the
+// previous key is kept: the live site keeps working until you upload it.
+async function manualActivate() {
+  if (!pending) return;
+  downloadConfig();
+  hideEl("pushFailActions");
+  setStep("Push", "⬇", "#eab308", "Downloaded — upload config.js to the repo root yourself");
+  await activatePending("Upload the downloaded config.js to GitHub — waiting for Vercel to serve v" + pending.ver + "...");
+}
+
+// Step 2 — write key (+ previous key) and decrypt script, then display settings.
+async function activatePending(waitMsg) {
+  const p = pending;
+  try {
+    const now = new Date().toISOString();
     await Promise.all([
-      setDoc(doc(db, "system", "keyFragment"), { k: keyHex, v: 1, updatedAt: new Date().toISOString(), updatedBy: currentUser.email }),
-      setDoc(doc(db, "system", "crypto"),      { script: cryptoScript, v: 1, updatedAt: new Date().toISOString(), updatedBy: currentUser.email })
+      setDoc(doc(db, "system", "keyFragment"), {
+        k: p.keyHex, ver: p.ver, prevK: p.prevK || null, prevVer: p.prevVer || null,
+        v: 2, updatedAt: now, updatedBy: currentUser.email
+      }),
+      setDoc(doc(db, "system", "crypto"), { script: p.cryptoScript, v: 2, updatedAt: now, updatedBy: currentUser.email })
     ]);
-
-    // Store generated config.js content
-    generatedBlob = `// config.js — Plessen Encrypted System Configuration\n// Generated by /config-tool on ${new Date().toISOString()}\n// Do not edit manually. Re-run config-tool to update.\nconst PLESSEN_ENCRYPTED_CONFIG="${blob}";`;
-
-    // Update systemConfigs in Firestore (display settings for portal)
     for (const sys of systems) {
       await setDoc(doc(db, "systemConfigs", sys.key), {
         key: sys.key, label: sys.label, description: sys.description||"",
         path: sys.path||"/"+sys.key, color: sys.color, accent: sys.accent,
         order: sys.order||1, enabled: sys.enabled!==false,
-        updatedAt: new Date().toISOString()
+        updatedAt: now
       }, { merge: true });
     }
-
-    showEl("downloadArea");
-
-    // Auto-push to GitHub
-    const pushMsgEl  = document.getElementById("pushStatusMsg");
-    const pushRowEl  = document.getElementById("pushResultMsg");
-    const pushBadge  = document.getElementById("pushStepBadge");
-    const pushSpin   = document.getElementById("pushSpinner");
-
-    try {
-      pushMsgEl.textContent = "Pushing config.js to GitHub...";
-      pushSpin.style.display = "block";
-      const result = await pushToGitHub(generatedBlob);
-      // Success
-      pushSpin.style.display = "none";
-      pushMsgEl.style.color  = "#86efac";
-      pushMsgEl.textContent  = "✓ Pushed to GitHub — Vercel is redeploying now.";
-      pushBadge.style.background = "#22c55e";
-      pushBadge.textContent = "✓";
-      pushRowEl.textContent = "config.js pushed → Vercel deploying (30–60 seconds)";
-      document.getElementById("resultTitle").textContent = "✅ Config Generated & Deployed";
-      showGlobalOk("✅ Done — config.js encrypted, pushed to GitHub, Vercel redeploying.");
-    } catch(pushErr) {
-      // Push failed — fall back to download
-      pushSpin.style.display = "none";
-      pushMsgEl.style.color  = "#fca5a5";
-      pushMsgEl.textContent  = "✗ GitHub push failed: " + pushErr.message;
-      pushBadge.textContent  = "3";
-      pushRowEl.textContent  = "Auto-push failed — download config.js below and push manually.";
-      showGlobalOk("✅ Config generated (Firestore updated). Push config.js to GitHub manually.");
-    }
-
+    setStep("Key", "✓", "#22c55e", "Key v" + p.ver + " active (previous key v" + (p.prevVer || "none") + " kept for the deploy window)");
   } catch(e) {
-    showGlobalErr("Generation failed: " + e.message);
+    setStep("Key", "✗", "#ef4444", "Could not activate key: " + e.message);
+    setPushStatus("✗ Key activation failed: " + e.message + " — config.js was pushed but will not decrypt until you Generate again.", "#fca5a5", false);
+    return;
   }
+  pending = null;
+  setPushStatus(waitMsg, "#94a3b8", true);
+  startLivePoll(p.ver);
+}
+
+// Step 3 — watch the live site until it serves the new version.
+function startLivePoll(ver) {
+  if (livePollIv) clearInterval(livePollIv);
+  const started = Date.now();
+  setStep("Live", "…", "#6366f1", "Waiting for Vercel to serve v" + ver + "...");
+  const check = async () => {
+    try {
+      const res = await fetch("/config.js?v=" + Date.now());
+      const liveVer = res.ok ? readConfigVersion(await res.text()) : "unreachable";
+      if (liveVer === ver) {
+        clearInterval(livePollIv); livePollIv = null;
+        setStep("Live", "✓", "#22c55e", "Live ✓ — v" + ver);
+        setPushStatus("✓ Live ✓ — every system is now using v" + ver + ".", "#86efac", false);
+        document.getElementById("resultTitle").textContent = "✅ Config Generated & Live";
+        showGlobalOk("✅ Done — config.js v" + ver + " is live.");
+        return;
+      }
+      const mins = Math.floor((Date.now() - started) / 60000);
+      setStep("Live", "…", "#6366f1", "Waiting for Vercel — live is still v" + liveVer + (mins ? " (" + mins + " min)" : ""));
+      if (Date.now() - started > 10 * 60000) {
+        clearInterval(livePollIv); livePollIv = null;
+        setStep("Live", "!", "#eab308", "Still serving v" + liveVer + " after 10 min — check the Vercel deployment. Systems keep working on the previous key.");
+        setPushStatus("⚠ Vercel has not deployed v" + ver + " yet. The previous version keeps working in the meantime.", "#fde68a", false);
+      }
+    } catch(e) { /* transient — try again next tick */ }
+  };
+  check();
+  livePollIv = setInterval(check, 5000);
+}
+
+function resetPublishUI() {
+  if (livePollIv) { clearInterval(livePollIv); livePollIv = null; }
+  document.getElementById("resultTitle").textContent = "Publishing Config…";
+  hideEl("pushFailActions");
+  setStep("Push", "1", "", "Push config.js to GitHub");
+  setStep("Key",  "2", "", "Activate new key in Firestore (previous key kept for the deploy window)");
+  setStep("Live", "3", "", "Live on Vercel");
+}
+function setStep(name, badge, color, msg) {
+  const b = document.getElementById("step" + name + "Badge"), m = document.getElementById("step" + name + "Msg");
+  if (b) { b.textContent = badge; b.style.background = color || ""; }
+  if (m) m.textContent = msg;
+}
+function setPushStatus(msg, color, spinning) {
+  const el = document.getElementById("pushStatusMsg"), sp = document.getElementById("pushSpinner");
+  if (el) { el.textContent = msg; el.style.color = color; }
+  if (sp) sp.style.display = spinning ? "block" : "none";
 }
 
 function downloadConfig() {

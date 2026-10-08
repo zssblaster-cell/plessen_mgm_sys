@@ -36,6 +36,54 @@ function _getPortal() {
 
 export const { app: portalApp, auth: portalAuth, db: portalDb } = _getPortal();
 
+// ── Config versioning ────────────────────────────────────────────────────────
+// config.js carries a plain, non-secret version label:
+//     const PLESSEN_CONFIG_VERSION="20260930T184500Z";
+// system/keyFragment holds the current key AND the previous one:
+//     { k, ver, prevK, prevVer }
+// While Vercel is still deploying a new config.js, the live file is the
+// previous version, so the previous key is used — no downtime, no mismatch.
+// Files and keys created before versioning count as version "legacy".
+export const LEGACY_VERSION = 'legacy';
+
+export function readConfigVersion(fileText) {
+  const m = /PLESSEN_CONFIG_VERSION\s*=\s*"([^"]+)"/.exec(fileText || '');
+  return m ? m[1] : LEGACY_VERSION;
+}
+
+function configError(code, message) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+
+// Returns { k } for the decrypt script, or throws CONFIG_OUT_OF_DATE.
+export function selectKeyForFile(fileText, keyDoc) {
+  const fileVer = readConfigVersion(fileText);
+  const curVer  = keyDoc.ver || LEGACY_VERSION;
+  if (fileVer === curVer && keyDoc.k) return { k: keyDoc.k };
+  if (keyDoc.prevK && fileVer === (keyDoc.prevVer || LEGACY_VERSION)) return { k: keyDoc.prevK };
+  throw configError('CONFIG_OUT_OF_DATE',
+    'config.js is out of date (file v' + fileVer + ', key v' + curVer + '). ' +
+    'The new config.js has not been deployed yet — wait for Vercel, or upload the latest config.js from /config-tool.');
+}
+
+// Maps any error from loadConfig() / a service sign-in to what a sub-system
+// should show. retrySeconds → reload automatically instead of redirecting.
+export function describeServiceError(e) {
+  const code = (e && (e.code || e.name)) || 'unknown';
+  if (code === 'CONFIG_OUT_OF_DATE' || code === 'CONFIG_DECRYPT_FAILED') {
+    return { code, retrySeconds: 30, title: 'Configuration Updating',
+      message: 'A new system configuration is being deployed. This page will retry automatically. (' + code + ')' };
+  }
+  if (typeof code === 'string' && code.startsWith('auth/')) {
+    return { code, title: 'Service Sign-In Failed',
+      message: 'This system could not sign in to its database (' + code + '). Contact your administrator.' };
+  }
+  return { code, title: 'System Configuration Issue',
+    message: 'System configuration issue (' + code + ') — contact your administrator.' };
+}
+
 // ── loadConfig() ──────────────────────────────────────────────────────────────
 // Resolves with decrypted config object.
 // Nulls all sensitive intermediates in finally{} — script, key, blob are
@@ -60,22 +108,34 @@ export function loadConfig() {
         ]);
 
         if (!cryptoSnap.exists() || !keySnap.exists()) {
-          throw new Error('NOT_CONFIGURED — open /config-tool to initialise the system.');
+          throw configError('NOT_CONFIGURED', 'NOT_CONFIGURED — open /config-tool to initialise the system.');
         }
 
         script  = cryptoSnap.data().script;
-        keyData = keySnap.data();
 
         // Fetch encrypted config blob (cache-bust so we always get latest)
         const res = await fetch('/config.js?v=' + Date.now());
-        if (!res.ok) throw new Error('config.js missing from repo — run config-tool.');
+        if (!res.ok) throw configError('CONFIG_MISSING', 'config.js missing from the site — run /config-tool.');
         blob = await res.text();
+        if (blob.includes('PLACEHOLDER_RUN_CONFIG_TOOL')) throw configError('NOT_CONFIGURED', 'config.js is still the placeholder — run /config-tool.');
+
+        // Pick the key that matches the version of the file actually being
+        // served (current key, or the previous one during a Vercel deploy).
+        keyData = selectKeyForFile(blob, keySnap.data());
 
         // Execute decryption script in a scoped closure (not on window)
         const decryptFn = (new Function('return (' + script + ')'))();
 
-        // Decrypt → plain config object
-        const configs = await decryptFn(blob, keyData);
+        // Decrypt → plain config object. Web Crypto's wrong-key error has an
+        // EMPTY message, so translate it into something readable.
+        let configs;
+        try {
+          configs = await decryptFn(blob, keyData);
+        } catch (de) {
+          throw configError('CONFIG_DECRYPT_FAILED',
+            'config.js could not be decrypted with the current key (' + (de && (de.name || de.message) || 'unknown') +
+            ') — config.js and the Firestore key are out of sync. Regenerate in /config-tool.');
+        }
         resolve(configs);
 
       } catch (e) {

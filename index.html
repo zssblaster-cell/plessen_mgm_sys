@@ -361,7 +361,7 @@
           <option value="staff">Staff</option>
           <option value="viewer">Viewer (read-only)</option>
           <option value="admin">Admin</option>
-          <option value="superuser">Superuser</option>
+          <option value="superuser" id="uRoleSuperuserOpt">Superuser</option>
         </select>
       </div>
     </div>
@@ -573,7 +573,9 @@ async function loadSystems() {
     const configs = await loadConfig();
     credentials = configs || {};
   } catch(e) {
-    console.warn("Could not load encrypted config:", e.message);
+    // e.code comes from crypto.js (CONFIG_OUT_OF_DATE, CONFIG_DECRYPT_FAILED,
+    // NOT_CONFIGURED…); fall back to e.name so the warning is never blank.
+    console.warn("Could not load encrypted config:", e.code || e.name || "Error", "—", e.message || "(no message)");
   }
 
   if (snap.empty) {
@@ -831,8 +833,10 @@ function renderUsersTable() {
       <td><div class="access-dots">${dots}</div></td>
       <td><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;${u.active?"background:#dcfce7;color:#166534":"background:#fee2e2;color:#991b1b"}">${u.active?"Active":"Inactive"}</span></td>
       <td><div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-xs" onclick="editUser('${u.id}')">Edit</button>
-        ${u.email!==currentUser.email?`<button class="btn btn-danger btn-xs" onclick="deleteUser('${u.id}','${u.email}')">Remove</button>`:""}
+        ${u.role==="superuser" && currentProfile?.role!=="superuser"
+          ? `<span style="font-size:11px;color:#94a3b8">Superuser-only</span>`
+          : `<button class="btn btn-ghost btn-xs" onclick="editUser('${u.id}')">Edit</button>
+             ${u.email!==currentUser.email?`<button class="btn btn-danger btn-xs" onclick="deleteUser('${u.id}','${u.email}')">Remove</button>`:""}`}
       </div></td>
     </tr>`;
   }).join("")||`<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">No users found.</td></tr>`;
@@ -855,6 +859,11 @@ function buildAccessFields(currentAccess) {
 }
 
 function openUserForm(uid) {
+  // Only an existing superuser can grant the superuser role — hidden entirely
+  // for everyone else, not just disabled (disabled options can still be set
+  // programmatically in some browsers).
+  const superOpt = document.getElementById("uRoleSuperuserOpt");
+  if (superOpt) superOpt.style.display = currentProfile?.role==="superuser" ? "" : "none";
   if (!uid) {
     document.getElementById("editUserId").value="";
     document.getElementById("userFormTitle").textContent="Add User";
@@ -872,6 +881,14 @@ function openUserForm(uid) {
 function editUser(uid) {
   const u=allUsers.find(x=>x.id===uid);
   if (!u) return;
+  // Non-superusers cannot open or edit an existing superuser's record at all —
+  // not just prevented from selecting the role, blocked from viewing it.
+  if (u.role==="superuser" && currentProfile?.role!=="superuser") {
+    alert("Only a superuser can view or edit another superuser's account.");
+    return;
+  }
+  const superOpt = document.getElementById("uRoleSuperuserOpt");
+  if (superOpt) superOpt.style.display = currentProfile?.role==="superuser" ? "" : "none";
   document.getElementById("editUserId").value=uid;
   document.getElementById("userFormTitle").textContent="Edit User";
   document.getElementById("userFormSaveBtn").textContent="Save Changes";
@@ -909,6 +926,16 @@ async function saveUser() {
   if (!name||!email) { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Name and email required."; return; }
   if (!uid&&!pass)   { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Password required for new users."; return; }
   if (pass&&pass.length<8) { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Min 8 characters."; return; }
+  // Hard guard — defense in depth even though the option is hidden in the UI.
+  // Only an existing superuser may grant or hold the superuser role.
+  if (role==="superuser" && currentProfile?.role!=="superuser") {
+    showEl("userFormErr"); document.getElementById("userFormErr").textContent="Only a superuser can grant the superuser role.";
+    return;
+  }
+  if (role==="superuser") {
+    const ok = confirm(`Grant Superuser to ${name || email}?\n\nThis gives full System Manager access — adding systems, service account credentials, and GitHub deployment. This is not reversible by anyone except another superuser.`);
+    if (!ok) return;
+  }
   const access={};
   for (const s of loadedSystems) access[s.key]=document.getElementById("access_"+s.key)?.value||"none";
   const btn=document.getElementById("userFormSaveBtn");

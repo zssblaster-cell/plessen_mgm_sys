@@ -405,7 +405,7 @@
 // ════════════════════════════════════════════════════════════════════════
 // FIREBASE IMPORTS
 // ════════════════════════════════════════════════════════════════════════
-import { portalAuth, portalDb, loadConfig, initSystemApp }
+import { portalAuth, portalDb, loadConfig, initSystemApp, describeServiceError }
   from '/crypto.js';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
          setPersistence, inMemoryPersistence }
@@ -456,10 +456,26 @@ function bootAuth() {
   });
 }
 
-async function ensureServiceSession(targetRole) {
+// The live profile listener can fire twice in quick succession (cached copy,
+// then server copy). svcInFlight makes the second call share the first
+// sign-in instead of racing it; svcGen lets a teardown (access revoked)
+// cancel a sign-in that is still in progress.
+let svcInFlight = null, svcInFlightRole = null, svcGen = 0;
+function ensureServiceSession(targetRole) {
+  if (svcInFlight && svcInFlightRole === targetRole) return svcInFlight;
+  const prior = svcInFlight || Promise.resolve();
+  svcInFlightRole = targetRole;
+  const p = prior.catch(()=>{}).then(() => doEnsureServiceSession(targetRole))
+    .finally(() => { if (svcInFlight === p) { svcInFlight = null; svcInFlightRole = null; } });
+  svcInFlight = p;
+  return p;
+}
+
+async function doEnsureServiceSession(targetRole) {
   // Already signed into the correct service account — nothing to do.
   // Avoids re-authenticating on every unrelated profile field change.
   if (currentServiceRole === targetRole && auth?.currentUser) return;
+  const myGen = svcGen;
 
   try {
     // Decrypt fresh each time a role switch is actually needed — never
@@ -486,6 +502,9 @@ async function ensureServiceSession(targetRole) {
 
     await signInWithEmailAndPassword(newAuth, email, pass);
 
+    // Access was revoked while signing in — don't open the app
+    if (myGen !== svcGen) { signOut(newAuth).catch(()=>{}); return; }
+
     auth = newAuth; db = newDb; currentServiceRole = targetRole;
     userRole = targetRole;
     removePortalOverlay();
@@ -493,12 +512,16 @@ async function ensureServiceSession(targetRole) {
     applyRoleGating();
     startListeners();
   } catch(e) {
+    console.error('[Equipment] service session failed:', e.code || e.name, e.message);
+    if (myGen !== svcGen) return; // superseded by a teardown — nothing to show
     teardownServiceSession();
-    showPortalBlocked("System configuration issue — contact your administrator.");
+    const info = describeServiceError(e);
+    showPortalBlocked(info.message, info);
   }
 }
 
 function teardownServiceSession() {
+  svcGen++; // cancels any sign-in still in progress
   if (unsubEq)   { unsubEq();   unsubEq   = null; }
   if (unsubRpts) { unsubRpts(); unsubRpts = null; }
   if (auth?.currentUser) { signOut(auth).catch(()=>{}); }
@@ -1207,7 +1230,9 @@ function showApp(){showEl('appScreen');render()}
 // PORTAL OVERLAY
 // ════════════════════════════════════════════════════════════════════════
 let poCountdownIv = null;
-function showPortalBlocked(message) {
+// opts: { title, retrySeconds } — retrySeconds reloads the page instead of
+// redirecting to the portal (used while a new config is deploying).
+function showPortalBlocked(message, opts = {}) {
   const overlay   = document.getElementById('portalOverlay');
   const loading   = document.getElementById('poLoading');
   const blocked   = document.getElementById('poBlocked');
@@ -1217,13 +1242,18 @@ function showPortalBlocked(message) {
   if (loading) loading.style.display = 'none';
   if (blocked) blocked.classList.remove('hidden');
   if (sub && message) sub.textContent = message;
+  const title = blocked && blocked.querySelector('.po-title');
+  if (title) title.textContent = opts.title || 'Portal Sign-In Required';
   hideEl('appScreen');
   if (poCountdownIv) clearInterval(poCountdownIv); // don't stack timers on repeated calls
-  let secs = 5;
+  const retry = !!opts.retrySeconds;
+  let secs = retry ? opts.retrySeconds : 5;
+  const label = () => (retry ? 'Retrying in ' : 'Redirecting in ') + secs + ' second' + (secs!==1?'s':'') + '...';
+  if (countdown) countdown.textContent = label();
   poCountdownIv = setInterval(() => {
     secs--;
-    if (countdown) countdown.textContent = 'Redirecting in ' + secs + ' second' + (secs!==1?'s':'') + '...';
-    if (secs <= 0) { clearInterval(poCountdownIv); window.location.href = '/'; }
+    if (countdown) countdown.textContent = label();
+    if (secs <= 0) { clearInterval(poCountdownIv); if (retry) window.location.reload(); else window.location.href = '/'; }
   }, 1000);
 }
 function removePortalOverlay() {

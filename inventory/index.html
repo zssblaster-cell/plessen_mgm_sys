@@ -22,22 +22,29 @@
      LIVE for the whole session — not a one-time check. Main script stays
      non-module so all inventory functions remain global. -->
 <script type="module">
-import { portalAuth, portalDb, loadConfig } from '/crypto.js';
+import { portalAuth, portalDb, loadConfig, describeServiceError } from '/crypto.js';
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 var poCountdownIv=null;
-function showPortalBlocked(message){
+// opts: { title, retrySeconds } — retrySeconds reloads the page instead of
+// redirecting to the portal (used while a new config is deploying).
+function showPortalBlocked(message,opts){
+  opts=opts||{};
   var o=document.getElementById('portalOverlay');
   var l=document.getElementById('poLoading'),b=document.getElementById('poBlocked'),
       c=document.getElementById('poCountdown'),s2=document.getElementById('poSub');
   if(o){o.style.display='flex';o.style.opacity='1';}
   if(l)l.style.display='none';if(b)b.style.display='block';
   if(s2&&message)s2.textContent=message;
+  var t=b&&b.querySelector('.po-title');if(t)t.textContent=opts.title||'Portal Sign-In Required';
   if(window._teardownInventoryService)window._teardownInventoryService();
   if(poCountdownIv)clearInterval(poCountdownIv);
-  var s=5;
-  poCountdownIv=setInterval(function(){s--;if(c)c.textContent='Redirecting in '+s+' second'+(s!==1?'s':'')+'...';if(s<=0){clearInterval(poCountdownIv);window.location.href='/';}},1000);
+  var retry=!!opts.retrySeconds;
+  var s=retry?opts.retrySeconds:5;
+  var label=function(){return (retry?'Retrying in ':'Redirecting in ')+s+' second'+(s!==1?'s':'')+'...';};
+  if(c)c.textContent=label();
+  poCountdownIv=setInterval(function(){s--;if(c)c.textContent=label();if(s<=0){clearInterval(poCountdownIv);if(retry)window.location.reload();else window.location.href='/';}},1000);
 }
 function removePortalOverlay(){
   var o=document.getElementById('portalOverlay');if(!o)return;o.style.opacity='0';setTimeout(function(){o.remove();},320);
@@ -71,6 +78,9 @@ onAuthStateChanged(portalAuth,function(portalUser){
     if(typeof window._ensureInventoryService==='function'){
       window._ensureInventoryService(targetRole,isGeneric,loadConfig).then(function(ok){
         if(ok)removePortalOverlay();
+      },function(e){
+        var info=describeServiceError(e);
+        showPortalBlocked(info.message,info);
       });
     }
   },function(){
@@ -108,11 +118,35 @@ var auth = null;
 var currentServiceRole = null; // 'admin' | 'tech' | null
 var fbLoadRanOnce = false;
 
+// The live profile listener can fire twice in quick succession (cached copy,
+// then server copy). svcInFlight makes the second call share the first
+// sign-in instead of racing it; svcGen lets a teardown (access revoked)
+// cancel a sign-in that is still in progress.
+var svcInFlight = null, svcInFlightRole = null, svcGen = 0;
+
+// Resolves true when the app is open, false when superseded by a teardown.
+// REJECTS with the real error on failure so the module script can show it
+// (previously it swallowed the error and left the spinner up forever).
 window._ensureInventoryService = function(targetRole, isGeneric, loadConfig){
+  if(svcInFlight && svcInFlightRole===targetRole) return svcInFlight;
+  var prior = svcInFlight || Promise.resolve();
+  svcInFlightRole = targetRole;
+  var p = prior.catch(function(){}).then(function(){
+    return doEnsureInventoryService(targetRole, isGeneric, loadConfig);
+  });
+  var clear = function(){ if(svcInFlight===p){ svcInFlight=null; svcInFlightRole=null; } };
+  p.then(clear, clear);
+  svcInFlight = p;
+  return p;
+};
+
+function doEnsureInventoryService(targetRole, isGeneric, loadConfig){
   // Already on the correct account — skip re-auth on unrelated profile changes
   if(currentServiceRole===targetRole && auth && auth.currentUser){
     return Promise.resolve(true);
   }
+  var myGen = svcGen;
+  var appRef = null;
   return loadConfig().then(function(configs){
     var cfg=configs&&configs.inventory;
     if(!cfg)throw new Error('Inventory config not initialised — run /config-tool first.');
@@ -124,16 +158,19 @@ window._ensureInventoryService = function(targetRole, isGeneric, loadConfig){
     if(!email||!pass)throw new Error('Service account credentials missing — run /config-tool.');
 
     var appName='plessen-inventory';
-    var app = firebase.apps.find(function(a){return a.name===appName;});
-    if(!app) app = firebase.initializeApp(fbCfg, appName);
-    var newAuth = app.auth();
+    appRef = firebase.apps.find(function(a){return a.name===appName;});
+    if(!appRef) appRef = firebase.initializeApp(fbCfg, appName);
+    var newAuth = appRef.auth();
 
     return newAuth.setPersistence(firebase.auth.Auth.Persistence.NONE).then(function(){
       var signOutP = (auth && auth.currentUser) ? auth.signOut().catch(function(){}) : Promise.resolve();
       return signOutP.then(function(){ return newAuth.signInWithEmailAndPassword(email,pass); });
     }).then(function(){
+      // Access was revoked while signing in — don't open the app
+      if(myGen!==svcGen){ newAuth.signOut().catch(function(){}); return false; }
+
       auth = newAuth;
-      db   = app.firestore();
+      db   = appRef.firestore();
       currentServiceRole = targetRole;
       window._authEmail = email;
 
@@ -147,12 +184,15 @@ window._ensureInventoryService = function(targetRole, isGeneric, loadConfig){
       return true;
     });
   }).catch(function(e){
+    console.error('[Inventory] service session failed:', (e&&(e.code||e.name)), e&&e.message);
+    if(myGen!==svcGen) return false; // superseded by a teardown — nothing to show
     window._teardownInventoryService();
-    return false;
+    throw e;
   });
-};
+}
 
 window._teardownInventoryService = function(){
+  svcGen++; // cancels any sign-in still in progress
   fbLoadRanOnce=false;
   if(auth && auth.currentUser){ auth.signOut().catch(function(){}); }
   auth=null; db=null; currentServiceRole=null;
@@ -239,9 +279,8 @@ function fbLoad(){
     // Load config (PIN hashes, tech roster) — role is already active by this
     // point, established by _ensureInventoryService before fbLoad ever runs.
     db.doc('plessen/config').get().then(function(cfgSnap){
-      var cfg={adminPinHash:'',techs:[]};
+      var cfg={techs:[]};
       if(cfgSnap.exists&&cfgSnap.data()){
-        cfg.adminPinHash=cfgSnap.data().adminPinHash||'';
         cfg.techs=cfgSnap.data().techs||[];
       }
       if(window.applyConfig)window.applyConfig(cfg);
@@ -295,7 +334,7 @@ function fbLoad(){
     // Still allow local fallback so the UI isn't fully dead on a rules issue —
     // role stays whatever _ensureInventoryService already activated.
     if(window.localFallbackBoot)window.localFallbackBoot();
-    if(window.applyConfig)window.applyConfig({adminPinHash:'',techs:[]});
+    if(window.applyConfig)window.applyConfig({techs:[]});
   });
 }
 
@@ -1979,8 +2018,7 @@ let fSkus=[], fLots=[], txNewSkus=[];
 // ── ROLE / AUTH STATE ──
 let currentRole=null;   // 'admin' or 'tech'
 let currentTech=null;   // {name, pin, badgeId, pinHash} for logged-in tech
-let appConfig={adminPinHash:'',techs:[]};  // loaded from Firestore
-let pinContext=null;    // what the pin modal is doing: 'admin'|'tech'
+let appConfig={techs:[]};  // loaded from Firestore (tech PINs only — admin has no PIN)
 let verifyContext=null; // pending removal after verification
 let verifyMode='pin';   // 'pin' or 'scan'
 let txCamStream=null;   // camera stream inside tx modal
@@ -1991,9 +2029,6 @@ const SCAN_COOLDOWN=2500;
 // ── PIN LOCKOUT ──
 const PIN_MAX_ATTEMPTS=3;
 const PIN_LOCKOUT_BASE_MS=60000; // 60 seconds base
-let pinAttempts=0;         // wrong attempts on current screen
-let pinLockedUntil=0;      // timestamp when lockout expires
-let pinLockoutCount=0;     // how many times locked out (doubles cooldown)
 let verifyAttempts=0;      // wrong attempts on verify screen
 let verifyLockedUntil=0;
 let verifyLockoutCount=0;  // how many times locked out on verify
@@ -3359,9 +3394,8 @@ document.addEventListener('keydown',e=>{
 
 function resetAppState(){
   currentRole=null;currentTech=null;
-  pinAttempts=0;pinLockedUntil=0;pinLockoutCount=0;
   verifyAttempts=0;verifyLockedUntil=0;verifyLockoutCount=0;
-  appConfig={adminPinHash:'',techs:[]};
+  appConfig={techs:[]};
   const badge=document.getElementById('roleBadge');if(badge)badge.style.display='none';
   const sb=document.getElementById('settingsBtn');if(sb)sb.style.display='none';
   const tb=document.getElementById('newTxBtn');if(tb)tb.style.display='none';
@@ -3371,123 +3405,12 @@ function resetAppState(){
 window.resetAppState=resetAppState;
 
 // Called by Firebase module after login - show role screen
-window.showRoleScreen = function(){
-  document.getElementById('roleScreen').style.display='flex';
-};
-
-function selectRole(role){
-  // Kept for fallback role screen - routes to PIN flow
-  showTechPinScreen();
-}
-function showTechPinScreen(){
-  pinContext='tech';
-  pinAttempts=0;
-  if(Date.now()>pinLockedUntil)pinLockedUntil=0;
-  document.getElementById('pinTitle').textContent='Staff Sign In';
-  document.getElementById('pinSub').textContent='Enter your PIN or scan your ID badge';
-  document.getElementById('pinScanNote').style.display='';
-  document.getElementById('pinInput').value='';
-  document.getElementById('pinErr').textContent='';
-  document.getElementById('pinModal').style.display='flex';
-  setTimeout(()=>document.getElementById('pinInput').focus(),80);
-}
-
-function pinInputChange(){
-  document.getElementById('pinErr').textContent='';
-}
-
-function pinCancel(){
-  pinAttempts=0;pinLockedUntil=0;pinLockoutCount=0;
-  document.getElementById('pinModal').style.display='none';
-  document.getElementById('pinErr').textContent='';
-  // Tech login - can't bypass PIN, log out instead
-  if(window.doLogout)window.doLogout();
-}
-
 function fmtLockTime(ms){
   if(ms<=0)return'0s';
   const s=Math.ceil(ms/1000);
   if(s<60)return s+'s';
   const m=Math.floor(s/60),rs=s%60;
   return m+'m'+(rs>0?' '+rs+'s':'');
-}
-function pinShowLockout(errEl,until){
-  const remaining=until-Date.now();
-  if(remaining<=0){pinAttempts=0;pinLockedUntil=0;if(errEl)errEl.textContent='';
-    var pf=document.getElementById('pinAttemptFill');if(pf)pf.style.width='0%';
-    return;}
-  if(errEl)errEl.textContent='Too many attempts. Try again in '+fmtLockTime(remaining)+'.';
-  setTimeout(()=>pinShowLockout(errEl,until),1000);
-}
-async function pinSubmit(){
-  const errEl=document.getElementById('pinErr');
-  // Check lockout
-  if(Date.now()<pinLockedUntil){pinShowLockout(errEl,pinLockedUntil);return;}
-  const pin=document.getElementById('pinInput').value.trim();
-  if(!pin){errEl.textContent='Please enter your PIN.';return;}
-  errEl.textContent='Checking…';
-  if(pinContext==='admin'){
-    const ok=await checkPin(pin,appConfig.adminPinHash);
-    if(ok){
-      pinAttempts=0;pinLockedUntil=0;
-      document.getElementById('pinModal').style.display='none';
-      activateRole('admin',null);
-    } else {
-      pinAttempts++;
-      var _pf=document.getElementById('pinAttemptFill');if(_pf)_pf.style.width=(pinAttempts/PIN_MAX_ATTEMPTS*100)+'%';
-      document.getElementById('pinInput').value='';
-      if(pinAttempts>=PIN_MAX_ATTEMPTS){
-        pinLockoutCount++;
-        const adminLockMs=PIN_LOCKOUT_BASE_MS*Math.pow(2,pinLockoutCount-1);
-        pinLockedUntil=Date.now()+adminLockMs;
-        pinAttempts=0;
-        var _pf2=document.getElementById('pinAttemptFill');if(_pf2)_pf2.style.width='0%';
-        pinShowLockout(errEl,pinLockedUntil);
-      } else {
-        errEl.textContent='Incorrect PIN. '+(PIN_MAX_ATTEMPTS-pinAttempts)+' attempt'+(PIN_MAX_ATTEMPTS-pinAttempts!==1?'s':'')+' remaining.';
-        document.getElementById('pinInput').focus();
-      }
-    }
-  } else {
-    // Tech identification — check against hashed PINs
-    let matchedTech=null;
-    for(const t of appConfig.techs){
-      const ok=await checkPin(pin,t.pinHash||'');
-      if(ok){matchedTech=t;break;}
-    }
-    if(matchedTech){
-      pinAttempts=0;pinLockedUntil=0;
-      document.getElementById('pinModal').style.display='none';
-      activateRole('tech',matchedTech);
-    } else {
-      pinAttempts++;
-      var _pft=document.getElementById('pinAttemptFill');if(_pft)_pft.style.width=(pinAttempts/PIN_MAX_ATTEMPTS*100)+'%';
-      document.getElementById('pinInput').value='';
-      if(pinAttempts>=PIN_MAX_ATTEMPTS){
-        pinLockoutCount++;
-        const techLockMs=PIN_LOCKOUT_BASE_MS*Math.pow(2,pinLockoutCount-1);
-        pinLockedUntil=Date.now()+techLockMs;
-        pinAttempts=0;
-        var _pft2=document.getElementById('pinAttemptFill');if(_pft2)_pft2.style.width='0%';
-        pinShowLockout(errEl,pinLockedUntil);
-      } else {
-        errEl.textContent='PIN not recognised. '+(PIN_MAX_ATTEMPTS-pinAttempts)+' attempt'+(PIN_MAX_ATTEMPTS-pinAttempts!==1?'s':'')+' remaining.';
-        document.getElementById('pinInput').focus();
-      }
-    }
-  }
-}
-
-// Also handle badge scan in PIN modal (for tech sign-in)
-function pinBadgeScan(badgeId){
-  if(pinContext!=='tech')return;
-  const tech=appConfig.techs.find(t=>t.badgeId&&t.badgeId===badgeId);
-  if(tech){
-    document.getElementById('pinModal').style.display='none';
-    activateRole('tech',tech);
-  } else {
-    document.getElementById('pinErr').textContent='Badge not recognised.';
-  }
 }
 
 function activateRole(role,tech){
@@ -3546,18 +3469,6 @@ function getCurrentUserName(){
 window.applyConfig = async function(cfg){
   if(!cfg)return;
   let needsSave=false;
-  // Handle admin PIN — migrate plain to hash if needed
-  if(cfg.adminPinHash){
-    appConfig.adminPinHash=cfg.adminPinHash;
-  } else if(cfg.adminPin){
-    // Legacy plain PIN — hash it and save
-    appConfig.adminPinHash=await hashPin(cfg.adminPin);
-    needsSave=true;
-  } else {
-    // First run — hash the default PIN
-    appConfig.adminPinHash=await hashPin('1234');
-    needsSave=true;
-  }
   // Handle techs — migrate plain pins to hashes
   if(cfg.techs&&cfg.techs.length){
     const migrated=[];
@@ -3575,12 +3486,20 @@ window.applyConfig = async function(cfg){
   }
   if(needsSave&&window.fbSaveConfig){
     // Save migrated hashes to Firestore (removes plain text PINs)
-    window.fbSaveConfig({adminPinHash:appConfig.adminPinHash,techs:appConfig.techs});
+    window.fbSaveConfig({techs:appConfig.techs});
   }
 };
 
 // ═══ VERIFY MODAL (tech removal authentication) ═══
 function openVerifyModal(removalData){
+  // Admin is already fully authorized by being signed in as the admin
+  // service account (decided by the portal) — no PIN step needed.
+  // Only tech-level sessions PIN-identify which staff member is acting.
+  if(currentRole==='admin'){
+    verifyContext=removalData;
+    verifySuccess();
+    return;
+  }
   verifyContext=removalData;
   verifyMode='pin';
   verifyAttempts=0;
@@ -3640,20 +3559,13 @@ async function verifySubmit(){
   let pinOk=false;
   let matchedTech=null;
 
-  if(currentRole==='admin'){
-    pinOk=await checkPin(pin,appConfig.adminPinHash||'');
-  } else {
-    // Search ALL techs — PIN identifies who is removing the medication.
-    // Each staff member enters their OWN PIN. A wrong PIN means
-    // "this PIN doesn't match any staff member" — not a lockout event,
-    // since another staff member could still enter their correct PIN.
-    for(const t of (appConfig.techs||[])){
-      if(await checkPin(pin,t.pinHash||'')){
-        pinOk=true; matchedTech=t; break;
-      }
+  // Tech PIN purely identifies WHICH staff member is acting — it never
+  // grants or elevates access. Admin never reaches this modal at all
+  // (see openVerifyModal above).
+  for(const t of (appConfig.techs||[])){
+    if(await checkPin(pin,t.pinHash||'')){
+      pinOk=true; matchedTech=t; break;
     }
-    // Admin PIN works as fallback at tech station
-    if(!pinOk) pinOk=await checkPin(pin,appConfig.adminPinHash||'');
   }
 
   document.getElementById('verifyPinInput').value='';
@@ -3743,10 +3655,6 @@ function completeTechRemoval(data){
 function openSettings(){
   if(currentRole!=='admin'){showToast('Admin access required','error');return;}
   renderTechList();
-  document.getElementById('s-admin-pin-current').value='';
-  document.getElementById('s-admin-pin-new').value='';
-  document.getElementById('s-admin-pin-confirm').value='';
-  document.getElementById('s-admin-pin-err').textContent='';
   hideAddTech();
   document.getElementById('settingsModal').style.display='flex';
 }
@@ -3832,29 +3740,6 @@ function editTech(idx){
   document.getElementById('s-tech-pin').value=t.pin;
   document.getElementById('s-tech-badge').value=t.badgeId||'';
   document.getElementById('s-add-tech-form').dataset.editIdx=idx;
-}
-async function saveAdminPin(){
-  const cur=document.getElementById('s-admin-pin-current').value.trim();
-  const nw=document.getElementById('s-admin-pin-new').value.trim();
-  const cf=document.getElementById('s-admin-pin-confirm').value.trim();
-  const err=document.getElementById('s-admin-pin-err');
-  if(!cur){err.textContent='Enter your current PIN.';return;}
-  if(!nw){err.textContent='New PIN cannot be empty.';return;}
-  if(nw.length<4){err.textContent='PIN must be at least 4 characters.';return;}
-  if(nw!==cf){err.textContent='New PINs do not match.';return;}
-  err.textContent='Verifying…';
-  // Verify current PIN against stored hash
-  const curOk=await checkPin(cur,appConfig.adminPinHash);
-  if(!curOk){err.textContent='Current PIN is incorrect.';return;}
-  err.textContent='Saving…';
-  // Hash and store new PIN
-  appConfig.adminPinHash=await hashPin(nw);
-  saveConfig();
-  err.style.color='var(--okm)';err.textContent='Admin PIN updated.';
-  document.getElementById('s-admin-pin-current').value='';
-  document.getElementById('s-admin-pin-new').value='';
-  document.getElementById('s-admin-pin-confirm').value='';
-  setTimeout(()=>{err.textContent='';err.style.color='var(--danger)';},3000);
 }
 
 function saveConfig(){
@@ -4316,8 +4201,6 @@ window.updateBadges = updateBadges;
 window.applyFilters = applyFilters;
 window.renderChangelog = renderChangelog;
 window.renderHistPanel = renderHistPanel;
-window.showRoleScreen = showRoleScreen;
-window.showTechPinScreen = showTechPinScreen;
 window.applyConfig = applyConfig;
 window.activateRole = activateRole;
 window.logChange = logChange;
@@ -4349,29 +4232,6 @@ window.localFallbackBoot = function(){
 
 
 <!-- PIN MODAL (admin login + tech identification) -->
-<div id="pinModal" style="display:none">
-  <div class="pin-card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-      <div class="pin-title" id="pinTitle" style="margin-bottom:0">Enter PIN</div>
-      <button onclick="pinCancel()" style="width:28px;height:28px;border-radius:6px;background:#b91c1c;border:none;color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Close">×</button>
-    </div>
-    <div class="pin-sub" id="pinSub">Enter your PIN to continue</div>
-    <div class="pin-input-wrap">
-      <input type="password" class="pin-input" id="pinInput" maxlength="12" inputmode="numeric"
-        placeholder="••••" oninput="pinInputChange()" onkeydown="if(event.key==='Enter')pinSubmit()">
-    </div>
-    <div class="pin-err" id="pinErr"></div>
-    <div id="pinAttemptBar" style="height:3px;background:var(--border);border-radius:3px;margin-bottom:8px;overflow:hidden">
-      <div id="pinAttemptFill" style="height:100%;width:0%;background:#b91c1c;transition:width .3s;border-radius:3px"></div>
-    </div>
-    <div class="pin-actions">
-      <button class="btn btn-s" style="flex:1" onclick="pinCancel()">← Back</button>
-      <button class="btn btn-p" style="flex:1" onclick="pinSubmit()">Continue →</button>
-    </div>
-    <div class="pin-scan-note" id="pinScanNote">Or scan your ID badge</div>
-  </div>
-</div>
-
 <!-- VERIFY MODAL (tech must authenticate before completing removal) -->
 <div id="verifyModal" style="display:none">
   <div class="verify-card">
@@ -4414,26 +4274,6 @@ window.localFallbackBoot = function(){
       <button onclick="closeSettings()" style="width:28px;height:28px;border-radius:6px;background:#b91c1c;border:none;color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1" title="Close">×</button>
     </div>
     <div class="mb">
-      <!-- Admin PIN section -->
-      <div style="margin-bottom:22px">
-        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)">Admin PIN</div>
-        <div class="fg">
-          <div class="field">
-            <label>Current PIN</label>
-            <input type="password" id="s-admin-pin-current" placeholder="Current admin PIN" style="width:100%"/>
-          </div>
-          <div class="field">
-            <label>New PIN</label>
-            <input type="password" id="s-admin-pin-new" placeholder="New PIN" style="width:100%"/>
-          </div>
-          <div class="field">
-            <label>Confirm New PIN</label>
-            <input type="password" id="s-admin-pin-confirm" placeholder="Confirm new PIN" style="width:100%"/>
-          </div>
-        </div>
-        <div id="s-admin-pin-err" style="color:var(--danger);font-size:12px;min-height:16px"></div>
-        <button class="btn btn-p btn-sm" onclick="saveAdminPin()" style="margin-top:8px">Update Admin PIN</button>
-      </div>
       <!-- Tech list -->
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)">
