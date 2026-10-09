@@ -99,6 +99,9 @@ async function doEnsureServiceSession(targetRole){
     await setPersistence(newAuth, inMemoryPersistence); // never persist a service session
     const newDb=getFirestore(crdApp);
 
+    // Detach live feeds BEFORE dropping the old session — otherwise they
+    // lose their credentials mid-stream and Firestore rejects them.
+    if(unsubP){unsubP();unsubP=null;}if(unsubM){unsubM();unsubM=null;}if(unsubFM){unsubFM();unsubFM=null;}
     if(auth?.currentUser){ try{ await signOut(auth); }catch(e){} }
     await signInWithEmailAndPassword(newAuth,email,pass);
 

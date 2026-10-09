@@ -498,6 +498,9 @@ async function doEnsureServiceSession(targetRole) {
     const newDb = getFirestore(eqApp);
 
     // Switching roles mid-session — drop the old service session first
+    // Detach live feeds BEFORE dropping the old session — otherwise they
+    // lose their credentials mid-stream and Firestore rejects them.
+    stopListeners();
     if (auth?.currentUser) { try { await signOut(auth); } catch(e){} }
 
     await signInWithEmailAndPassword(newAuth, email, pass);
@@ -522,8 +525,7 @@ async function doEnsureServiceSession(targetRole) {
 
 function teardownServiceSession() {
   svcGen++; // cancels any sign-in still in progress
-  if (unsubEq)   { unsubEq();   unsubEq   = null; }
-  if (unsubRpts) { unsubRpts(); unsubRpts = null; }
+  stopListeners();
   if (auth?.currentUser) { signOut(auth).catch(()=>{}); }
   auth = null; db = null; currentServiceRole = null;
   hideEl('appScreen');
@@ -618,7 +620,13 @@ async function doSignOut() {
 // ════════════════════════════════════════════════════════════════════════
 // REAL-TIME LISTENERS
 // ════════════════════════════════════════════════════════════════════════
+function stopListeners() {
+  if (unsubEq)   { unsubEq();   unsubEq   = null; }
+  if (unsubRpts) { unsubRpts(); unsubRpts = null; }
+}
+
 function startListeners() {
+  stopListeners(); // never stack a second set of feeds on top of the first
   unsubEq = onSnapshot(collection(db,'equipment'), snap => {
     equipment = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     render();

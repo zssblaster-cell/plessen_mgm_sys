@@ -117,6 +117,11 @@ var db   = null;
 var auth = null;
 var currentServiceRole = null; // 'admin' | 'tech' | null
 var fbLoadRanOnce = false;
+var invUnsubs = []; // live Firestore feeds — detached on teardown / role switch
+function detachInventoryListeners(){
+  invUnsubs.forEach(function(u){ try{u();}catch(e){} });
+  invUnsubs = [];
+}
 
 // The live profile listener can fire twice in quick succession (cached copy,
 // then server copy). svcInFlight makes the second call share the first
@@ -163,6 +168,9 @@ function doEnsureInventoryService(targetRole, isGeneric, loadConfig){
     var newAuth = appRef.auth();
 
     return newAuth.setPersistence(firebase.auth.Auth.Persistence.NONE).then(function(){
+      // Role switch: detach live feeds BEFORE dropping the old session, and
+      // reload under the new one so the feeds come back with the right identity.
+      if(auth && auth.currentUser){ detachInventoryListeners(); fbLoadRanOnce=false; }
       var signOutP = (auth && auth.currentUser) ? auth.signOut().catch(function(){}) : Promise.resolve();
       return signOutP.then(function(){ return newAuth.signInWithEmailAndPassword(email,pass); });
     }).then(function(){
@@ -193,6 +201,7 @@ function doEnsureInventoryService(targetRole, isGeneric, loadConfig){
 
 window._teardownInventoryService = function(){
   svcGen++; // cancels any sign-in still in progress
+  detachInventoryListeners();
   fbLoadRanOnce=false;
   if(auth && auth.currentUser){ auth.signOut().catch(function(){}); }
   auth=null; db=null; currentServiceRole=null;
@@ -293,7 +302,8 @@ function fbLoad(){
       if(window.applyConfig)window.applyConfig(cfg);
     });
     // Listeners
-    db.doc('plessen/inventory').onSnapshot(function(snap){
+    detachInventoryListeners(); // never stack a second set of feeds
+    invUnsubs.push(db.doc('plessen/inventory').onSnapshot(function(snap){
       if(!snap.exists||_ru)return;
       var d=JSON.parse(snap.data().data).map(migrateItem);
       if(JSON.stringify(d)===JSON.stringify(window.inventory))return;
@@ -304,8 +314,8 @@ function fbLoad(){
       var t=document.getElementById('toast');
       if(t){t.textContent='Updated from another device';t.className='toast show';setTimeout(function(){t.classList.remove('show');},3000);}
       setTimeout(function(){_ru=false;},600);
-    });
-    db.doc('plessen/changelog').onSnapshot(function(snap){
+    }));
+    invUnsubs.push(db.doc('plessen/changelog').onSnapshot(function(snap){
       if(!snap.exists)return;
       var d=JSON.parse(snap.data().data);
       mutArr(window.changeLog,d);
@@ -315,8 +325,8 @@ function fbLoad(){
       if(clPage&&clPage.classList.contains('active')&&window.renderChangelog){
         window.renderChangelog();
       }
-    });
-    db.doc('plessen/transactions').onSnapshot(function(snap){
+    }));
+    invUnsubs.push(db.doc('plessen/transactions').onSnapshot(function(snap){
       if(!snap.exists)return;
       var d=JSON.parse(snap.data().data);
       if(JSON.stringify(d)!==JSON.stringify(window.transactions)){
@@ -325,7 +335,7 @@ function fbLoad(){
         var histBody=document.getElementById('histBody');
         if(histBody&&window.renderHistPanel)window.renderHistPanel();
       }
-    });
+    }));
   }).catch(function(e){
     console.error('fbLoad error - details:', e.code, e.message, e);
     setSS('error');

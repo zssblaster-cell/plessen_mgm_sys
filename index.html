@@ -549,7 +549,7 @@ G.doLogin=doLogin; G.doSignOut=doSignOut; G.toggleGear=toggleGear;
 G.openChangePw=openChangePw; G.closeChangePw=closeChangePw; G.doChangePw=doChangePw;
 G.openUserMgmt=openUserMgmt; G.closeUserMgmt=closeUserMgmt;
 G.openUserForm=openUserForm; G.closeUserForm=closeUserForm;
-G.saveUser=saveUser; G.editUser=editUser; G.deleteUser=deleteUser;
+G.saveUser=saveUser; G.editUser=editUser; G.deleteUser=deleteUser; G.toggleUserActive=toggleUserActive;
 G.openSystemMgr=openSystemMgr; G.closeSystemMgr=closeSystemMgr;
 G.openSystemForm=openSystemForm; G.backToSystemsList=backToSystemsList;
 G.toggleGenericFields=toggleGenericFields; G.toggleGenericPassVis=toggleGenericPassVis;
@@ -832,11 +832,17 @@ function renderUsersTable() {
       <td><span class="role-pill ${rp[u.role]||"role-staff"}">${u.role}</span></td>
       <td><div class="access-dots">${dots}</div></td>
       <td><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;${u.active?"background:#dcfce7;color:#166534":"background:#fee2e2;color:#991b1b"}">${u.active?"Active":"Inactive"}</span></td>
-      <td><div style="display:flex;gap:6px">
+      <td><div style="display:flex;gap:6px;flex-wrap:wrap">
         ${u.role==="superuser" && currentProfile?.role!=="superuser"
           ? `<span style="font-size:11px;color:#94a3b8">Superuser-only</span>`
           : `<button class="btn btn-ghost btn-xs" onclick="editUser('${u.id}')">Edit</button>
-             ${u.email!==currentUser.email?`<button class="btn btn-danger btn-xs" onclick="deleteUser('${u.id}','${u.email}')">Remove</button>`:""}`}
+             ${u.id!==currentUser.uid
+               ? `<button class="btn btn-ghost btn-xs" onclick="toggleUserActive('${u.id}')"
+                    style="${u.active?"color:#b45309":"color:#15803d"}">${u.active?"Deactivate":"Activate"}</button>`
+               : ""}
+             ${u.id!==currentUser.uid && currentProfile?.role==="superuser"
+               ? `<button class="btn btn-danger btn-xs" onclick="deleteUser('${u.id}')">Delete</button>`
+               : ""}`}
       </div></td>
     </tr>`;
   }).join("")||`<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">No users found.</td></tr>`;
@@ -903,17 +909,75 @@ function editUser(uid) {
   hideEl("userFormErr"); showEl("userFormModal");
 }
 
-async function deleteUser(uid, email) {
-  if (!confirm(`Remove ${email}? This will revoke portal access and remove them from all systems.`)) return;
+// Active/Inactive — reversible. Every sub-system watches the profile LIVE, so
+// deactivating kicks the person out of any open system within seconds, and
+// reactivating restores access on their next visit.
+async function toggleUserActive(uid) {
+  const u = allUsers.find(x=>x.id===uid);
+  if (!u) return;
+  if (uid===currentUser.uid) { alert("You can't deactivate your own account."); return; }
+  if (u.role==="superuser" && currentProfile?.role!=="superuser") { alert("Only a superuser can change another superuser's status."); return; }
+  const next = !u.active;
+  if (!next && !confirm(`Deactivate ${u.email}?\n\nThey will be signed out of every system within seconds. You can reactivate them at any time.`)) return;
   try {
-    // active:false is watched LIVE by every sub-system's own profile listener —
-    // this alone revokes access everywhere, instantly, no per-system sync needed.
-    await updateDoc(doc(db,"users",uid), { active:false });
+    await updateDoc(doc(db,"users",uid), { active:next, updatedAt:new Date().toISOString() });
     await loadUsers();
   } catch(e) { alert("Error: "+e.message); }
 }
 
+// Delete — permanent. Removes the portal profile, which ends access everywhere
+// immediately. The login account in plessen-auth → Authentication can't be
+// deleted from a browser (needs admin privileges), so it's left for manual
+// cleanup; on its own it has no access to anything.
+async function deleteUser(uid) {
+  const u = allUsers.find(x=>x.id===uid);
+  if (!u) return;
+  if (currentProfile?.role!=="superuser") { alert("Only a superuser can delete users."); return; }
+  if (uid===currentUser.uid) { alert("You can't delete your own account."); return; }
+  const typed = prompt(`Permanently delete ${u.email}?\n\nTheir profile and all system access will be removed. This cannot be undone (use Deactivate for a temporary block).\n\nType the email address to confirm:`);
+  if (typed===null) return;
+  if (typed.trim().toLowerCase()!==String(u.email).toLowerCase()) { alert("Email didn't match — nothing was deleted."); return; }
+  try {
+    await deleteDoc(doc(db,"users",uid));
+    await loadUsers();
+    let copied = false;
+    try { await navigator.clipboard.writeText(u.email); copied = true; } catch(_) {}
+    alert(`✓ ${u.email} deleted — access removed from all systems.\n\nOne manual step left: remove the leftover login account in\nFirebase console → plessen-auth → Authentication → Users.\n` + (copied ? "(Email copied to your clipboard.)" : ""));
+  } catch(e) { alert("Error: "+e.message); }
+}
+
 function closeUserForm() { hideEl("userFormModal"); }
+
+// Delete a login account this save just created. Allowed without admin
+// privileges because we hold that new account's own ID token.
+async function rollbackNewAccount(idToken) {
+  try {
+    const key = auth.app?.options?.apiKey;
+    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${key}`,
+      { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ idToken }) });
+    return res.ok;
+  } catch(_) { return false; }
+}
+
+// "Email already in use" → is it an orphan (login account with no profile)?
+// Verifies ownership with the password typed in the form, then returns its
+// uid so saveUser can attach the profile. Returns null if cancelled/blocked.
+async function repairOrphanAccount(apiKey, email, pass) {
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+    { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ email, password:pass, returnSecureToken:false }) });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`A login account for ${email} already exists, but the password entered doesn't match it. ` +
+      `Delete ${email} in Firebase → plessen-auth → Authentication, then create the user again.`);
+  }
+  const existing = await getDoc(doc(db,"users",data.localId));
+  if (existing.exists()) {
+    throw new Error(`${email} already has a portal profile — find them in the user list and use Edit instead.`);
+  }
+  const ok = confirm(`A login account for ${email} already exists but has no portal profile (orphaned account).\n\nAttach a profile to it with the role and access you selected?`);
+  return ok ? data.localId : null;
+}
 
 async function saveUser() {
   const uid=document.getElementById("editUserId").value;
@@ -940,6 +1004,9 @@ async function saveUser() {
   for (const s of loadedSystems) access[s.key]=document.getElementById("access_"+s.key)?.value||"none";
   const btn=document.getElementById("userFormSaveBtn");
   btn.disabled=true; btn.textContent="Saving...";
+  // Set when THIS save created a brand-new login account — used to roll it
+  // back if the profile write fails, so no orphaned account is left behind.
+  let rollbackIdToken = null;
   try {
     let fbUid=uid;
     if (!uid) {
@@ -953,16 +1020,40 @@ async function saveUser() {
           body: JSON.stringify({ email, password:pass, returnSecureToken:true }) }
       );
       const createData = await createRes.json();
-      if (!createRes.ok) throw new Error(createData.error?.message || "Could not create account.");
-      fbUid = createData.localId;
+      if (createRes.ok) {
+        fbUid = createData.localId;
+        rollbackIdToken = createData.idToken;
+      } else if ((createData.error?.message||"").startsWith("EMAIL_EXISTS")) {
+        // A login account already exists for this email. If it has no profile
+        // it's an orphan (console-created, or a failed earlier attempt) —
+        // offer to attach a profile, verified with the password typed above.
+        fbUid = await repairOrphanAccount(portalApiKey, email, pass);
+        if (!fbUid) { btn.disabled=false; btn.textContent="Create User"; return; }
+      } else {
+        throw new Error(createData.error?.message || "Could not create account.");
+      }
     }
     // This is the ONLY step that matters now — every sub-system watches this
     // document LIVE and reads access.{systemKey} directly. There is nothing
     // left to sync out to sub-projects.
-    await setDoc(doc(db,"users",fbUid),{
-      uid:fbUid, email, displayName:name, role, locations:locs, access, active:true,
-      updatedAt:new Date().toISOString(), ...(uid?{}:{createdAt:new Date().toISOString()})
-    },{merge:true});
+    try {
+      await setDoc(doc(db,"users",fbUid),{
+        uid:fbUid, email, displayName:name, role, locations:locs, access,
+        updatedAt:new Date().toISOString(),
+        // Status is changed only with the Activate/Deactivate button —
+        // editing a user never silently re-activates them.
+        ...(uid?{}:{active:true, createdAt:new Date().toISOString()})
+      },{merge:true});
+    } catch(profileErr) {
+      if (rollbackIdToken) {
+        const rolledBack = await rollbackNewAccount(rollbackIdToken);
+        throw new Error("Profile could not be saved (" + profileErr.message + "). " +
+          (rolledBack ? "The new login account was removed — nothing was left behind."
+                      : "The new login account could NOT be removed automatically — delete " + email + " in Firebase → plessen-auth → Authentication."));
+      }
+      throw profileErr;
+    }
+    rollbackIdToken = null;
     btn.textContent="✓ Saved";
     await loadUsers();
     setTimeout(()=>{ btn.disabled=false; btn.textContent=uid?"Save Changes":"Create User"; },1200);
