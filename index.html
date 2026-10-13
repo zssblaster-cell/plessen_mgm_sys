@@ -510,7 +510,7 @@
     </div>
     <div class="field-hint" style="margin:8px 0 14px;line-height:1.6">
       To bring a new location online: add it here → create its two service accounts in each location-based system's Firebase project
-      (e.g. <code>equipment-stt-admin@</code>, <code>equipment-stt-viewer@</code>, <code>inventory-stt-admin@</code>, <code>inventory-stt-tech@</code>)
+      (e.g. <code>equipment-stt-admin@</code>, <code>equipment-stt-viewer@</code>, <code>inventory-stt-admin@</code>, <code>inventory-stt-viewer@</code>)
       → enter their passwords in <a href="/config-tool" style="color:#6366f1;font-weight:700">/config-tool</a> and Generate → grant access in User Management.
     </div>
     <div id="locationsList"></div>
@@ -1162,7 +1162,7 @@ async function saveLocation() {
     loadedLocations = await loadLocations();
     renderLocationsList(); closeLocationForm(); renderCards();
     if (!existing) alert(`✓ ${code} added.\n\nNext: create its service accounts in each location-based system's Firebase project ` +
-      `(e.g. equipment-${code.toLowerCase()}-admin@ / equipment-${code.toLowerCase()}-viewer@, inventory-${code.toLowerCase()}-admin@ / inventory-${code.toLowerCase()}-tech@), ` +
+      `(e.g. equipment-${code.toLowerCase()}-admin@ / equipment-${code.toLowerCase()}-viewer@, inventory-${code.toLowerCase()}-admin@ / inventory-${code.toLowerCase()}-viewer@), ` +
       `then enter their passwords in /config-tool and Generate.`);
   } catch(e) { err(e.message); }
   btn.disabled = false;

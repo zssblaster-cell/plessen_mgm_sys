@@ -236,6 +236,9 @@ export function locationAccessMap(profile, sysKey) {
 // Service account emails follow one pattern, which the Firestore rules read
 // the location from:  {system}-{location}-admin@  /  {system}-{location}-{role}@
 export const SERVICE_DOMAIN = 'plesseneye.com';
+// Every location-based system has exactly two accounts per location: admin
+// and viewer. The Firestore rules check these exact words — keep them in sync.
+export const LOCATION_SECONDARY_ROLE = 'viewer';
 export function serviceEmail(sysKey, locCode, kind) {
   return `${String(sysKey).toLowerCase()}-${String(locCode).toLowerCase()}-${kind}@${SERVICE_DOMAIN}`;
 }

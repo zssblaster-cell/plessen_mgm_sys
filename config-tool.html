@@ -196,7 +196,7 @@ import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 // Version helpers shared with every system (single source of truth)
 import { readConfigVersion, selectKeyForFile, LEGACY_VERSION,
-         loadLocations, isLocationAware, serviceEmail } from '/crypto.js';
+         loadLocations, isLocationAware, serviceEmail, LOCATION_SECONDARY_ROLE } from '/crypto.js';
 
 // ── Portal bootstrap (same as crypto.js) ─────────────────────────────────────
 const PORTAL_MIN = {
@@ -246,6 +246,10 @@ window.addSystem=addSystem; window.removeSystem=removeSystem;
 window.generateConfig=generateConfig; window.downloadConfig=downloadConfig;
 window.retryPush=retryPush; window.manualActivate=manualActivate;
 window.setLocCred=setLocCred;
+// Inline oninput/onchange handlers run in the page's global scope, but these
+// live inside this module — expose them so the handlers can reach them.
+Object.defineProperty(window,'systems',{get:()=>systems,configurable:true});
+window.syncFromDOM=syncFromDOM; window.renderSystems=renderSystems;
 window.selectColor=selectColor;
 window.saveGithubConfig=saveGithubConfig;
 window.testGithubConnection=testGithubConnection;
@@ -499,7 +503,9 @@ function renderSystemCard(sys, idx) {
 function ensureLocationCreds(sys) {
   if (!isLocationAware(sys)) return;
   sys.locations = sys.locations || {};
-  const role = (sys.secondaryRoleName || "viewer").toLowerCase();
+  // Fixed by the rules — not editable, whatever an older config saved.
+  const role = LOCATION_SECONDARY_ROLE;
+  sys.secondaryRoleName = role;
   for (const l of locations) {
     const c = sys.locations[l.code] || {};
     c.adminEmail     = serviceEmail(sys.key, l.code, "admin");
@@ -528,14 +534,9 @@ function renderLocationAccounts(sys, idx) {
         </div>`;
   return `
     <div style="font-size:11px;color:#64748b;line-height:1.5;margin-bottom:12px">
-      This system keeps <strong style="color:#a5b4fc">separate data per location</strong>. Each location has its own two accounts —
+      This system keeps <strong style="color:#a5b4fc">separate data per location</strong>. Each location has its own two accounts (admin + viewer) —
       the database only lets an account into its own location. Create them in ${sys.projectId||"this project"}'s Firebase Auth
       with exactly these emails, then enter the passwords. A location left blank simply can't be opened yet.
-    </div>
-    <div style="margin-bottom:10px;max-width:260px">
-      <label class="fl">Secondary Role Name</label>
-      <input class="fi" value="${sys.secondaryRoleName||"viewer"}" placeholder="viewer / tech"
-             onchange="systems[${idx}].secondaryRoleName=this.value.trim().toLowerCase();ensureLocationCreds(systems[${idx}]);markDirty();syncFromDOM();renderSystems()">
     </div>
     ${locations.map(l => {
       const c = sys.locations[l.code];
@@ -550,8 +551,8 @@ function renderLocationAccounts(sys, idx) {
       <div class="grid2">
         <div><label class="fl">Admin Account</label><input class="fi" value="${c.adminEmail}" readonly style="opacity:.75;font-family:monospace"></div>
         <div><label class="fl">Admin Password</label>${pw(l.code,"adminPassword",c.adminPassword)}</div>
-        <div><label class="fl">${(sys.secondaryRoleName||"viewer").replace(/^./,ch=>ch.toUpperCase())} Account</label><input class="fi" value="${c.secondaryEmail}" readonly style="opacity:.75;font-family:monospace"></div>
-        <div><label class="fl">${(sys.secondaryRoleName||"viewer").replace(/^./,ch=>ch.toUpperCase())} Password</label>${pw(l.code,"secondaryPassword",c.secondaryPassword)}</div>
+        <div><label class="fl">Viewer Account</label><input class="fi" value="${c.secondaryEmail}" readonly style="opacity:.75;font-family:monospace"></div>
+        <div><label class="fl">Viewer Password</label>${pw(l.code,"secondaryPassword",c.secondaryPassword)}</div>
       </div>
     </div>`; }).join("")}`;
 }
