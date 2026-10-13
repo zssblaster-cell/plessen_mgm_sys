@@ -284,6 +284,9 @@
             <button class="gear-item" id="systemMgrBtn" onclick="openSystemMgr()" style="display:none">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>System Manager
             </button>
+            <button class="gear-item" id="locationMgrBtn" onclick="openLocationMgr()" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>Locations
+            </button>
           </div>
           <div class="gear-div"></div>
           <button class="gear-item danger" onclick="doSignOut()">
@@ -342,7 +345,7 @@
 <div class="mo hidden" id="userFormModal" onclick="if(event.target===this)closeUserForm()">
   <div class="md">
     <div class="md-title" id="userFormTitle">Add User</div>
-    <div class="md-sub">Account will be created and synced to assigned systems.</div>
+    <div class="md-sub">Access applies live in every system — no sync needed.</div>
     <div id="userFormErr" class="err-box hidden"></div>
     <input type="hidden" id="editUserId">
     <div class="grid2">
@@ -365,14 +368,8 @@
         </select>
       </div>
     </div>
-    <div class="field-group">
-      <label class="field-label">Locations</label>
-      <div style="display:flex;gap:20px;margin-top:6px">
-        <label class="cb-row"><input type="checkbox" id="locSTX" checked> STX — St. Croix</label>
-        <label class="cb-row"><input type="checkbox" id="locSTT"> STT — St. Thomas</label>
-      </div>
-    </div>
     <div class="section-label">System Access</div>
+    <div class="field-hint" style="margin:-4px 0 10px">Location-based systems are set per location. A person only sees the locations where they have Viewer or Editor access.</div>
     <div id="systemAccessFields"><div style="font-size:13px;color:#94a3b8">Loading systems...</div></div>
     <div class="md-actions">
       <button class="btn btn-ghost" onclick="closeUserForm()">Cancel</button>
@@ -435,6 +432,14 @@
         </label>
         <span style="font-size:13px;font-weight:600;color:var(--navy)">System Enabled</span>
       </div>
+      <div class="field-group" style="display:flex;align-items:center;gap:10px;margin-top:4px">
+        <label class="toggle-wrap">
+          <input type="checkbox" id="sysLocationAware">
+          <span class="toggle-track"></span>
+        </label>
+        <span style="font-size:13px;font-weight:600;color:var(--navy)">Separate data per location</span>
+        <span style="font-size:11px;color:#94a3b8">(access is then set per location)</span>
+      </div>
       <div class="section-label">Firebase Configuration</div>
       <div style="background:#0d0d1a;border:1px solid #2e2060;border-radius:9px;padding:14px 16px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -465,6 +470,11 @@
           <span style="font-size:13px;font-weight:600;color:#e2e8f0">Enable Generic Login</span>
         </div>
         <div id="genericFields" style="display:none">
+          <div class="field-group" id="sysGenericLocWrap" style="display:none">
+            <label class="field-label">Location for this shared device</label>
+            <select id="sysGenericLoc" class="field-select" onchange="toggleGenericFields()"></select>
+            <div style="font-size:11px;color:#64748b;margin-top:4px">One generic account per location. Save again with another location to add one there.</div>
+          </div>
           <div class="field-group">
             <label class="field-label">Generic Account Email <span style="font-weight:400;text-transform:none;color:#64748b">(auto-generated)</span></label>
             <input type="text" id="sysGenericEmail" class="field-input field-input-sm" readonly
@@ -491,11 +501,47 @@
   </div>
 </div>
 
+<!-- MODAL: LOCATIONS ───────────────────────────────────────────────────── -->
+<div class="mo hidden" id="locationMgrModal" onclick="if(event.target===this)closeLocationMgr()">
+  <div class="md md-lg">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div><div class="md-title">Locations</div><div style="font-size:13px;color:#64748b">Sites whose data is kept separate in location-based systems.</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openLocationForm()">+ Add Location</button>
+    </div>
+    <div class="field-hint" style="margin:8px 0 14px;line-height:1.6">
+      To bring a new location online: add it here → create its two service accounts in each location-based system's Firebase project
+      (e.g. <code>equipment-stt-admin@</code>, <code>equipment-stt-viewer@</code>, <code>inventory-stt-admin@</code>, <code>inventory-stt-tech@</code>)
+      → enter their passwords in <a href="/config-tool" style="color:#6366f1;font-weight:700">/config-tool</a> and Generate → grant access in User Management.
+    </div>
+    <div id="locationsList"></div>
+    <div id="locFormWrap" class="hidden" style="margin-top:14px;padding:14px;border:1.5px solid #e2e8f0;border-radius:10px">
+      <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:10px" id="locFormTitle">Add Location</div>
+      <div id="locFormErr" class="err-box hidden"></div>
+      <input type="hidden" id="editLocCode">
+      <div class="grid2">
+        <div class="field-group"><label class="field-label">Code * <span style="font-weight:400;text-transform:none;letter-spacing:0">(e.g. STT — cannot be changed later)</span></label><input type="text" id="locCode" class="field-input field-input-sm" maxlength="8" placeholder="STT"></div>
+        <div class="field-group"><label class="field-label">Name *</label><input type="text" id="locName" class="field-input field-input-sm" placeholder="St. Thomas"></div>
+      </div>
+      <div class="grid2">
+        <div class="field-group"><label class="field-label">Color</label><input type="color" id="locColor" value="#7e22ce" style="width:60px;height:34px;border:1.5px solid #e2e8f0;border-radius:7px;padding:2px;background:#fff"></div>
+        <div class="field-group"><label class="field-label">Order</label><input type="number" id="locOrder" class="field-input field-input-sm" min="1" placeholder="3"></div>
+      </div>
+      <div class="md-actions" style="margin-top:6px">
+        <button class="btn btn-ghost btn-sm" onclick="closeLocationForm()">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="locSaveBtn" onclick="saveLocation()">Save Location</button>
+      </div>
+    </div>
+    <div class="md-actions"><button class="btn btn-ghost" onclick="closeLocationMgr()">Close</button></div>
+  </div>
+</div>
+
 <script type="module">
 // ════════════════════════════════════════════════════════════════════════════
 // IMPORTS — only plessen-auth credentials exposed (in crypto.js)
 // All sub-system credentials live in encrypted config.js
-import { portalAuth, portalDb, loadConfig }
+import { portalAuth, portalDb, loadConfig,
+         loadLocations, isLocationAware, locationAccessMap, normalizeLocationCode,
+         DEFAULT_LOCATIONS, LEGACY_LOCATION }
   from '/crypto.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged,
          updatePassword, EmailAuthProvider, reauthenticateWithCredential,
@@ -540,6 +586,9 @@ let currentUser    = null;
 let currentProfile = null;
 let loadedSystems  = [];   // populated from Firestore systemConfigs
 let allUsers       = [];
+let loadedLocations = [];  // plessen-auth locations/{CODE}, all of them (enabled + disabled)
+const enabledLocations = () => loadedLocations.filter(l => l.enabled !== false);
+const locByCode = code => loadedLocations.find(l => l.code === code);
 
 // auth + db come from crypto.js import
 
@@ -555,6 +604,9 @@ G.openSystemForm=openSystemForm; G.backToSystemsList=backToSystemsList;
 G.toggleGenericFields=toggleGenericFields; G.toggleGenericPassVis=toggleGenericPassVis;
 G.saveSystem=saveSystem; G.editSystem=editSystem; G.deleteSystem=deleteSystem;
 G.toggleSystemEnabled=toggleSystemEnabled;
+G.openLocationMgr=openLocationMgr; G.closeLocationMgr=closeLocationMgr;
+G.openLocationForm=openLocationForm; G.closeLocationForm=closeLocationForm;
+G.saveLocation=saveLocation; G.editLocation=editLocation; G.toggleLocationEnabled=toggleLocationEnabled;
 
 // ════════════════════════════════════════════════════════════════════════════
 // REST API HELPERS
@@ -564,6 +616,8 @@ G.toggleSystemEnabled=toggleSystemEnabled;
 // encrypted config.js via crypto.js. Merge into loadedSystems at runtime.
 // ════════════════════════════════════════════════════════════════════════════
 async function loadSystems() {
+  // Locations registry (falls back to STX/STT if it doesn't exist yet)
+  loadedLocations = await loadLocations();
   // Load display settings from Firestore
   const snap = await getDocs(query(collection(db,"systemConfigs"), orderBy("order")));
 
@@ -630,7 +684,7 @@ onAuthStateChanged(auth, async (fbUser) => {
     if (fbUser.email==="anthony.jolly@plesseneye.com") {
       const profile={ uid:fbUser.uid, email:fbUser.email, displayName:"Anthony Jolly",
         role:"superuser", locations:["STX","STT"],
-        access:{ equipment:"editor", inventory:"editor", credentialing:"editor" },
+        access:{ equipment:{STX:"editor",STT:"editor"}, inventory:{STX:"editor",STT:"editor"}, credentialing:"editor" },
         active:true, createdAt:new Date().toISOString() };
       await setDoc(doc(db,"users",fbUser.uid), profile);
       currentUser=fbUser; currentProfile=profile;
@@ -653,7 +707,11 @@ onAuthStateChanged(auth, async (fbUser) => {
   if (profile.role === 'generic') {
     await loadSystems();
     const targetSys = loadedSystems.find(s => s.key === profile.genericFor);
-    if (targetSys) { window.location.href = targetSys.path || '/' + profile.genericFor; return; }
+    if (targetSys) {
+      const base = targetSys.path || '/' + profile.genericFor;
+      const loc  = profile.genericLocation ? `?loc=${encodeURIComponent(profile.genericLocation)}` : '';
+      window.location.href = base + loc; return;
+    }
   }
   const firstRun = await loadSystems();
   showPortal(firstRun);
@@ -702,10 +760,17 @@ function showPortal(isFirstRun) {
   document.getElementById("heroGreeting").textContent=
     `${h<12?"Good morning":h<17?"Good afternoon":"Good evening"}, ${(p.displayName||"").split(" ")[0]||"there"}`;
   document.getElementById("gearName").textContent=p.displayName||p.email;
-  document.getElementById("gearRole").textContent=`${p.role} · ${(p.locations||[]).join(", ")}`;
+  const myLocs = profileLocations(p);
+  document.getElementById("gearRole").textContent=`${p.role} · ${myLocs.join(", ")||"no locations"}`;
+  const locLabel = document.getElementById("locLabel");
+  if (locLabel) locLabel.textContent = myLocs.join(" · ") || "—";
   const isPriv=["superuser","admin"].includes(p.role);
   if (isPriv) { showEl("adminGearItems"); }
-  if (p.role==="superuser") { document.getElementById("systemMgrBtn").style.display=""; }
+  if (p.role==="superuser") {
+    document.getElementById("systemMgrBtn").style.display="";
+    document.getElementById("locationMgrBtn").style.display="";
+    seedLocationsIfMissing();
+  }
   if (isFirstRun) showEl("setupBanner"); else hideEl("setupBanner");
   updateLoginPanel();
   renderCards();
@@ -730,8 +795,16 @@ function renderCards() {
   const grid=document.getElementById("cardsGrid");
   let html="";
   for (const sys of loadedSystems) {
-    const userAccess=p.access?.[sys.key]||"none";
-    const hasAccess=isPriv||(userAccess!=="none");
+    let userAccess, hasAccess;
+    if (isLocationAware(sys)) {
+      const m = locationAccessMap(p, sys.key);
+      const codes = Object.keys(m).filter(c => locByCode(c)?.enabled !== false);
+      userAccess = codes.length ? codes.map(c => `${c}:${m[c]}`).join(" ") : "none";
+      hasAccess = isPriv || codes.length > 0;
+    } else {
+      userAccess = p.access?.[sys.key]||"none";
+      hasAccess = isPriv||(userAccess!=="none");
+    }
     const locked=!hasAccess;
     const icon=SYS_SVG[sys.key]||DEFAULT_SVG;
     if (!sys.enabled) {
@@ -812,6 +885,7 @@ async function loadUsers() {
   try {
     const snap=await getDocs(collection(db,"users"));
     allUsers=snap.docs.map(d=>({id:d.id,...d.data()}));
+    await convertLegacyAccess();
     renderUsersTable();
   } catch(e) {
     document.getElementById("usersTableBody").innerHTML=`<tr><td colspan="6" style="color:#dc2626;padding:16px">${e.message}</td></tr>`;
@@ -822,10 +896,18 @@ function renderUsersTable() {
   const rp={"superuser":"role-superuser","admin":"role-admin","staff":"role-staff","viewer":"role-viewer"};
   const rows=allUsers.map(u=>{
     const dots=loadedSystems.map(s=>{
+      if (isLocationAware(s)) {
+        const m = locationAccessMap(u, s.key);
+        return enabledLocations().map(l=>{
+          const a = m[l.code]||"none";
+          const col=a==="none"?"#e2e8f0":a==="editor"?s.color:"#93c5fd";
+          return `<span class="access-dot" style="background:${col}" title="${s.label} · ${l.code}: ${a}"></span>`;
+        }).join("");
+      }
       const a=u.access?.[s.key]||"none";
       const col=a==="none"?"#e2e8f0":a==="editor"?s.color:"#93c5fd";
       return `<span class="access-dot" style="background:${col}" title="${s.label}: ${a}"></span>`;
-    }).join("");
+    }).join(`<span style="display:inline-block;width:6px"></span>`);
     return `<tr>
       <td style="font-weight:600">${u.displayName||"—"}</td>
       <td style="font-family:'DM Mono',monospace;font-size:11px">${u.email}</td>
@@ -849,19 +931,43 @@ function renderUsersTable() {
   document.getElementById("usersTableBody").innerHTML=rows;
 }
 
+const accessSelect = (id, val) => `
+      <select id="${id}" style="padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:#0f172a;background:#fff;outline:none">
+        <option value="none"   ${val==="none"?"selected":""}>No Access</option>
+        <option value="viewer" ${val==="viewer"?"selected":""}>Viewer</option>
+        <option value="editor" ${val==="editor"?"selected":""}>Editor</option>
+      </select>`;
+
+// Location-based systems get one row per enabled location; others one row.
 function buildAccessFields(currentAccess) {
-  return loadedSystems.filter(s=>s.enabled).map(s=>`
+  const fakeProfile = { access: currentAccess||{} };
+  return loadedSystems.filter(s=>s.enabled).map(s=>{
+    if (isLocationAware(s)) {
+      const m = locationAccessMap(fakeProfile, s.key);
+      return `
+    <div class="access-row" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${s.color}"></div>
+        <span style="font-size:13px;font-weight:600;color:#0f172a">${s.label}</span>
+        <span style="font-size:10px;font-weight:700;color:#64748b;background:#f1f5f9;padding:2px 7px;border-radius:8px">PER LOCATION</span>
+      </div>
+      ${enabledLocations().map(l=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-left:18px">
+        <span style="font-size:12px;color:#334155;display:flex;align-items:center;gap:6px">
+          <span style="width:8px;height:8px;border-radius:2px;background:${l.color||'#64748b'}"></span>${l.code} — ${l.name||''}</span>
+        ${accessSelect(`access_${s.key}__${l.code}`, m[l.code]||"none")}
+      </div>`).join("")}
+    </div>`;
+    }
+    return `
     <div class="access-row">
       <div style="display:flex;align-items:center;gap:8px">
         <div style="width:10px;height:10px;border-radius:50%;background:${s.color}"></div>
         <span style="font-size:13px;font-weight:600;color:#0f172a">${s.label}</span>
       </div>
-      <select id="access_${s.key}" style="padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:#0f172a;background:#fff;outline:none">
-        <option value="none"   ${(currentAccess?.[s.key]||"none")==="none"?"selected":""}>No Access</option>
-        <option value="viewer" ${(currentAccess?.[s.key]||"")==="viewer"?"selected":""}>Viewer</option>
-        <option value="editor" ${(currentAccess?.[s.key]||"")==="editor"?"selected":""}>Editor</option>
-      </select>
-    </div>`).join("");
+      ${accessSelect(`access_${s.key}`, typeof currentAccess?.[s.key]==="string" ? currentAccess[s.key] : "none")}
+    </div>`;
+  }).join("");
 }
 
 function openUserForm(uid) {
@@ -876,8 +982,6 @@ function openUserForm(uid) {
     document.getElementById("userFormSaveBtn").textContent="Create User";
     ["uName","uEmail","uPass"].forEach(id=>document.getElementById(id).value="");
     document.getElementById("uRole").value="staff";
-    document.getElementById("locSTX").checked=true;
-    document.getElementById("locSTT").checked=false;
     document.getElementById("passHint").textContent="Required for new users";
     document.getElementById("systemAccessFields").innerHTML=buildAccessFields({});
   }
@@ -902,8 +1006,6 @@ function editUser(uid) {
   document.getElementById("uEmail").value=u.email;
   document.getElementById("uPass").value="";
   document.getElementById("uRole").value=u.role||"staff";
-  document.getElementById("locSTX").checked=(u.locations||[]).includes("STX");
-  document.getElementById("locSTT").checked=(u.locations||[]).includes("STT");
   document.getElementById("passHint").textContent="Leave blank to keep current password";
   document.getElementById("systemAccessFields").innerHTML=buildAccessFields(u.access||{});
   hideEl("userFormErr"); showEl("userFormModal");
@@ -948,6 +1050,133 @@ async function deleteUser(uid) {
 
 function closeUserForm() { hideEl("userFormModal"); }
 
+// Every location where this person has any access in any location-based system.
+function profileLocations(p) {
+  const set = new Set();
+  for (const s of loadedSystems) {
+    if (!isLocationAware(s)) continue;
+    Object.keys(locationAccessMap(p, s.key)).forEach(c => set.add(c));
+  }
+  const order = c => loadedLocations.findIndex(l => l.code === c);
+  return [...set].sort((a,b) => order(a) - order(b));
+}
+
+// One-time upgrade: profiles saved before locations hold a single access
+// string per location-based system — rewrite it as { STX: level }.
+async function convertLegacyAccess() {
+  const isSuper = currentProfile?.role === "superuser";
+  const awareKeys = loadedSystems.filter(isLocationAware).map(s => s.key);
+  const batch = writeBatch(db);
+  let n = 0;
+  for (const u of allUsers) {
+    if (u.role === "superuser" && !isSuper) continue;   // rules: superuser records are superuser-only
+    let changed = false;
+    const access = { ...(u.access || {}) };
+    for (const k of awareKeys) {
+      if (typeof access[k] === "string") { access[k] = locationAccessMap(u, k); changed = true; }
+    }
+    if (!changed) continue;
+    const update = { access, locations: profileLocations({ access }), updatedAt: new Date().toISOString() };
+    if (u.role === "generic" && u.genericFor && awareKeys.includes(u.genericFor) && !u.genericLocation) {
+      update.genericLocation = LEGACY_LOCATION;
+    }
+    batch.update(doc(db, "users", u.id), update);
+    Object.assign(u, update);
+    n++;
+  }
+  if (n) {
+    try { await batch.commit(); console.info(`[locations] converted ${n} profile(s) to per-location access`); }
+    catch(e) { console.warn("[locations] legacy access conversion failed:", e.code || e.message); }
+  }
+}
+
+// ── LOCATIONS REGISTRY (superusers) ─────────────────────────────────────────
+async function seedLocationsIfMissing() {
+  try {
+    const snap = await getDocs(collection(db, "locations"));
+    if (!snap.empty) return;
+    const batch = writeBatch(db);
+    for (const l of DEFAULT_LOCATIONS) batch.set(doc(db, "locations", l.code), { ...l, createdAt: new Date().toISOString() });
+    await batch.commit();
+    loadedLocations = await loadLocations();
+  } catch(e) { console.warn("[locations] could not seed registry:", e.code || e.message); }
+}
+
+function openLocationMgr() { closeGear(); renderLocationsList(); hideEl("locFormWrap"); showEl("locationMgrModal"); }
+function closeLocationMgr() { hideEl("locationMgrModal"); }
+
+function renderLocationsList() {
+  const users = allUsers.length ? allUsers : null;
+  document.getElementById("locationsList").innerHTML = loadedLocations.map(l => `
+    <div class="sys-mgr-card">
+      <div class="sys-color-dot" style="background:${l.color||'#64748b'}"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:#0f172a">${l.name||l.code}
+          <span style="font-size:10px;font-family:'DM Mono',monospace;color:#94a3b8;margin-left:6px">${l.code}</span>
+          ${l.enabled===false?'<span style="font-size:10px;font-weight:700;color:#991b1b;background:#fee2e2;padding:1px 7px;border-radius:8px;margin-left:6px">DISABLED</span>':''}
+        </div>
+        <div style="font-size:11px;color:#64748b;font-family:'DM Mono',monospace">data: sites/${l.code}/… · accounts: {system}-${l.code.toLowerCase()}-admin@</div>
+      </div>
+      <label class="toggle-wrap" title="${l.enabled!==false?"Disable":"Enable"} location">
+        <input type="checkbox" ${l.enabled!==false?"checked":""} onchange="toggleLocationEnabled('${l.code}',this.checked)">
+        <span class="toggle-track"></span>
+      </label>
+      <button class="btn btn-ghost btn-xs" onclick="editLocation('${l.code}')">Edit</button>
+    </div>`).join("") || `<div style="color:#94a3b8;font-size:13px;padding:16px">No locations.</div>`;
+}
+
+function openLocationForm(loc) {
+  document.getElementById("editLocCode").value = loc?.code || "";
+  document.getElementById("locFormTitle").textContent = loc ? `Edit ${loc.code}` : "Add Location";
+  document.getElementById("locCode").value = loc?.code || "";
+  document.getElementById("locCode").disabled = !!loc;
+  document.getElementById("locName").value = loc?.name || "";
+  document.getElementById("locColor").value = loc?.color || "#7e22ce";
+  document.getElementById("locOrder").value = loc?.order || loadedLocations.length + 1;
+  hideEl("locFormErr"); showEl("locFormWrap");
+}
+function closeLocationForm() { hideEl("locFormWrap"); }
+function editLocation(code) { const l = locByCode(code); if (l) openLocationForm(l); }
+
+async function saveLocation() {
+  const existing = document.getElementById("editLocCode").value;
+  const code = normalizeLocationCode(existing || document.getElementById("locCode").value);
+  const name = document.getElementById("locName").value.trim();
+  const err = m => { showEl("locFormErr"); document.getElementById("locFormErr").textContent = m; };
+  hideEl("locFormErr");
+  if (code.length < 2) return err("Code must be 2–8 letters or digits (e.g. STT).");
+  if (!name) return err("Name is required.");
+  if (!existing && locByCode(code)) return err(`${code} already exists.`);
+  const data = {
+    code, name,
+    color: document.getElementById("locColor").value || "#64748b",
+    order: parseInt(document.getElementById("locOrder").value) || loadedLocations.length + 1,
+    enabled: existing ? (locByCode(code)?.enabled !== false) : true,
+    updatedAt: new Date().toISOString(),
+    ...(existing ? {} : { createdAt: new Date().toISOString() })
+  };
+  const btn = document.getElementById("locSaveBtn");
+  btn.disabled = true;
+  try {
+    await setDoc(doc(db, "locations", code), data, { merge: true });
+    loadedLocations = await loadLocations();
+    renderLocationsList(); closeLocationForm(); renderCards();
+    if (!existing) alert(`✓ ${code} added.\n\nNext: create its service accounts in each location-based system's Firebase project ` +
+      `(e.g. equipment-${code.toLowerCase()}-admin@ / equipment-${code.toLowerCase()}-viewer@, inventory-${code.toLowerCase()}-admin@ / inventory-${code.toLowerCase()}-tech@), ` +
+      `then enter their passwords in /config-tool and Generate.`);
+  } catch(e) { err(e.message); }
+  btn.disabled = false;
+}
+
+async function toggleLocationEnabled(code, enabled) {
+  if (!enabled && !confirm(`Disable ${code}?\n\nIts data is kept, but nobody can open it until it's enabled again.`)) { renderLocationsList(); return; }
+  try {
+    await setDoc(doc(db, "locations", code), { enabled, updatedAt: new Date().toISOString() }, { merge: true });
+    loadedLocations = await loadLocations();
+    renderLocationsList(); renderCards();
+  } catch(e) { alert("Could not update: " + e.message); renderLocationsList(); }
+}
+
 // Delete a login account this save just created. Allowed without admin
 // privileges because we hold that new account's own ID token.
 async function rollbackNewAccount(idToken) {
@@ -985,7 +1214,6 @@ async function saveUser() {
   const email=document.getElementById("uEmail").value.trim();
   const pass=document.getElementById("uPass").value;
   const role=document.getElementById("uRole").value;
-  const locs=["STX","STT"].filter(l=>document.getElementById("loc"+l).checked);
   hideEl("userFormErr");
   if (!name||!email) { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Name and email required."; return; }
   if (!uid&&!pass)   { showEl("userFormErr"); document.getElementById("userFormErr").textContent="Password required for new users."; return; }
@@ -1000,8 +1228,24 @@ async function saveUser() {
     const ok = confirm(`Grant Superuser to ${name || email}?\n\nThis gives full System Manager access — adding systems, service account credentials, and GitHub deployment. This is not reversible by anyone except another superuser.`);
     if (!ok) return;
   }
-  const access={};
-  for (const s of loadedSystems) access[s.key]=document.getElementById("access_"+s.key)?.value||"none";
+  // Start from the stored access so systems/locations not shown in the form
+  // (disabled ones) keep their values instead of being wiped.
+  const existingUser = uid ? allUsers.find(x=>x.id===uid) : null;
+  const access = JSON.parse(JSON.stringify(existingUser?.access || {}));
+  for (const s of loadedSystems) {
+    if (!s.enabled) continue;
+    if (isLocationAware(s)) {
+      const m = locationAccessMap({access}, s.key);  // converts a legacy string
+      for (const l of enabledLocations()) {
+        const v = document.getElementById(`access_${s.key}__${l.code}`)?.value || "none";
+        if (v==="none") delete m[l.code]; else m[l.code]=v;
+      }
+      access[s.key] = m;
+    } else {
+      access[s.key] = document.getElementById("access_"+s.key)?.value||"none";
+    }
+  }
+  const locs = profileLocations({access});
   const btn=document.getElementById("userFormSaveBtn");
   btn.disabled=true; btn.textContent="Saving...";
   // Set when THIS save created a brand-new login account — used to roll it
@@ -1123,6 +1367,9 @@ function openSystemForm(sys) {
   document.getElementById("sysPath").value=sys?.path||"";
   document.getElementById("sysOrder").value=sys?.order||loadedSystems.length+1;
   document.getElementById("sysEnabled").checked=sys?.enabled!==false;
+  document.getElementById("sysLocationAware").checked = sys ? isLocationAware(sys) : false;
+  document.getElementById("sysGenericLoc").innerHTML = enabledLocations()
+    .map(l=>`<option value="${l.code}">${l.code} — ${l.name||''}</option>`).join("");
   // Show project ID from decrypted config (read-only — edit via config-tool)
   const projDisplay = document.getElementById("sysProjectIdDisplay");
   if (projDisplay) projDisplay.textContent = sys?.projectId || "Not yet configured — run config-tool";
@@ -1132,23 +1379,29 @@ function openSystemForm(sys) {
   // Generic login fields
   const genEnabled = sys?.genericLogin?.enabled || false;
   document.getElementById('sysGenericEnabled').checked = genEnabled;
-  const genEmailEl = document.getElementById('sysGenericEmail');
-  const genKey = (sys?.key || '').toLowerCase() || 'system';
-  if (genEmailEl) genEmailEl.value = `generic-${genKey}@plesseneye.com`;
+  document.getElementById('sysGenericEmail').value = genericEmailFor(sys?.key || 'system');
   document.getElementById('sysGenericPass').value = '';
   document.getElementById('genericFields').style.display = genEnabled ? '' : 'none';
   hideEl("sysFormErr"); hideEl("sysMgrList"); showEl("sysMgrForm");
 }
 
+// Generic (shared-device) account email: one per system, or one per system
+// AND location for location-based systems — a shared device sits at one site.
+function genericEmailFor(key) {
+  key = String(key||'system').trim().toLowerCase().replace(/\s+/g,'_');
+  const aware = document.getElementById('sysLocationAware')?.checked;
+  document.getElementById('sysGenericLocWrap').style.display = aware ? '' : 'none';
+  if (!aware) return `generic-${key}@plesseneye.com`;
+  const loc = (document.getElementById('sysGenericLoc')?.value || LEGACY_LOCATION).toLowerCase();
+  return `generic-${key}-${loc}@plesseneye.com`;
+}
 function toggleGenericFields() {
   const enabled = document.getElementById('sysGenericEnabled').checked;
   document.getElementById('genericFields').style.display = enabled ? '' : 'none';
-  if (enabled) {
-    const key = document.getElementById('sysKey').value ||
-                document.getElementById('editSysKey').value || 'system';
-    document.getElementById('sysGenericEmail').value = `generic-${key}@plesseneye.com`;
-  }
+  const key = document.getElementById('sysKey').value || document.getElementById('editSysKey').value || 'system';
+  document.getElementById('sysGenericEmail').value = genericEmailFor(key);
 }
+document.getElementById('sysLocationAware')?.addEventListener('change', toggleGenericFields);
 
 function toggleGenericPassVis() {
   const el = document.getElementById('sysGenericPass');
@@ -1194,7 +1447,14 @@ async function saveSystem() {
     const genericEnabled = document.getElementById('sysGenericEnabled').checked;
     // Derive email directly from the system key — never read from the readonly display field
     // which may be stale or unpopulated
-    const genericEmail   = genericEnabled ? `generic-${key}@plesseneye.com` : '';
+    const locationAware  = document.getElementById('sysLocationAware').checked;
+    const genericLoc     = locationAware ? (document.getElementById('sysGenericLoc').value || LEGACY_LOCATION) : null;
+    const genericEmail   = genericEnabled
+      ? (locationAware ? `generic-${key}-${genericLoc.toLowerCase()}@plesseneye.com` : `generic-${key}@plesseneye.com`) : '';
+    // What a generic account may do: viewer only — never admin.
+    const genericAccess  = locationAware ? { [key]: { [genericLoc]: 'viewer' } } : { [key]: 'viewer' };
+    const genericExtra   = locationAware ? { genericLocation: genericLoc } : {};
+    const prevGeneric    = loadedSystems.find(s=>s.key===key)?.genericLogin || {};
     const genericPass    = document.getElementById('sysGenericPass').value;
     const sysData={
       key, label, description:document.getElementById("sysDesc").value.trim(),
@@ -1203,7 +1463,15 @@ async function saveSystem() {
       enabled:document.getElementById("sysEnabled").checked,
       color:document.getElementById("sysColor").value||"#1d4ed8",
       accent:document.getElementById("sysAccent").value||"#dbeafe",
-      genericLogin: { enabled: genericEnabled, email: genericEnabled ? genericEmail : '' },
+      locationAware,
+      genericLogin: {
+        enabled: genericEnabled,
+        email: genericEnabled ? genericEmail : '',
+        // per-location accounts already created for this system
+        locations: locationAware && genericEnabled
+          ? [...new Set([...(prevGeneric.locations||[]), ...(genericPass ? [genericLoc] : [])])]
+          : (prevGeneric.locations||[])
+      },
       updatedAt:new Date().toISOString(),
       ...(existingKey?{}:{createdAt:new Date().toISOString()})
     };
@@ -1242,8 +1510,9 @@ async function saveSystem() {
           // matches how every sub-system's live listener reads this field.
           await setDoc(doc(db, 'users', createData.localId), {
             uid: createData.localId, email: genericEmail,
-            displayName: `Generic - ${label}`, role: 'generic',
-            genericFor: key, access: { [key]: 'viewer' },
+            displayName: `Generic - ${label}${genericLoc?' ('+genericLoc+')':''}`, role: 'generic',
+            genericFor: key, access: genericAccess, ...genericExtra,
+            locations: genericLoc ? [genericLoc] : [],
             active: true, createdAt: new Date().toISOString()
           });
         }
@@ -1259,8 +1528,9 @@ async function saveSystem() {
             const signData = await signRes.json();
             await setDoc(doc(db, 'users', signData.localId), {
               uid: signData.localId, email: genericEmail,
-              displayName: `Generic - ${label}`, role: 'generic',
-              genericFor: key, access: { [key]: 'viewer' },
+              displayName: `Generic - ${label}${genericLoc?' ('+genericLoc+')':''}`, role: 'generic',
+              genericFor: key, access: genericAccess, ...genericExtra,
+              locations: genericLoc ? [genericLoc] : [],
               active: true, updatedAt: new Date().toISOString()
             }, { merge: true });
           }

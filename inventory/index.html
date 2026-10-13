@@ -22,9 +22,15 @@
      LIVE for the whole session — not a one-time check. Main script stays
      non-module so all inventory functions remain global. -->
 <script type="module">
-import { portalAuth, portalDb, loadConfig, describeServiceError } from '/crypto.js';
+import { portalAuth, portalDb, loadConfig, describeServiceError,
+         loadLocations, resolveLocation, rememberLocation, renderLocationSwitcher,
+         LEGACY_LOCATION } from '/crypto.js';
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+// The original site — its pre-location data (plessen/*) is moved into
+// sites/STX/… by the one-time move tool in the main script.
+window._legacyLocation = LEGACY_LOCATION;
 
 var poCountdownIv=null;
 // opts: { title, retrySeconds } — retrySeconds reloads the page instead of
@@ -50,39 +56,67 @@ function removePortalOverlay(){
   var o=document.getElementById('portalOverlay');if(!o)return;o.style.opacity='0';setTimeout(function(){o.remove();},320);
 }
 
-// Bridge used by the compat-SDK main script to sign into the portal account
-// itself needs no bridge (portalAuth is only touched here), but Sign Out
-// inside the app needs to end the PORTAL session, not just this tab's.
+// Sign Out inside the app ends the PORTAL session, not just this tab's.
 window._portalSignOut=async function(){ await signOut(portalAuth); window.location.href='/'; };
 
-var profileUnsub=null;
+// ── Location + role, decided LIVE from the portal profile ──────────────────
+// Access is per location: { STX:'editor', STT:'viewer' }. editor → the
+// location's admin account, viewer → its tech account. Changing access, or
+// removing a location, takes effect within seconds while the app is open.
+var profileUnsub=null, locationsCache=null, lastProfile=null, currentLoc=null, applySeq=0;
+async function getLocations(){ if(!locationsCache) locationsCache=await loadLocations(); return locationsCache; }
+
+function applyProfile(profile){
+  lastProfile=profile;
+  var seq=++applySeq;
+  getLocations().then(function(locs){
+    if(seq!==applySeq) return; // a newer profile update arrived
+    var r=resolveLocation('inventory', profile, locs, currentLoc);
+    if(!r.current){
+      showPortalBlocked("You don't have access to Inventory at any location. Contact your administrator.");
+      return;
+    }
+    var level=r.allowed.find(function(a){return a.code===r.current;}).level;
+    openLocation(r, level==='editor'?'admin':'tech', profile.role==='generic');
+  });
+}
+
+function openLocation(r, role, isGeneric){
+  var loc=r.current, previous=currentLoc;
+  renderLocationSwitcher(document.getElementById('locSwitch'), r.allowed, loc, function(code){
+    currentLoc=code; rememberLocation('inventory', code);
+    if(lastProfile) applyProfile(lastProfile);
+  });
+  if(typeof window._ensureInventoryService!=='function') return;
+  window._ensureInventoryService(loc, role, isGeneric, loadConfig).then(function(ok){
+    if(!ok) return;
+    currentLoc=loc; rememberLocation('inventory', loc);
+    removePortalOverlay();
+  },function(e){
+    var info=describeServiceError(e);
+    // Another location still works — go back to it instead of locking them out
+    if(previous && previous!==loc && r.allowed.some(function(a){return a.code===previous;})){
+      alert(info.message);
+      currentLoc=previous;
+      if(lastProfile) applyProfile(lastProfile);
+      return;
+    }
+    showPortalBlocked(info.message,info);
+  });
+}
+
 onAuthStateChanged(portalAuth,function(portalUser){
   if(profileUnsub){profileUnsub();profileUnsub=null;}
   if(!portalUser){
     showPortalBlocked("Sign in through the Plessen Management Portal to access Inventory.");
     return;
   }
-  // Live listener — fires instantly on any change, not just next login.
   profileUnsub=onSnapshot(doc(portalDb,'users',portalUser.uid),function(snap){
     if(!snap.exists()||snap.data().active===false){
       showPortalBlocked("Your account is not active. Contact your administrator.");
       return;
     }
-    var level=snap.data().access&&snap.data().access.inventory||'none';
-    if(level==='none'){
-      showPortalBlocked("You don't have access to Inventory. Contact your administrator.");
-      return;
-    }
-    var isGeneric=snap.data().role==='generic';
-    var targetRole=level==='editor'?'admin':'tech';
-    if(typeof window._ensureInventoryService==='function'){
-      window._ensureInventoryService(targetRole,isGeneric,loadConfig).then(function(ok){
-        if(ok)removePortalOverlay();
-      },function(e){
-        var info=describeServiceError(e);
-        showPortalBlocked(info.message,info);
-      });
-    }
+    applyProfile(snap.data());
   },function(){
     showPortalBlocked("Could not verify your access. Please sign in again through the Portal.");
   });
@@ -107,79 +141,119 @@ if(typeof firebase==='undefined'){
     var cd=document.getElementById('poCountdown');if(cd)cd.style.display='none';
   });return;
 }
-// Firebase config comes from encrypted config.js — no credentials in this file.
-// _ensureInventoryService(role) is called by the module script above whenever
-// the portal's LIVE-verified access level says this session should be
-// 'admin' or 'tech'. There is no login screen — the two fixed service
-// accounts below are the only identities this project's Firebase Auth ever
-// sees; which one gets signed into is decided entirely by the portal.
+// ════════════════════════════════════════════════════════════════════════════
+// DATA LAYER — one Firestore document per item, transaction and change-log
+// entry, kept per location under sites/{LOC}/… :
+//   sites/{LOC}/items/{itemId}        sites/{LOC}/transactions/{id}
+//   sites/{LOC}/changelog/{id}        sites/{LOC}/meta/config  (tech roster + PIN hashes)
+//   sites/{LOC}/meta/layout           (marks the location as set up)
+// The screen keeps working on the same in-memory lists (window.inventory,
+// window.changeLog, window.transactions). fbSave() compares them with the last
+// copy synced to Firestore and writes only what changed — so the database
+// rules can check every single change (a tech may only lower quantities).
+// ════════════════════════════════════════════════════════════════════════════
 var db   = null;
 var auth = null;
 var currentServiceRole = null; // 'admin' | 'tech' | null
+var currentLoc = null;         // 'STX' | 'STT' | …
+var siteRef = null;            // db.collection('sites').doc(currentLoc)
 var fbLoadRanOnce = false;
-var invUnsubs = []; // live Firestore feeds — detached on teardown / role switch
+var invUnsubs = [];            // live Firestore feeds — detached on teardown / switch
+var synced = { items:new Map(), transactions:new Map(), changelog:new Map() }; // key → canonical JSON last synced
+var LEGACY = window._legacyLocation || 'STX';
+
 function detachInventoryListeners(){
   invUnsubs.forEach(function(u){ try{u();}catch(e){} });
   invUnsubs = [];
 }
+function clearLocalData(){
+  window._fbReady=false;
+  clearTimeout(_sq); clearTimeout(window._saveRetry);
+  mutArr(window.inventory,[]); mutArr(window.changeLog,[]); mutArr(window.transactions,[]);
+  synced.items.clear(); synced.transactions.clear(); synced.changelog.clear();
+  setBanner(null);
+}
+
+// Stable JSON: object keys sorted, so a copy read back from Firestore (which
+// may return fields in any order) compares equal to what we wrote.
+function canon(v){
+  if(Array.isArray(v)) return '['+v.map(canon).join(',')+']';
+  if(v && typeof v==='object') return '{'+Object.keys(v).sort().filter(function(k){return v[k]!==undefined;})
+    .map(function(k){return JSON.stringify(k)+':'+canon(v[k]);}).join(',')+'}';
+  var j=JSON.stringify(v); return j===undefined?'null':j;
+}
+function plain(o){ return JSON.parse(JSON.stringify(o)); }
+function entryKey(e){ return String(e.id); }
 
 // The live profile listener can fire twice in quick succession (cached copy,
 // then server copy). svcInFlight makes the second call share the first
-// sign-in instead of racing it; svcGen lets a teardown (access revoked)
-// cancel a sign-in that is still in progress.
-var svcInFlight = null, svcInFlightRole = null, svcGen = 0;
+// sign-in instead of racing it; svcGen lets a teardown (access revoked) or a
+// location switch cancel a sign-in or a load that is still in progress.
+var svcInFlight = null, svcInFlightKey = null, svcGen = 0;
 
-// Resolves true when the app is open, false when superseded by a teardown.
-// REJECTS with the real error on failure so the module script can show it
-// (previously it swallowed the error and left the spinner up forever).
-window._ensureInventoryService = function(targetRole, isGeneric, loadConfig){
-  if(svcInFlight && svcInFlightRole===targetRole) return svcInFlight;
+// Resolves true when the app is open, false when superseded. REJECTS with the
+// real error on failure so the module script can show it.
+window._ensureInventoryService = function(loc, targetRole, isGeneric, loadConfig){
+  var key = loc+':'+targetRole;
+  if(svcInFlight && svcInFlightKey===key) return svcInFlight;
   var prior = svcInFlight || Promise.resolve();
-  svcInFlightRole = targetRole;
+  svcInFlightKey = key;
   var p = prior.catch(function(){}).then(function(){
-    return doEnsureInventoryService(targetRole, isGeneric, loadConfig);
+    return doEnsureInventoryService(loc, targetRole, isGeneric, loadConfig);
   });
-  var clear = function(){ if(svcInFlight===p){ svcInFlight=null; svcInFlightRole=null; } };
+  var clear = function(){ if(svcInFlight===p){ svcInFlight=null; svcInFlightKey=null; } };
   p.then(clear, clear);
   svcInFlight = p;
   return p;
 };
 
-function doEnsureInventoryService(targetRole, isGeneric, loadConfig){
-  // Already on the correct account — skip re-auth on unrelated profile changes
-  if(currentServiceRole===targetRole && auth && auth.currentUser){
+function locationNotConfigured(loc){
+  var e=new Error('Inventory at '+loc+' has no service accounts yet — a superuser must add the '+loc+' passwords in /config-tool and Generate.');
+  e.code='LOCATION_NOT_CONFIGURED'; return e;
+}
+
+function doEnsureInventoryService(loc, targetRole, isGeneric, loadConfig){
+  // Already on the correct location + account — skip re-auth on unrelated profile changes
+  if(currentLoc===loc && currentServiceRole===targetRole && auth && auth.currentUser){
+    if(isGeneric){ showGenericSessionBadge(); } else { hideGenericSessionBadge(); }
     return Promise.resolve(true);
   }
-  var myGen = svcGen;
+  var myGen = ++svcGen;
   var appRef = null;
   return loadConfig().then(function(configs){
     var cfg=configs&&configs.inventory;
     if(!cfg)throw new Error('Inventory config not initialised — run /config-tool first.');
-    var email = targetRole==='admin' ? cfg.adminEmail    : cfg.secondaryEmail;
-    var pass  = targetRole==='admin' ? cfg.adminPassword : cfg.secondaryPassword;
+    var lc = cfg.locations && cfg.locations[loc];
+    var email = lc && (targetRole==='admin' ? lc.adminEmail    : lc.secondaryEmail);
+    var pass  = lc && (targetRole==='admin' ? lc.adminPassword : lc.secondaryPassword);
     var fbCfg = {apiKey:cfg.apiKey,authDomain:cfg.authDomain,projectId:cfg.projectId,
       storageBucket:cfg.storageBucket||'',messagingSenderId:cfg.messagingSenderId||'',appId:cfg.appId};
-    cfg=null; // null immediately — credentials no longer needed
-    if(!email||!pass)throw new Error('Service account credentials missing — run /config-tool.');
+    cfg=null; lc=null; // null immediately — credentials no longer needed
+    if(!email||!pass) throw locationNotConfigured(loc);
 
     var appName='plessen-inventory';
     appRef = firebase.apps.find(function(a){return a.name===appName;});
     if(!appRef) appRef = firebase.initializeApp(fbCfg, appName);
     var newAuth = appRef.auth();
 
-    return newAuth.setPersistence(firebase.auth.Auth.Persistence.NONE).then(function(){
-      // Role switch: detach live feeds BEFORE dropping the old session, and
-      // reload under the new one so the feeds come back with the right identity.
-      if(auth && auth.currentUser){ detachInventoryListeners(); fbLoadRanOnce=false; }
+    // Switching location or role: save anything pending to the OLD location,
+    // detach its feeds and clear the screen BEFORE the old session ends.
+    var before = (auth && auth.currentUser) ? flushPendingSave() : Promise.resolve();
+    return before.then(function(){
+      detachInventoryListeners(); fbLoadRanOnce=false; clearLocalData();
+      return newAuth.setPersistence(firebase.auth.Auth.Persistence.NONE);
+    }).then(function(){
       var signOutP = (auth && auth.currentUser) ? auth.signOut().catch(function(){}) : Promise.resolve();
       return signOutP.then(function(){ return newAuth.signInWithEmailAndPassword(email,pass); });
     }).then(function(){
-      // Access was revoked while signing in — don't open the app
+      // Superseded (access revoked, or another switch) while signing in
       if(myGen!==svcGen){ newAuth.signOut().catch(function(){}); return false; }
 
       auth = newAuth;
       db   = appRef.firestore();
       currentServiceRole = targetRole;
+      currentLoc = loc; window._invLoc = loc;
+      siteRef = db.collection('sites').doc(loc);
       window._authEmail = email;
 
       var ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
@@ -188,24 +262,25 @@ function doEnsureInventoryService(targetRole, isGeneric, loadConfig){
 
       if(isGeneric){ showGenericSessionBadge(); } else { hideGenericSessionBadge(); }
       if(window.activateRole) window.activateRole(targetRole,null);
-      if(!fbLoadRanOnce){ fbLoadRanOnce=true; setTimeout(fbLoad,200); }
+      if(!fbLoadRanOnce){ fbLoadRanOnce=true; setTimeout(function(){ fbLoad(myGen); },120); }
       return true;
     });
   }).catch(function(e){
     console.error('[Inventory] service session failed:', (e&&(e.code||e.name)), e&&e.message);
-    if(myGen!==svcGen) return false; // superseded by a teardown — nothing to show
+    if(myGen!==svcGen) return false; // superseded — nothing to show
     window._teardownInventoryService();
     throw e;
   });
 }
 
 window._teardownInventoryService = function(){
-  svcGen++; // cancels any sign-in still in progress
+  svcGen++; // cancels any sign-in or load still in progress
   detachInventoryListeners();
   fbLoadRanOnce=false;
+  clearLocalData();
   if(auth && auth.currentUser){ auth.signOut().catch(function(){}); }
-  auth=null; db=null; currentServiceRole=null;
-  window._fbReady=false; window._authEmail=null;
+  auth=null; db=null; currentServiceRole=null; currentLoc=null; siteRef=null;
+  window._authEmail=null;
   var ma=document.getElementById('mainApp'),lb=document.getElementById('logoutBtn');
   if(ma)ma.style.display='none';
   if(lb)lb.style.display='none';
@@ -218,40 +293,119 @@ function setSS(s){
   var st=m[s]||m.synced;el.textContent=st.t;dot.style.background=st.c;dot.style.animation=st.a?'pulse2 1s infinite':'none';
 }
 
-var _sq=null,_ru=false;
+// ── Banner (location setup / move messages) ──────────────────────────────────
+function setBanner(kind, html){
+  var el=document.getElementById('locBanner'); if(!el) return;
+  if(!kind){ el.style.display='none'; el.innerHTML=''; return; }
+  var c={info:['#eff6ff','#1e40af','#93c5fd'],warn:['#fffbeb','#92400e','#f59e0b'],ok:['#ecfdf5','#065f46','#34d399'],err:['#fef2f2','#991b1b','#f87171']}[kind]||['#eff6ff','#1e40af','#93c5fd'];
+  el.style.cssText='display:block;margin:12px 20px 0;padding:12px 16px;border-radius:10px;font-size:13px;line-height:1.55;background:'+c[0]+';color:'+c[1]+';border:1.5px solid '+c[2];
+  el.innerHTML=html;
+}
+function bannerBtn(label, fn, primary){
+  return '<button onclick="'+fn+'" style="margin:8px 8px 0 0;padding:6px 12px;border-radius:7px;font-weight:700;font-size:12px;cursor:pointer;'+
+    (primary?'background:#0d2d5e;color:#fff;border:0':'background:#fff;color:#0d2d5e;border:1.5px solid #cbd5e1')+'">'+label+'</button>';
+}
 
+// ── SAVE: write only what changed since the last sync ────────────────────────
+var _sq=null, _saveChain=Promise.resolve(), _denies=[];
 window.fbSave=function(){
-  if(!window._fbReady){
-    // Queue the save - retry once Firebase is ready
+  if(!window._fbReady||!siteRef){
     clearTimeout(window._saveRetry);
     window._saveRetry=setTimeout(window.fbSave,2000);
-    return;
+    return Promise.resolve();
   }
-  setSS('saving');
-  Promise.all([
-    db.doc('plessen/inventory').set({data:JSON.stringify(window.inventory),ts:new Date().toISOString()}),
-    db.doc('plessen/changelog').set({data:JSON.stringify(window.changeLog),ts:new Date().toISOString()}),
-    db.doc('plessen/transactions').set({data:JSON.stringify(window.transactions),ts:new Date().toISOString()})
-  ]).then(function(){setSS('synced');}).catch(function(e){console.error('fbSave error:',e.code,e.message);setSS('error');});
-};
-window.fbSaveDebounced=function(){setSS('saving');clearTimeout(_sq);_sq=setTimeout(window.fbSave,900);};
-window.fbSaveConfig=function(cfg){
-  if(!db)return;
-  db.doc('plessen/config').set(cfg).catch(function(e){console.error('config save:',e);});
-};
+  var site=siteRef, loc=currentLoc, gen=svcGen, isAdmin=currentServiceRole==='admin';
+  var ops=[], undo=[];
+  function remember(map,key){ undo.push([map,key,synced[map].has(key),synced[map].get(key)]); }
 
-// Immediately write just the changelog document (called from logChange)
-window.fbSaveChangelog=function(){
-  if(!window._fbReady||!db)return;
-  db.doc('plessen/changelog').set({
-    data:JSON.stringify(window.changeLog),
-    ts:new Date().toISOString()
-  }).catch(function(e){console.error('changelog write error:',e);});
+  // Items: set changed/new ones, delete ones no longer in the list
+  var seen=new Set();
+  window.inventory.forEach(function(r){
+    var key=String(r.id); seen.add(key);
+    if(typeof r.quantity!=='number') r.quantity=parseFloat(r.quantity)||0; // rules compare numbers
+    var data=plain(r), j=canon(data);
+    if(synced.items.get(key)!==j){ remember('items',key); synced.items.set(key,j); ops.push(['set',site.collection('items').doc(key),data]); }
+  });
+  Array.from(synced.items.keys()).forEach(function(key){
+    if(!seen.has(key)){ remember('items',key); synced.items.delete(key); ops.push(['del',site.collection('items').doc(key)]); }
+  });
+  // History: new entries are added; existing ones are only rewritten by an
+  // admin; entries trimmed from the on-screen list are never deleted here.
+  [['transactions',window.transactions],['changelog',window.changeLog]].forEach(function(pair){
+    var name=pair[0];
+    pair[1].forEach(function(e){
+      if(e.id===undefined||e.id===null||e.id==='') e.id=Date.now()+Math.random();
+      if(!e.ts) e.ts=new Date().toISOString();
+      var key=entryKey(e), data=plain(e), j=canon(data), prev=synced[name].get(key);
+      if(prev===undefined || (prev!==j && isAdmin)){
+        remember(name,key); synced[name].set(key,j); ops.push(['set',site.collection(name).doc(key),data]);
+      }
+    });
+  });
+  if(!ops.length){ setSS('synced'); return _saveChain; }
+  setSS('saving');
+  _saveChain=_saveChain.catch(function(){}).then(function(){
+    return commitInChunks(ops);
+  }).then(function(){
+    if(gen===svcGen && loc===currentLoc) setSS('synced');
+  }).catch(function(e){
+    console.error('[Inventory] save failed:', e.code, e.message);
+    // Put the "last synced" copies back so the change is retried / reconciled
+    undo.reverse().forEach(function(u){ if(u[2]) synced[u[0]].set(u[1],u[3]); else synced[u[0]].delete(u[1]); });
+    if(gen!==svcGen || loc!==currentLoc) return;
+    setSS('error');
+    if(e.code==='permission-denied'){
+      var now=Date.now(); _denies=_denies.filter(function(t){return now-t<30000;}); _denies.push(now);
+      if(_denies.length>3){ // something keeps producing a disallowed change — stop and say so
+        window._fbReady=false;
+        setBanner('err','⚠ Changes keep being refused by the database for this access level. Saving is paused — reload the page; if it continues, contact an admin.');
+        return;
+      }
+      if(window.showToast) window.showToast('That change isn\'t allowed for your access level — reloading the latest data','error');
+      reloadSite();
+    } else if(window.showToast){
+      window.showToast('Could not save ('+(e.code||'error')+') — will retry','error');
+      clearTimeout(window._saveRetry); window._saveRetry=setTimeout(window.fbSave,4000);
+    }
+  });
+  return _saveChain;
+};
+function commitInChunks(ops){
+  var chunks=[]; for(var i=0;i<ops.length;i+=400) chunks.push(ops.slice(i,i+400));
+  return chunks.reduce(function(p,chunk){
+    return p.then(function(){
+      var b=db.batch();
+      chunk.forEach(function(o){ if(o[0]==='set') b.set(o[1],o[2]); else b.delete(o[1]); });
+      return b.commit();
+    });
+  },Promise.resolve());
+}
+function flushPendingSave(){
+  if(!window._fbReady) return Promise.resolve();
+  clearTimeout(_sq); clearTimeout(window._saveRetry);
+  return window.fbSave().catch(function(){});
+}
+window.fbSaveDebounced=function(){setSS('saving');clearTimeout(_sq);_sq=setTimeout(window.fbSave,900);};
+// logChange() calls this right away; the diff makes it cheap.
+window.fbSaveChangelog=function(){ if(window._fbReady) window.fbSave(); };
+// Tech roster + PIN hashes for THIS location — admin only.
+window.fbSaveConfig=function(cfg){
+  if(!siteRef||currentServiceRole!=='admin')return;
+  siteRef.collection('meta').doc('config').set(plain(cfg)).catch(function(e){console.error('config save:',e);});
+};
+// "Clear Log" (admin): removes every change-log entry for this location.
+window.fbClearChangelog=function(){
+  if(!siteRef||currentServiceRole!=='admin')return Promise.resolve();
+  var col=siteRef.collection('changelog');
+  return col.get().then(function(snap){
+    var ops=snap.docs.map(function(d){ synced.changelog.delete(d.id); return ['del',d.ref]; });
+    return commitInChunks(ops);
+  }).catch(function(e){ console.error('clear log:',e); if(window.showToast)window.showToast('Could not clear the log ('+e.code+')','error'); });
 };
 
 function migrateItem(r,i){
-  if(!Array.isArray(r.skus))r.skus=r.sku?[r.sku.trim()].filter(Boolean):[];
-  if(!Array.isArray(r.lotNums))r.lotNums=r.lot?[r.lot.trim()].filter(Boolean):[];
+  if(!Array.isArray(r.skus))r.skus=r.sku?[String(r.sku).trim()].filter(Boolean):[];
+  if(!Array.isArray(r.lotNums))r.lotNums=r.lot?[String(r.lot).trim()].filter(Boolean):[];
   if(!Array.isArray(r.lotDetails))r.lotDetails=[];
   if(r.lotDetails.length===0&&r.quantity>0&&r.lot)
     r.lotDetails=[{lot:r.lot,qty:parseFloat(r.quantity)||0,expiry:r.expiry||'',received:'',vendor:r.vendor||'',price:parseFloat(r.price)||0,notes:''}];
@@ -260,128 +414,318 @@ function migrateItem(r,i){
   return r;
 }
 function mutArr(arr,data){if(!arr||!data)return;arr.length=0;data.forEach(function(x){arr.push(x);});}
-
-function fbLoad(){
-  setSS('loading');
-  Promise.all([db.doc('plessen/inventory').get(),db.doc('plessen/changelog').get(),db.doc('plessen/transactions').get()])
-  .then(function(res){
-    var iv=res[0],cl=res[1],tx=res[2];
-    if(iv.exists){
-      mutArr(window.inventory,JSON.parse(iv.data().data).map(migrateItem));
-    } else {
-      // First time - seed from RAW. RAW is defined in main script which runs after this module.
-      var rawData = window.RAW || [];
-      var seeded=rawData.map(function(r,i){return migrateItem(Object.assign({},r,{id:i+1,notes:r.notes||'',expiry:r.expiry||''}),i);});
-      mutArr(window.inventory,seeded);
-      mutArr(window.changeLog,[]);
-      mutArr(window.transactions,[]);
-      if(seeded.length) window.fbSave();
-    }
-    if(cl.exists)mutArr(window.changeLog,JSON.parse(cl.data().data));
-    if(tx.exists)mutArr(window.transactions,JSON.parse(tx.data().data));
-    var dirty=false;
-    var mig=window.inventory.map(function(r,i){var b=JSON.stringify(r),a=JSON.stringify(migrateItem(Object.assign({},r),i));if(b!==a)dirty=true;return JSON.parse(a);});
-    mutArr(window.inventory,mig);
-    if(dirty)window.fbSave();
-    setSS('synced');
-    window._fbReady=true;
-    // Redraw now that the data is in memory. The role (and its first render)
-    // was activated BEFORE this load ran, so without this the screen keeps
-    // showing the empty pre-load state until some other action redraws it.
-    if(typeof updateBadges==='function')updateBadges();
-    if(typeof applyFilters==='function')applyFilters();
-    var activePage=document.querySelector('.page.active');
-    if(activePage&&activePage.id==='page-changelog'&&typeof renderChangelog==='function')renderChangelog();
-    // Load config (PIN hashes, tech roster) — role is already active by this
-    // point, established by _ensureInventoryService before fbLoad ever runs.
-    db.doc('plessen/config').get().then(function(cfgSnap){
-      var cfg={techs:[]};
-      if(cfgSnap.exists&&cfgSnap.data()){
-        cfg.techs=cfgSnap.data().techs||[];
-      }
-      if(window.applyConfig)window.applyConfig(cfg);
-    });
-    // Listeners
-    detachInventoryListeners(); // never stack a second set of feeds
-    invUnsubs.push(db.doc('plessen/inventory').onSnapshot(function(snap){
-      if(!snap.exists||_ru)return;
-      var d=JSON.parse(snap.data().data).map(migrateItem);
-      if(JSON.stringify(d)===JSON.stringify(window.inventory))return;
-      _ru=true;mutArr(window.inventory,d);
-      if(window.applyFilters)window.applyFilters();
-      if(window.updateBadges)window.updateBadges();
-      setSS('synced');
-      var t=document.getElementById('toast');
-      if(t){t.textContent='Updated from another device';t.className='toast show';setTimeout(function(){t.classList.remove('show');},3000);}
-      setTimeout(function(){_ru=false;},600);
-    }));
-    invUnsubs.push(db.doc('plessen/changelog').onSnapshot(function(snap){
-      if(!snap.exists)return;
-      var d=JSON.parse(snap.data().data);
-      mutArr(window.changeLog,d);
-      if(window.updateBadges)window.updateBadges();
-      // Always re-render changelog if page is open
-      var clPage=document.getElementById('page-changelog');
-      if(clPage&&clPage.classList.contains('active')&&window.renderChangelog){
-        window.renderChangelog();
-      }
-    }));
-    invUnsubs.push(db.doc('plessen/transactions').onSnapshot(function(snap){
-      if(!snap.exists)return;
-      var d=JSON.parse(snap.data().data);
-      if(JSON.stringify(d)!==JSON.stringify(window.transactions)){
-        mutArr(window.transactions,d);
-        // Refresh history panel if it's visible
-        var histBody=document.getElementById('histBody');
-        if(histBody&&window.renderHistPanel)window.renderHistPanel();
-      }
-    }));
-  }).catch(function(e){
-    console.error('fbLoad error - details:', e.code, e.message, e);
-    setSS('error');
-    // Show a banner prompting the user to fix Firestore rules
-    var banner=document.getElementById('connectionBanner');
-    if(banner){
-      banner.style.display='block';
-      banner.style.background='#fef3c7';
-      banner.style.color='#92400e';
-      banner.style.borderColor='#d97706';
-      banner.innerHTML='⚠ Firestore permission error — check your Firestore rules in the Firebase Console. <a href="https://console.firebase.google.com" target="_blank" style="color:#92400e;font-weight:700">Open Firebase Console →</a>';
-    }
-    // Still allow local fallback so the UI isn't fully dead on a rules issue —
-    // role stays whatever _ensureInventoryService already activated.
-    if(window.localFallbackBoot)window.localFallbackBoot();
-    if(window.applyConfig)window.applyConfig({techs:[]});
-  });
+function byId(a,b){ return (Number(a.id)||0)-(Number(b.id)||0); }
+function byTsDesc(a,b){ return String(b.ts||'').localeCompare(String(a.ts||'')); }
+function rerenderAll(){
+  if(typeof updateBadges==='function')updateBadges();
+  if(typeof applyFilters==='function')applyFilters();
+  var clPage=document.getElementById('page-changelog');
+  if(clPage&&clPage.classList.contains('active')&&typeof renderChangelog==='function')renderChangelog();
+  var histBody=document.getElementById('histBody');
+  if(histBody&&typeof renderHistPanel==='function')renderHistPanel();
 }
 
+// ── LOAD ─────────────────────────────────────────────────────────────────────
+function fbLoad(gen){
+  if(gen===undefined) gen=svcGen;
+  var site=siteRef, loc=currentLoc, isAdmin=currentServiceRole==='admin';
+  if(!site) return;
+  setSS('loading');
+  site.collection('meta').doc('layout').get().then(function(layout){
+    if(gen!==svcGen) return;
+    if(layout.exists) return loadSite(gen, layout.data());
+    // Not set up yet. At the original site, the old single-document data may
+    // still be waiting to be moved; anywhere else it's a brand-new location.
+    return legacyExists(loc).then(function(hasLegacy){
+      if(gen!==svcGen) return;
+      if(hasLegacy){
+        showMoveBanner(loc);
+        window._fbReady=false; setSS('synced'); rerenderAll();
+        return;
+      }
+      if(loc===LEGACY && !isAdmin){
+        // Tech accounts can't see the old data; the move hasn't been run.
+        setBanner('warn','<strong>'+loc+' inventory is being upgraded.</strong> An admin needs to open Inventory once to finish moving the data. Nothing is lost.');
+        window._fbReady=false; setSS('synced'); rerenderAll();
+        return;
+      }
+      if(!isAdmin) return loadSite(gen, {});
+      return site.collection('meta').doc('layout').set({version:2,createdAt:new Date().toISOString(),createdBy:'new-location'})
+        .then(function(){ return loadSite(gen, {version:2, createdBy:'new-location'}); });
+    });
+  }).catch(function(e){ loadFailed(e); });
+}
+
+function loadSite(gen, layout){
+  var site=siteRef, loc=currentLoc, isAdmin=currentServiceRole==='admin';
+  return Promise.all([
+    site.collection('items').get(),
+    site.collection('transactions').orderBy('ts','desc').get(),
+    site.collection('changelog').orderBy('ts','desc').limit(2000).get(),
+    site.collection('meta').doc('config').get()
+  ]).then(function(res){
+    if(gen!==svcGen) return;
+    synced.items.clear(); synced.transactions.clear(); synced.changelog.clear();
+    var items=res[0].docs.map(function(d,i){
+      var r=migrateItem(Object.assign({},d.data()),i);
+      if(r.id===undefined) r.id=d.id;
+      synced.items.set(d.id, canon(plain(r)));
+      return r;
+    }).sort(byId);
+    function entries(snap,name){
+      return snap.docs.map(function(d){
+        var e=Object.assign({},d.data()); if(e.id===undefined) e.id=d.id;
+        synced[name].set(d.id, canon(plain(e))); return e;
+      });
+    }
+    mutArr(window.inventory, items);
+    mutArr(window.transactions, entries(res[1],'transactions'));
+    mutArr(window.changeLog, entries(res[2],'changelog'));
+    window._fbReady=true;
+    setSS('synced');
+    rerenderAll();
+    var cfgSnap=res[3], cfg={techs:[]};
+    if(cfgSnap.exists&&cfgSnap.data()) cfg.techs=cfgSnap.data().techs||[];
+    if(window.applyConfig)window.applyConfig(cfg);
+
+    if(loc===LEGACY && isAdmin && layout && layout.movedFrom && !layout.legacyRemoved) showLegacyCleanupBanner(layout);
+    else if(isAdmin && items.length===0) showNewLocationBanner(loc);
+    else setBanner(null);
+
+    attachListeners(gen);
+  }).catch(function(e){ loadFailed(e); });
+}
+
+function loadFailed(e){
+  console.error('[Inventory] load failed:', e.code, e.message);
+  setSS('error');
+  setBanner('err','⚠ Could not load inventory for '+(currentLoc||'this location')+' ('+(e.code||e.message)+'). '+
+    (e.code==='permission-denied'?'The Firestore rules for plessen-inventory may not be published yet.':'Check your connection and reload.'));
+  // Read-only local copy for THIS location only (never another location's data).
+  if(window.localFallbackBoot)window.localFallbackBoot();
+  if(window.applyConfig)window.applyConfig({techs:[]});
+}
+
+function reloadSite(){
+  if(!siteRef) return;
+  detachInventoryListeners();
+  window._fbReady=false;
+  fbLoad(svcGen);
+}
+
+// ── LIVE FEEDS: apply other devices' changes, item by item ──────────────────
+function attachListeners(gen){
+  detachInventoryListeners(); // never stack a second set of feeds
+  var site=siteRef, loc=currentLoc;
+  var onErr=function(e){ console.error('[Inventory] live feed error:', e.code, e.message); };
+
+  invUnsubs.push(site.collection('items').onSnapshot(function(snap){
+    if(gen!==svcGen||loc!==currentLoc) return;
+    var changed=false;
+    snap.docChanges().forEach(function(ch){
+      var key=ch.doc.id;
+      var idx=window.inventory.findIndex(function(r){return String(r.id)===key;});
+      var had=synced.items.has(key), last=synced.items.get(key);
+      var localJ=idx>-1?canon(plain(window.inventory[idx])):null;
+      var localDirty = idx>-1 ? localJ!==last : had;   // unsaved local edit, or a local delete not yet sent
+      if(ch.type==='removed'){
+        synced.items.delete(key);
+        if(idx>-1 && !localDirty){ window.inventory.splice(idx,1); changed=true; }
+        return;
+      }
+      var r=migrateItem(Object.assign({},ch.doc.data()),idx>-1?idx:window.inventory.length);
+      if(r.id===undefined) r.id=key;
+      var sj=canon(plain(r));
+      synced.items.set(key,sj);          // local edits (if any) win on the next save
+      if(localDirty) return;
+      if(idx>-1){ if(localJ!==sj){ window.inventory[idx]=r; changed=true; } }
+      else { window.inventory.push(r); changed=true; }
+    });
+    if(changed){
+      window.inventory.sort(byId);
+      rerenderAll();
+      if(!snap.metadata.hasPendingWrites && window.showToast) window.showToast('Updated from another device');
+    }
+  },onErr));
+
+  function entryFeed(name, arr, query){
+    return query.onSnapshot(function(snap){
+      if(gen!==svcGen||loc!==currentLoc) return;
+      var list=arr(), changed=false;
+      snap.docChanges().forEach(function(ch){
+        var key=ch.doc.id;
+        var idx=list.findIndex(function(e){return entryKey(e)===key;});
+        if(ch.type==='removed'){
+          synced[name].delete(key);
+          if(idx>-1){ list.splice(idx,1); changed=true; }
+          return;
+        }
+        var e=Object.assign({},ch.doc.data()); if(e.id===undefined) e.id=key;
+        var sj=canon(plain(e)); synced[name].set(key,sj);
+        if(idx>-1){ if(canon(plain(list[idx]))!==sj){ list[idx]=e; changed=true; } }
+        else { list.push(e); changed=true; }
+      });
+      if(changed){ list.sort(byTsDesc); rerenderAll(); }
+    },onErr);
+  }
+  invUnsubs.push(entryFeed('transactions', function(){return window.transactions;}, site.collection('transactions').orderBy('ts','desc')));
+  invUnsubs.push(entryFeed('changelog', function(){return window.changeLog;}, site.collection('changelog').orderBy('ts','desc').limit(2000)));
+}
+
+// ── NEW LOCATION ─────────────────────────────────────────────────────────────
+function showNewLocationBanner(loc){
+  setBanner('info','<strong>'+loc+' has no items yet.</strong> Start from the standard item list (every item, quantity 0, no lots), or add items yourself.<br>'+
+    bannerBtn('Start from the standard item list','window._invStarterList()',true)+bannerBtn('Start empty','window._invDismissBanner()',false));
+}
+window._invDismissBanner=function(){ setBanner(null); };
+window._invStarterList=function(){
+  if(currentServiceRole!=='admin'||!window._fbReady) return;
+  if(window.inventory.length){ setBanner(null); return; }
+  var raw=window.RAW||[];
+  if(!raw.length){ alert('No standard item list is available.'); return; }
+  if(!confirm('Add '+raw.length+' items to '+currentLoc+' with quantity 0?')) return;
+  var items=raw.map(function(r,i){
+    var x=Object.assign({},r,{id:i+1,notes:r.notes||'',expiry:'',lot:'',quantity:0,reorder:'REORDER',
+      skus:r.sku?[String(r.sku)].filter(Boolean):[],lotNums:[],lotDetails:[]});
+    return migrateItem(x,i);
+  });
+  mutArr(window.inventory, items);
+  if(window.logChange) window.logChange('add','Item list','Started '+currentLoc+' from the standard item list ('+items.length+' items)');
+  window.fbSave(); setBanner('ok','✓ '+items.length+' items added to '+currentLoc+'. Receive stock to set quantities.');
+  rerenderAll();
+};
+
+// ── ONE-TIME MOVE of the original data (plessen/*) into sites/STX/… ──────────
+function legacyExists(loc){
+  if(loc!==LEGACY || currentServiceRole!=='admin') return Promise.resolve(false);
+  return db.doc('plessen/inventory').get().then(function(s){ return s.exists; })
+    .catch(function(e){ if(e&&e.code==='permission-denied') throw e; return false; });
+}
+function showMoveBanner(loc){
+  setBanner('warn','<strong>One-time upgrade needed for '+loc+'.</strong> Inventory now keeps each item, transaction and log entry separately, per location. '+
+    'This copies the current '+loc+' data into the new layout. A full backup file downloads first, and the old copy is kept until you confirm everything matches.<br>'+
+    bannerBtn('Back up and move '+loc+' data','window._invRunMove()',true));
+}
+function downloadJSON(name, obj){
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));
+  a.download=name; document.body.appendChild(a); a.click(); a.remove();
+}
+function uniqueKeys(list, prefix){
+  var seen=new Set();
+  return list.map(function(e,i){
+    var x=plain(e);
+    if(x.id===undefined||x.id===null||x.id==='') x.id=prefix+'-'+i;
+    var key=String(x.id);
+    while(seen.has(key)){ key=key+'-'+i; x.id=key; }
+    seen.add(key);
+    if(!x.ts){ var d=x.date?new Date(x.date):null; x.ts=(d&&!isNaN(d))?d.toISOString():new Date(0).toISOString(); }
+    return [key,x];
+  });
+}
+function totalUnits(items){ return items.reduce(function(s,r){ return s+(Number(r.quantity)||0); },0); }
+
+window._invRunMove=function(){
+  if(currentServiceRole!=='admin'||currentLoc!==LEGACY||!siteRef) return;
+  var site=siteRef, gen=svcGen, loc=currentLoc;
+  setBanner('info','⏳ Reading the current '+loc+' data…');
+  var names=['inventory','changelog','transactions','config'];
+  var src={};
+  Promise.all(names.map(function(n){ return db.doc('plessen/'+n).get(); })).then(function(snaps){
+    names.forEach(function(n,i){ src[n]=snaps[i].exists?snaps[i].data():null; });
+    downloadJSON('inventory-'+loc+'-backup-'+new Date().toISOString().slice(0,10)+'.json',
+      {exportedAt:new Date().toISOString(), source:'plessen-inventory / plessen/*', documents:src});
+    var items=(src.inventory?JSON.parse(src.inventory.data):[]).map(function(r,i){
+      r=migrateItem(plain(r),i);
+      r.quantity=Number(typeof calcTotal==='function'?calcTotal(r):r.quantity)||0;
+      return plain(r);
+    });
+    var idSeen=new Set();
+    items.forEach(function(r,i){ while(idSeen.has(String(r.id))) r.id=Number(r.id)+100000+i; idSeen.add(String(r.id)); });
+    var tx=uniqueKeys(src.transactions?JSON.parse(src.transactions.data):[],'legacy-tx');
+    var cl=uniqueKeys(src.changelog?JSON.parse(src.changelog.data):[],'legacy-log');
+    var cfg=src.config?{techs:src.config.techs||[]}:{techs:[]};
+    var ops=[];
+    items.forEach(function(r){ ops.push(['set',site.collection('items').doc(String(r.id)),r]); });
+    tx.forEach(function(p){ ops.push(['set',site.collection('transactions').doc(p[0]),p[1]]); });
+    cl.forEach(function(p){ ops.push(['set',site.collection('changelog').doc(p[0]),p[1]]); });
+    ops.push(['set',site.collection('meta').doc('config'),cfg]);
+    var expect={items:items.length,transactions:tx.length,changelog:cl.length,units:totalUnits(items)};
+    setBanner('info','⏳ Writing '+expect.items+' items, '+expect.transactions+' transactions and '+expect.changelog+' log entries…');
+    return commitInChunks(ops).then(function(){
+      return Promise.all([site.collection('items').get(),site.collection('transactions').get(),site.collection('changelog').get()]);
+    }).then(function(chk){
+      var got={items:chk[0].size,transactions:chk[1].size,changelog:chk[2].size,
+               units:totalUnits(chk[0].docs.map(function(d){return d.data();}))};
+      var okAll=got.items===expect.items&&got.transactions===expect.transactions&&got.changelog===expect.changelog&&Math.abs(got.units-expect.units)<1e-6;
+      if(!okAll){
+        setBanner('err','⚠ The copy does not match: items '+got.items+'/'+expect.items+', transactions '+got.transactions+'/'+expect.transactions+
+          ', log '+got.changelog+'/'+expect.changelog+', units '+got.units+'/'+expect.units+'. Nothing was removed. Run the move again; it is safe to repeat.<br>'+
+          bannerBtn('Run the move again','window._invRunMove()',true));
+        return;
+      }
+      return site.collection('meta').doc('layout').set({version:2,movedAt:new Date().toISOString(),movedFrom:'plessen/*',
+        counts:expect,legacyRemoved:false}).then(function(){
+        if(gen!==svcGen) return;
+        reloadSite();
+        setTimeout(function(){
+          showLegacyCleanupBanner({counts:expect});
+        },800);
+      });
+    });
+  }).catch(function(e){
+    console.error('[Inventory] move failed:', e.code, e.message);
+    setBanner('err','⚠ The move stopped ('+(e.code||e.message)+'). Nothing was removed — the old data is untouched. '+
+      (e.code==='permission-denied'?'Check that the new plessen-inventory rules are published. ':'')+'<br>'+bannerBtn('Try again','window._invRunMove()',true));
+  });
+};
+function showLegacyCleanupBanner(layout){
+  var c=(layout&&layout.counts)||{};
+  setBanner('ok','✓ <strong>'+LEGACY+' moved and verified:</strong> '+(c.items||0)+' items, '+(c.transactions||0)+' transactions, '+(c.changelog||0)+
+    ' log entries, '+(c.units||0)+' total units — all match. The old copy is still kept. Once you have checked a few items, remove it.<br>'+
+    bannerBtn('Remove the old copy','window._invRemoveLegacy()',true)+bannerBtn('Later','window._invDismissBanner()',false));
+}
+window._invRemoveLegacy=function(){
+  if(currentServiceRole!=='admin'||currentLoc!==LEGACY) return;
+  if(!confirm('Remove the old single-document copy of the '+LEGACY+' inventory?\n\nYour backup file and the new layout are not affected.')) return;
+  var site=siteRef;
+  var b=db.batch();
+  ['inventory','changelog','transactions','config'].forEach(function(n){ b.delete(db.doc('plessen/'+n)); });
+  b.commit().then(function(){
+    return site.collection('meta').doc('layout').set({legacyRemoved:true,legacyRemovedAt:new Date().toISOString()},{merge:true});
+  }).then(function(){
+    setBanner('ok','✓ Old copy removed. '+LEGACY+' now runs fully on the new layout.');
+    setTimeout(function(){ setBanner(null); },6000);
+  }).catch(function(e){
+    setBanner('err','⚠ Could not remove the old copy ('+e.code+'). Your data in the new layout is fine.');
+  });
+};
+
 function showGenericSessionBadge(){
-  // Shown when the PORTAL profile is a generic/shared-device account —
-  // driven by the live listener, not by which service account is signed in
-  // (both admin and tech service accounts are shared identities now).
-  var topbar=document.getElementById('topbar')||document.querySelector('.topbar');
+  var topbar=document.getElementById('topbar')||document.querySelector('.topbar')||document.querySelector('.hdr-r');
   if(!topbar)return;
   if(document.getElementById('genericBadge'))return; // already shown
   var badge=document.createElement('div');
   badge.id='genericBadge';
   badge.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:20px;font-size:11px;font-weight:700;margin:0 8px';
   badge.textContent='Generic Session';
-  topbar.appendChild(badge);
+  topbar.insertBefore(badge, topbar.firstChild);
 }
 function hideGenericSessionBadge(){
   var badge=document.getElementById('genericBadge');
   if(badge)badge.remove();
 }
 
-// Sign Out now ends the PORTAL session (the only real session left) —
-// ending it here ends it everywhere, not just this tab.
+// Sign Out ends the PORTAL session (the only real session) — everywhere.
 window.doLogout=function(){
-  window._fbReady=false;
-  if(window._portalSignOut) window._portalSignOut();
+  flushPendingSave().then(function(){
+    window._fbReady=false;
+    if(window._portalSignOut) window._portalSignOut();
+  });
 };
-// Real online/offline detection using browser API
 window.addEventListener('online',  function(){ if(window._fbReady)setSS('synced'); });
 window.addEventListener('offline', function(){ setSS('offline'); });
+window.addEventListener('beforeunload', function(){ if(window._fbReady){ clearTimeout(_sq); window.fbSave(); } });
 })();
 </script>
 <style>
@@ -1033,12 +1377,14 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
 
 <!-- MAIN APP -->
 <div id="mainApp" style="display:none">
+<div id="locBanner" style="display:none"></div>
 
 <div class="hdr">
   <div class="hdr-l">
     <div style="background:#fff;border-radius:8px;padding:4px 10px;display:flex;align-items:center"><img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCABZASwDASIAAhEBAxEB/8QAHQAAAgMBAQEBAQAAAAAAAAAAAAYEBQcIAwIBCf/EAEkQAAEDAwIDBQYCBgUJCQAAAAECAwQABREGEhMhMQcUQVFhIjJxgZGhCBUWFyNCYrE1dILB0SQzNHKSorLC4Tc4Q1JUc7Pw8f/EABoBAAIDAQEAAAAAAAAAAAAAAAADAQIEBQb/xAAzEQABBAEDAgMGBgEFAAAAAAABAAIDEQQSITFBUQUTYRQicYGRoTIzQrHR8MEVUmJy4f/aAAwDAQACEQMRAD8A4yooooQiveDDlzpCY8KM9JdV0Q0gqJ+QrVuyvsam39pq7aiU7AtyxubZAw68PPn7o+9dKaR0LAs1tSLRa4Vrh9OO6Q3xD57j7Sz9a2RYbnjU40El0oGw3XJNp7I9f3FCVosS46FdDIdQ2f8AZJz9qgMdn2pXtbzNGiOym7wwovNrdwkYAJGf7Qru+NbIdsjt3gy03RTKgrhRU5bbWOaeIo8wM/w88YzXM+kXHHvxS6iedUVOLS+pRPiSEUx+LGC0DqaVRK4g2stvfZjrm0IU5K0/JW0nmVsFLo/3SSKUHW3GnFNuoUhaTgpUMEfKu9KWNZ6D0zquOpNztzQkYOyU0Ah1J/1h1+BzTJPD/wDYfqobkdwuMKKe+1Ds0u+inzIyZtqWrDcpCcbfILH7p+xpErmvY5hpwWgEEWEV+pSpSglIJUTgAeJr8qZZP6Zhf1hv/iFQ0WQEE0LXqLFeind+VTMefBVUNyO+2+GHGVodJxsUnBzWu9o19uFjZhOQFIy44QsKTncAOleOvo8eXYIFyfZS1LS6yRy9obsZT/8AfKutL4dG3WGONt5WFmY46S4bFZnc7LdbY0l2fBdjoWralSx1PlVfWqdsv9Bwv6z/AMppZtOg7nMholSZEeClzGxLxO456cvCkZGA5s5iiBNJsWSDGHv2SjRV1etM3S13Ri3utB1yQcMKb5hznjlV2ezue3H3v3KCy7tKuGon+dIbhzuJAbxymHIjABJ5SVRTFpnSNxvkdUptxqPGSSniuE4JHXArw1Jp1+zS40bvLMxcgZb4OSeuOnqaqcaUM8wt2VhMwu0XuqSinSJ2d3R1hCpE2JGecGUsrJKvtVTH0tcV6kFieLbEgpKgpWSkgAnIx8Ks7DnbVt5VRkRm6PCoaKdmezi7KkONuy4raE+6vmd/wFLmpLJMsU/ukvaolO5C0e6oelRJiTRN1PbQUsnjeaad1WUUUVnTUUUUUIRRRRQhFFFFCEUUUUIRRRRQhFFFFCEVtH4e+zhu7Op1TfGN0JlY7myscnlg81keKQfqfhWW6PszmoNUW6zN7sy30oUUjmlPVR+QBPyrv2DYoUfRDcS2KQ9CtEdCIrgSEuNoBCS04n55B+NbMSMOdqdwlSuIFBRNOR2nZbrrzIdaisKfLeOSyMBKTjwKiKm3BptL3eNRSpDsxYyIzGNzafAKJ5I/1QPpXna5UiBpuXKgPKYkKlNsuOoOFBspUcA+AJT9hXwu3Q4wT+cTn2ZTo3FttoOFsHoV5I5ny611T+I2svRekKRaW3t8KVcLS/jAcUoOoPoraAQPka5102pa/wAVupFOSUSlFL2XUZwvkjnzAP2roP8ALraT7N+jc+m5hwfXlyrmVT8qx/iR1KtlTSnm+IncPaSQQ3zHypMjQ6RgHdWBpriey6FopMtWtipwN3KOlKT/AOK1nl8RTgw62+yl5laVtrGUqScgit743M5WdkjX8LzuEOLPhOwprCH47yShxtYyFA1yV2x6Ed0TqEIYC3LXKyuK4eZT5oJ8x9xiuvKU+1nTLeqtETrfsBkto40VWOaXE8x9eY+dYsqASs9QtET9JXGtTLJ/TML+sN/8QqItJQopUMKBwR5V6wnu7TGZG3dwnEr25xnBziuIw04ErY7cFbHrq9xrI1EeftyJilrOzdj2CB16Vnd81RP1BcYiXwlmO28koaR0zkcyfE1+6z1WrUbMdswhG4KirIc3ZyPgKXGHOE+27jOxQVjzwa6WdnGWQhjvc2WPGxgxgLh7y17tHQ04LK2/jhquCArPTGDX3r9NjUmGq9y5kdKVEtcAEgq5deR50iaw1gvUMJiP3ERi07xAoO7s8iPIedTYXaA6YKYl3tbFxCRjcsgZ+IIIzWx+dA98gvY1uQa2+6ztxpWtaa3F9VZap1jaHHLXJtq1SXocjeQtspynbg8yPGrCXEsevIplw33WJzKNuTyKeuAoeI9RSbO1PGfvMGezY4rCImf2KTyXnzwB0+FWa+0BMeO4i02KLBdc95YI6+eABmltzI3ud5zgWnpR325Cucd7Q3ywQfiFK0fqC3xre7pa+I4YC1s7xnacnmCRzHPxqUxpWNZNa2t5p0uRHlL4aVnJQsJyB6/9KX7Jq6JCgtsTLDGmutqKw8sjcVE5ycpPjUPUWrbld7hGlDbFEVW5hDZztPmT4nlVBlQiJus6i2q23HoSreTIXnSKBu0+ase07F1JFm3WdNYlMpSppLaSUYyfQ/PnUZi82y9doVqftzinOHHdQslBT4Egc/nVKO0FEmOhF1sMWY4jookYz8CDiqpnVCGdVovjNrZaCGygR217U+6RnOPXypsmdFrBa4USCdjaWzGfpog2ARyKTRqmQ8ntOs7YdWEAtgJB5cyc/WovbRjvVuOOexf8xVBddUmdqiJezCDZjFB4XEzu2nPXHL6V8az1KdRux1mGI3BSRgObs5+QpE+XE+OVoO5Nj7JscD2vYSOBul6iiiuQt6KKKKEIooooQiiiihCKKKKEIooooQiiiihC1v8AC5bEytdyLitGRCiqKT5KX7P8t31rrHSS1fnjEUklmWTHeR4KQoYP+PxFc0fhLUnvt9T+/wANo/LJrrnscbtTmone/pSqSlAVE3dAoZ3H44x9668BDMYu+KyP3kpVAk/o/A7nwWX5zy0PuB1G5LGAdgx0Kvazz5DIqhedceeW88tTji1FSlKOST51aazVDXqq4rt6yuMp4lKic5P73yzmqitkY21dSlHsiuaphKu3zUZJyfbH/wAddK1zVK/7fNR/2/8Akqr/AM2P/sFB/Lf8E204dnVyWH3LY4olCk72s/ukdRSfV5oZKlakjlOfZCifhg12ZgCw2uXCSHilplHyoormLpri7tRtyLT2h3yC2na2mYtaE+SVHcB9DS4hCnFpQhJUpRwAOpNPXb6UntWvG3wLYPx4aaoez9lD2roCHBkBZVj1AJFef8vVPoHU191uL9Mer0THE0Hb4kFp+/3QRnHSAEJIABPhk9TVPrbSLtgQiUw8ZENxW3cRhSD4Z/xq17Z3Vm5wGM+wlkqA9SrH91X92/yrspS4/wA1CE2rJ8xjnXWfjwOMkTW0Wi7WBs0rdEhN6jwsiorXJkLT8DSUW6y7Uy6Wm214SkArURjn6c6iaitVnvmjDebdDbjPIa4qNiQnp7yTjr41ld4Y4A04E1deic3NBI22urVRL0nbGtCJvaVv95MdDmCsbcnGeWPWkWtlYchs9msZ24Ml6MiG2pbYON+MYH1xUGXAsmoNDOXGLbWoqw0tbe1ICkqRnIyOo5VoyMBr68sgHTdd0qLKLb12RdWkCxaau15YXIhMpLKFFKnFrAAIGf7xUjQ1mi3m+mDMU4Gw2pXsHByK0bs7nR5el1OMwm4yWlltaUn3yEJyo+pqi0ddIlz1m2qJbGoAbjuJUGz75yOZ5VVmFC0xOu9X3UuyZDrFVSUdbWqNZtQOwIhWWkISoFZyeYzVJWxTZdiOt/yyRbEPy5CE7nnEhQHs8hg+gpR1vbrfZNZRFtQg7FdSl1cYdCckED6UrKwQ0ukaRV18EyDJJprhvV/FJdXmiLVGvV/bgyy4GlIUolBwcgVoWn2mrk4WZWjWoURSfZdWlOfmMZqrs9qj2ftT7tFBSwqOpxCSfdynp9Qaszw/Q5jybaSBwR+6h2XqDmgUQEqa7tEWyX3uUMuFrhJX7ZycnP8AhVBWrT40aX2qoYlMNvNmDnatORnnXutOm4OrkWZNmaU9KTuU4UgpTy5AA/Cpk8PD3ucHBo1UoZl6WgEWatZFRWtT2dM2XUsaF+ToceuChlRAKW/AYB9aqNc6XiK1Pa2IDaY6ZxKXEoGAMcyoD4fypMnhr2NJDgSDRHxTGZjXEAirFrPKsNOQ2rhfIcJ8qDbzoSracHFaRcv0b05Pt1m/J2Xu9YSt1aQSkE7QTnrzqDedPRbPrezSoKOGxJfwWweSVDy9Kv8A6cWEGwaIBHa1X2sOFVVg0qDtE0/BsEiI3CU6oPIUVcRWehH+NKlaj2jW43bU9jt4UUh4LCiPADBP2BqRPVpuxXa3WH8nYdEnCVOrSCU5O0Ek9edMnwA6Z5BDWggfMgKsWURG0EWSsmorQNS6NjJ1bAjQ8sxZpJUkH3NvNWPlV1eBpe23KFp1yztLMkJ9sJGUZOASep5ikDw14LtZAo18SmHMbtpF3uslorVtWRrPar/YgbdFTHfccbeHDGCDtAJ+BNeOodOQ/wBN7OliI0iM8DxEJThJ2czy+FS/w17SQHWQQPrX8qG5jTRI5BP0WX0U2dp5gs31MCBFYYQw2OJw0AZWef8ALFKdYpovKkLLulpjfraHVytS/DLdUwe0QQXF7UT4y205P76faH2Brs/RbblldTqOcyW4yNqGirqorOCQOpATuPriv526du0qxX6DeYKkiTCfS83uSCMpOeYPIiu7IOqY+qdH2a4xJfeBMa73IVnJS6rlwz5bAMY8MmtuG/Wzyv7SVKKOpMFxagrnKjTYMeF3jKmJzDilNKJPJWCSNpPXHMfLFUj1unNTVQ1RHlSEn3EIKifUY6j1q303Jbdtky2SIjcvaO8MtryDy98JI5pVjn/Zr7ULjJhbLFc5cmIBzi8TDzQ8ike8PVPL0FbgS00kVarE2G9qUEi0TgT5sKA+pHKuX7zH7r+IbU0fiIcKCsFSFZGcN5wfHnXUTNtvskKQiJPWP3spVj55rm222gzPxL6jtsvewoB0qAxkEBBqj3VLGSeoRptjgOyt60DQdmchMLnykbXnkgISRzSn/rU+1aZtdvcDqWlPOjot05x8B0q5rqTThw0tWOGDSdTkV+KKUpKlEAAZJPhX7SF25arb0xoeSGnQJ85Jjxk+Iz7yvkM/PFYnvDGlxWoCzS5k7Qrmm864vNzQctvzHC2f4AcJ+wFV9hnm2XiLPAJ4LgUQPEeI+lQTzOaK88HkO1jnlby0EUVrmq7HH1hHhTrbPYGwEFR5gpPw6EeVQu0S5w7ZplnT0V5LjpQhtQSclKE45n44FZo0+8zkNPON567VEZr4USokqJJPUmuhJ4iHBxaynO2JtZGYhBFusDhbPcbaq7aDYgoebaW4w1tUs4GRg4qDeFMaY7PzbXn21yVslpKQfeUo8yB5DNVWotR2iToVu3xpm6WltobAlQIIIzzx6Vnrrrjqtzri3FealZNasvNZGfcFktq7SYMZzx7xoA3S1W4qT+qVA3DPcmuWfVNfukFJHZesFQB4Mjx9VVlJddKNhcXt6bdxxQl11KNgcWE+QUcVmHiVPD9P6dPP3Tjh+7pvra07shkx12GXBLqUvB9StpPPaUpGfsai6Rsr9h12I8h9pziR1rSpB8M4558azpta21bm1qQoeKTg19KffUvep5wqxjcVHNUZnNDYwW7s9VZ2KS5xB2ctEuKh+uCOcjGEc8/wVc3ZyAntHtxmKb/0JQaKyMBe44+eM1kJccK95Wrd/wCbPOvxbi1kFa1KI6EnNWb4jWr3eXalBxLrfgUtpXFuqdZJnP3NCLZt2tMcXG5RHTb4nxzVe+QO1hhWRgwTzz8aylch9ZSVvuKKfdysnHwr54ru/fxV7umdxzTHeJg8N63yqDCI5PSuFq7ik/rabO4Y7j1z8ahXZQ/W5AORjYOef4VVmvFd37+Ivd03bjmguOFe8uKKvPPOlu8RsVp/Vq/8VxiUeelLSdcKSdf2MggjKfH+Opuvri1bdQ2Ccs5bacXvx4AgA/Y1lKnHFKClOLKh0JPMV+LcccxvWpWOmTmh3iJOum7uIPwqkDE/DZ4BH1Wu6ksI1BerTd4cthUZraXTuzlIVuGPuKi6ou8WXrSyW+O6hwx5G51STkAnwzWXNvvtoKG3nEJPUJUQDXwFFKtwJBHiDUv8SBvS2iSCd+yhuGRVuurr5rVtb3Jq2axsM51X7JsOBZHgFcifvUi/2A3rUlrvUWWwqK1sU4d2chKtwx8elZEtxa8b1qVjzOa+kPvoQW0POJQeqQogGpPiTXOdrZYJB56iv4UDDLQNLtwKWnan1PAY1na0pdS4zEKg8tJyElYx9qn3+ws3PUttvrVxjoZa2BQKs78KJTtPjnOKyKMlpUhtL69jRWAtWM4GeZrQba1oO3TW57d3fd4Kt7bSySAfDkBmnwZRyC7zAKJB3NV/KXLAIgNF3VcWvTtpJAtJBwQXSP8Acpm05OjXLT0G9SCAuO0reo/ukDCv5Vn2qtQQNR6khB4Ot2xlWwq6KIJG5Xp4fSp+sdTW1mzDT2nsCOBtccT0x1IHnk9TTBlsbNLNY07UO5FUqGBxjZHW/wCwSZdpi7hc5E1zO55wr+GTyFRaKK4DiXGyuoAAKCK03sN7RTpC5G2XNalWeWsbz17uvpvHp5isyoq0cjo3amoc0OFFd7WycFBi4W+SFA4cZeaVkHyINM0+5NNxYVxjWq3bX0lL37Igh1J9rBB9nIKTyx1riDs07UL5oxSYuTPtWecVxWNnmUH934dK6c7Ou0/RmsbUuzt3hm3zXHA9HanKDRDmMKQSTjmOhB6gV1mZMcoBOxWQxuant8x7yB3e4PR3/wD0sx8qbJ8kLPT4K+tc36TYdjfin1Cw+gocQh4KTnpyRW9TYUqE5slx1tE9CoclDzB6EfCsB0V/3n7/AP8AtvfyRVphRZR2tQzg/Bbtyo5V8PutMNKdfdQ02kZUpagAB6k1nGt+2TS1gbcZgPfm84AhLcc/swf4l9MfDNaXyNYLcVQNLuE76mvtr05aHrpdpKWI7Q8TzWfBKR4k+VchdpGsJ2tNRuXSUC0ykcOMxnIaRnkPiepNfGutZ3zWNx73dpJLaT+xjo5NtD0Hn6nnS5XHysoy+6OFrji07nlFTrBbl3W7x4CFbC8vBV5DxP0qDVnpa4ptN+iz3Ekttr9sDrtPI1niDS8a+L3V33pOnlMGqnNO2hx+yQrMH30o2GS44dyVkeA8agjRN8MPj7GeJw+L3fiDi7fhVvqa2QJF1XqSDd4DrGUvLYU5hwkYyAPHNMBm2z9Iv0n/ADaJ3PuWzh8T9pu64211vZmSSO8ygOlUNu/qsHnOYwaOet3z2SJbdIXafb2J7JjpYeUUgrc27SCRzz6jFSf0Cv3EdbIjBaBlKeKMuDzAq3nXGI9oGElEhlLpuBcLW8bkpLqzzHzFXT1ygHtKZf7/ABuALcUlfFG3dvPLOcZqGYmMQL/49e6HTzC69enZIls0jdrhCTMa4CGi4W1FxzbtIODmv1Oj7yb0u0lDQfSyXgSv2VJyByPzpwYipuOhpjCJbDAcuDhS64vCP85nrUxi8Ws60jsicwURreptbxcASVFSOQPj0qW4MFN1da683yg5MlmulpE/Q6899TEKGUr4PGcUXBtaTkj2j4HlVjpzTLsLVkCPdGGJEaQham1JO9twBP8A+VN0VdoW+9wZj8fjS3FKbXJV+zX1GCfKp8W5rZ1DZ4s12zsx2A4UGK9lKBtxgk9KiHHx6a8dx+9Ufkpkll3ae3+Evan0jPYduFxjtxxEadUeEhYKkIzy5eHKoVt0hd50NuQgMNcYEstuuBK3AOfIUzwZ0MMauCpjH7ZxfCBcHt8j086npusadBtk22OWbjxmgkiY5sWycAHbU+yY73ar+V+tKPPlaK+/ySPbtJXedFckNpZQlp0tOBxzaUEdc+gr9k6QvTN3ZtgZQ468krQtCvYKR1OfSmKTc2pGh7zxpMZMp6YpRbbcHte0OaR1Iqdc57iptjctNzt6H2oit5eeGwjCcpPkT/dVPZMfSOeh+prhW8+W/r+yX7Bp52JqVqI+xAuhUytfDD/sjHLmcdarZ2m7giKm4JQzwHpJZShC8lKtxGPqKeYb9hjayiyWX4TD64q+9lpwcLdkY59M9agaNuVvfcudvuEpltpmeJTClrACsLJ5Z9QPrVziwmoyepr6BV8+Qe9Xb/KWTo67i4uwiY4LDYcedLmENg9Mnzqvv1lm2WQhqYlBDid7biFbkrHoaebBf4Ny/O48hyIl+U8VtCUcNrSAAAT8AKXdfTZT3coj5tpSwg7BCc3pSOmD5dKRPjwNhL2H+3/CbHLKZNLv7sr9NstsTSlqmt6ZN0fkNp4nDKsjlnJxmlWXpyeY0a4tNNJjzn+EyhK8lCiThJ8sYI+VOQccl6Os8e26hh26Q00ni7pGwkbcYOK+Oz15t2DOt090Oot0nvKXgcp5EkkH4gn51qfBHK5rDtY245ofPvykNlcxpd6+qVRo67d9kRlKjITGA4zynMNoJGQM+fSqy92ibZ5oiTEALUApCknKVg+INPWnr7DutnukR9UIS35SnktzDhtxJ24BPpj7ClvXk+VJnRG5BgKMdrCO6Ob0gZ6E+mKyT48DYdbD/b4T4pZTJpcradAsWlLTDVPt35lPlJ3KSte1KR6fyqjt+npN7KpUNyDGQ84oNMLfAV16AdaZb2i3axtUCTHusSHMYRscakL2/H717afatNvtUJyFJtIkNyMTXn1ArwDz2Z+1aHQMkkA20VtVenz+qUJXMZf6uqUoWkrzLlTorbKA/CxxEKVgnOcY884r0Ro+6qmSGFKjIRGCeK+t0BsEgHGfPnTum5Qm75qV5E+OOJEb4Sg6n2iEL6HPM9Kp9GXGFI0k/aXVwTLDpc2TVYbcBI8fOq+x44cG3v73Xsdh81PtEtE12+6Tb5aZtmnGJObCXNoUkg5CgfEGoFMmvp8qZcWG5SoKlMshKTEXvRjJ5Z86W65s7WskLWcLZE4uYC7lFFFFJTEUUUUIV/Z9aattEJUG2akukWIoYLCJKuH/ALOcCorGo74xeXryzdJLdxeBDkhK8LUDjOT8hVVRUhxHVRQU+6Xm73RWblc5cv0eeUofQmoFFFBJPKlFFFFQhFFFFCEUUUUIRRRRQhWyb/LTptViDbPdivfuwd+c565x9qqaKKs57n1qPGyq1obwiiiiqqyKKKKEIooooQiiiihCKKKKEIq4TqGa3p4WRlLTTBUS4tCcLcBOcE+VU9FXY9zL0mrVXNDuUUUUVRWRRRRQhFFFFCEUUUUIX//Z" alt="Plessen Ophthalmology" style="height:32px;width:auto;object-fit:contain;display:block" title="Plessen Ophthalmology — Clinical Inventory System"></div>
   </div>
   <div class="hdr-r">
+    <div id="locSwitch" style="display:none"></div>
     <div class="sync-pill">
       <div id="syncDot" style="width:7px;height:7px;border-radius:50%;background:#60a5fa;animation:pulse2 1s infinite;flex-shrink:0"></div>
       <span id="syncStatus" style="font-size:11px;font-weight:600;color:rgba(255,255,255,.7)">Connecting…</span>
@@ -1431,7 +1777,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
         <option value="30">Last 30 days</option>
         <option value="9999" selected>All time</option>
       </select>
-      <button class="btn btn-s btn-sm" onclick="if(confirm('Clear all logged changes?')){changeLog=[];saveAll();renderChangelog();updateBadges();showToast('Log cleared','warning')}">Clear Log</button>
+      <button class="btn btn-s btn-sm" onclick="if(confirm('Clear all logged changes for this location?')){changeLog.length=0;if(window.fbClearChangelog)window.fbClearChangelog();renderChangelog();updateBadges();showToast('Log cleared','warning')}">Clear Log</button>
     </div>
   </div>
   <div class="clf">
@@ -2086,17 +2432,20 @@ function initInventory(){
   }));
   changeLog=[];transactions=[];saveAll();
 }
+// Local per-device cache, one per location (never mixes STX and STT data)
+function lsKey(k){return k+'_'+(window._invLoc||'none');}
 function saveAll(){
   try{
-    localStorage.setItem('pI8',JSON.stringify(window.inventory));
-    localStorage.setItem('pL8',JSON.stringify(window.changeLog));
-    localStorage.setItem('pT8',JSON.stringify(window.transactions));
+    if(!window._fbReady)return; // never cache a half-loaded or switching location
+    localStorage.setItem(lsKey('pI8'),JSON.stringify(window.inventory));
+    localStorage.setItem(lsKey('pL8'),JSON.stringify(window.changeLog));
+    localStorage.setItem(lsKey('pT8'),JSON.stringify(window.transactions));
   }catch(e){}
   if(window.fbSaveDebounced)window.fbSaveDebounced();
 }
 function loadAll(){
   try{
-    const i=localStorage.getItem('pI8'),l=localStorage.getItem('pL8'),t=localStorage.getItem('pT8');
+    const i=localStorage.getItem(lsKey('pI8')),l=localStorage.getItem(lsKey('pL8')),t=localStorage.getItem(lsKey('pT8'));
     if(i){const d=JSON.parse(i);window.inventory.length=0;d.forEach(function(x){window.inventory.push(x);});}
     if(l){const d=JSON.parse(l);window.changeLog.length=0;d.forEach(function(x){window.changeLog.push(x);});}
     if(t){const d=JSON.parse(t);window.transactions.length=0;d.forEach(function(x){window.transactions.push(x);});}
@@ -2114,8 +2463,10 @@ function logChange(type,item,detail=''){
   // Write changelog to Firestore immediately (separate from debounced full save)
   if(window.fbSaveChangelog)window.fbSaveChangelog();
 }
+// Shown only when Firestore can't be reached: this location's last cached copy,
+// read-only (saves stay blocked until a real load succeeds).
 window.localFallbackBoot=function(){
-  if(!loadAll())initInventory();
+  loadAll();
   updateBadges();applyFilters();
 };
 
@@ -3133,9 +3484,10 @@ function txSaveRemove(){
     const li=r.lotDetails.findIndex(l=>l.lot===lot);
     if(li>-1){
       const old=r.lotDetails[li].qty;
-      r.lotDetails[li].qty=Math.max(0,(parseFloat(old)||0)-qty);
-      syncTotal(r);
-      logChange('qty',r.item,'Lot '+lot+': '+old+'→'+r.lotDetails[li].qty+' ['+reasonLabel+']');
+      const left=Math.max(0,(parseFloat(old)||0)-qty);
+      r.lotDetails[li].qty=left;
+      syncTotal(r); // drops the lot if it's now empty — so log 'left', not r.lotDetails[li]
+      logChange('qty',r.item,'Lot '+lot+': '+old+'→'+left+' ['+reasonLabel+']');
     }
   } else {
     const old=parseFloat(r.quantity)||0;
@@ -3647,9 +3999,10 @@ function completeTechRemoval(data){
     const li=r.lotDetails.findIndex(l=>l.lot===data.lot);
     if(li>-1){
       const old=r.lotDetails[li].qty;
-      r.lotDetails[li].qty=Math.max(0,(parseFloat(old)||0)-qty);
-      syncTotal(r);
-      logChange('qty',r.item,'Lot '+data.lot+': '+old+'→'+r.lotDetails[li].qty+' [Used for patient — '+getCurrentUserName()+']');
+      const left=Math.max(0,(parseFloat(old)||0)-qty);
+      r.lotDetails[li].qty=left;
+      syncTotal(r); // drops the lot if it's now empty — so log 'left', not r.lotDetails[li]
+      logChange('qty',r.item,'Lot '+data.lot+': '+old+'→'+left+' [Used for patient — '+getCurrentUserName()+']');
     }
   } else {
     const old=parseFloat(r.quantity)||0;
@@ -4227,18 +4580,11 @@ window.calcTotal = calcTotal;
 window.getFefo = getFefo;
 window.findItems = findItems;
 window.findBySku = findBySku;
-// localFallbackBoot: seeds from RAW if Firebase unreachable
+// localFallbackBoot: when Firestore can't be reached, show this location's own
+// last cached copy (read-only). Never seeds the built-in list — that would show
+// one location's catalog at another.
 window.localFallbackBoot = function(){
-  if(!window.inventory.length){
-    var seeded=RAW.map(function(r,i){
-      return{id:i+1,item:r.item||'',notes:r.notes||'',expiry:r.expiry||'',
-        skus:r.sku?[r.sku].filter(Boolean):[],
-        lotNums:[],lotDetails:[],quantity:parseFloat(r.quantity)||0,
-        reorder:r.reorder||'OK',price:r.price||0,par:r.par||'',
-        category:r.category||'',vendor:r.vendor||''};
-    });
-    seeded.forEach(function(r){window.inventory.push(r);});
-  }
+  if(!window.inventory.length) loadAll();
   updateBadges();applyFilters();
 };
 

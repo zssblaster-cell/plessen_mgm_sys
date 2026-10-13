@@ -195,7 +195,8 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 // Version helpers shared with every system (single source of truth)
-import { readConfigVersion, selectKeyForFile, LEGACY_VERSION } from '/crypto.js';
+import { readConfigVersion, selectKeyForFile, LEGACY_VERSION,
+         loadLocations, isLocationAware, serviceEmail } from '/crypto.js';
 
 // ── Portal bootstrap (same as crypto.js) ─────────────────────────────────────
 const PORTAL_MIN = {
@@ -211,6 +212,7 @@ const db   = getFirestore(app);
 let currentUser   = null;
 let systems       = [];      // array of system config objects
 let generatedBlob = null;    // the generated config.js content
+let locations     = [];      // plessen-auth locations registry (all, incl. disabled)
 let pending       = null;    // { keyHex, ver, prevK, prevVer, cryptoScript } — not yet activated
 let livePollIv    = null;
 let isDirty       = false;   // unsaved changes flag
@@ -243,6 +245,7 @@ window.doLogin=doLogin; window.doSignOut=doSignOut;
 window.addSystem=addSystem; window.removeSystem=removeSystem;
 window.generateConfig=generateConfig; window.downloadConfig=downloadConfig;
 window.retryPush=retryPush; window.manualActivate=manualActivate;
+window.setLocCred=setLocCred;
 window.selectColor=selectColor;
 window.saveGithubConfig=saveGithubConfig;
 window.testGithubConnection=testGithubConnection;
@@ -264,6 +267,7 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   hideEl("loginSection"); showEl("mainSection");
   document.getElementById("welcomeMsg").textContent = "Welcome, " + (snap.data().displayName || user.email);
+  locations = await loadLocations();
   await Promise.all([ loadExistingConfig(), loadGithubConfig() ]);
 });
 
@@ -448,6 +452,7 @@ function renderSystemCard(sys, idx) {
 
     <div class="section-div"></div>
     <div style="font-size:11px;font-weight:700;color:#4a4a7a;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Service Accounts</div>
+    ${isLocationAware(sys) ? renderLocationAccounts(sys, idx) : `
     <div style="font-size:11px;color:#64748b;line-height:1.5;margin-bottom:12px">
       Two fixed accounts control access inside this system — not per-person.
       The portal decides which one a user's browser signs into, based on their live-verified access level.
@@ -484,8 +489,73 @@ function renderSystemCard(sys, idx) {
         </div>
       </div>
     </div>
+    `}
   </div>`;
 }
+
+// ── Location-based systems: one admin + one secondary account PER LOCATION ──
+// Emails are fixed by the naming pattern the Firestore rules read the location
+// from, so they're generated here (not typed) — only passwords are entered.
+function ensureLocationCreds(sys) {
+  if (!isLocationAware(sys)) return;
+  sys.locations = sys.locations || {};
+  const role = (sys.secondaryRoleName || "viewer").toLowerCase();
+  for (const l of locations) {
+    const c = sys.locations[l.code] || {};
+    c.adminEmail     = serviceEmail(sys.key, l.code, "admin");
+    c.secondaryEmail = serviceEmail(sys.key, l.code, role);
+    c.adminPassword     = c.adminPassword || "";
+    c.secondaryPassword = c.secondaryPassword || "";
+    sys.locations[l.code] = c;
+  }
+}
+
+function setLocCred(idx, code, field, value) {
+  const sys = systems[idx];
+  sys.locations = sys.locations || {};
+  sys.locations[code] = sys.locations[code] || {};
+  sys.locations[code][field] = value;
+  markDirty();
+}
+
+function renderLocationAccounts(sys, idx) {
+  ensureLocationCreds(sys);
+  const pw = (code, field, val) => `
+        <div style="display:flex;gap:6px">
+          <input type="password" class="fi" style="flex:1" value="${val||""}" placeholder="Password set in Firebase Auth"
+                 oninput="setLocCred(${idx},'${code}','${field}',this.value)">
+          <button type="button" class="btn btn-ghost btn-xs" onclick="togglePassVis(this)" style="flex-shrink:0">👁</button>
+        </div>`;
+  return `
+    <div style="font-size:11px;color:#64748b;line-height:1.5;margin-bottom:12px">
+      This system keeps <strong style="color:#a5b4fc">separate data per location</strong>. Each location has its own two accounts —
+      the database only lets an account into its own location. Create them in ${sys.projectId||"this project"}'s Firebase Auth
+      with exactly these emails, then enter the passwords. A location left blank simply can't be opened yet.
+    </div>
+    <div style="margin-bottom:10px;max-width:260px">
+      <label class="fl">Secondary Role Name</label>
+      <input class="fi" value="${sys.secondaryRoleName||"viewer"}" placeholder="viewer / tech"
+             onchange="systems[${idx}].secondaryRoleName=this.value.trim().toLowerCase();ensureLocationCreds(systems[${idx}]);markDirty();syncFromDOM();renderSystems()">
+    </div>
+    ${locations.map(l => {
+      const c = sys.locations[l.code];
+      const done = c.adminPassword && c.secondaryPassword;
+      return `
+    <div style="border:1px solid #2e2060;border-left:4px solid ${l.color||'#6366f1'};border-radius:9px;padding:12px 14px;margin-bottom:10px;${l.enabled===false?'opacity:.55':''}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:13px;font-weight:700;color:#e2e8f0">${l.code}</span>
+        <span style="font-size:12px;color:#94a3b8">${l.name||""}${l.enabled===false?" · disabled":""}</span>
+        <span style="margin-left:auto;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;${done?"background:#14532d33;color:#86efac":"background:#7f1d1d33;color:#fca5a5"}">${done?"READY":"NOT SET"}</span>
+      </div>
+      <div class="grid2">
+        <div><label class="fl">Admin Account</label><input class="fi" value="${c.adminEmail}" readonly style="opacity:.75;font-family:monospace"></div>
+        <div><label class="fl">Admin Password</label>${pw(l.code,"adminPassword",c.adminPassword)}</div>
+        <div><label class="fl">${(sys.secondaryRoleName||"viewer").replace(/^./,ch=>ch.toUpperCase())} Account</label><input class="fi" value="${c.secondaryEmail}" readonly style="opacity:.75;font-family:monospace"></div>
+        <div><label class="fl">${(sys.secondaryRoleName||"viewer").replace(/^./,ch=>ch.toUpperCase())} Password</label>${pw(l.code,"secondaryPassword",c.secondaryPassword)}</div>
+      </div>
+    </div>`; }).join("")}`;
+}
+window.ensureLocationCreds = ensureLocationCreds;
 
 function addSystem() {
   syncFromDOM();          // preserve existing cards' values before re-render
@@ -620,7 +690,19 @@ async function generateConfig() {
       showGlobalErr(`"${sys.label||sys.key||"A system"}" is missing required fields (Key, Label, API Key, Project ID, App ID).`);
       return;
     }
-    if (!sys.adminEmail||!sys.adminPassword||!sys.secondaryEmail||!sys.secondaryPassword) {
+    if (isLocationAware(sys)) {
+      ensureLocationCreds(sys);
+      const entries = Object.entries(sys.locations || {});
+      const half = entries.find(([,c]) => !!c.adminPassword !== !!c.secondaryPassword);
+      if (half) {
+        showGlobalErr(`"${sys.label||sys.key}" · ${half[0]}: enter BOTH the admin and the secondary password, or leave both blank.`);
+        return;
+      }
+      if (!entries.some(([,c]) => c.adminPassword && c.secondaryPassword)) {
+        showGlobalErr(`"${sys.label||sys.key}" has no location with service account passwords — set at least one location.`);
+        return;
+      }
+    } else if (!sys.adminEmail||!sys.adminPassword||!sys.secondaryEmail||!sys.secondaryPassword) {
       showGlobalErr(`"${sys.label||sys.key}" is missing Service Account credentials — both the admin and secondary accounts must have an email and password.`);
       return;
     }

@@ -198,6 +198,12 @@
     .divider{height:1px;background:#1e2035;margin:14px 0}
     .chip{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700}
 
+    /* ── Viewer access: view + log new reports only ─────────── */
+    body.role-viewer [onclick^="openCloseReport"],
+    body.role-viewer [onclick^="reopenReport"]{display:none!important}
+    body.role-viewer .ri, body.role-viewer [onchange^="handleRepairStatusChange"]{pointer-events:none;opacity:.55}
+    body.role-viewer input[onchange^="toggleActive"]{pointer-events:none}
+    body.role-viewer .toggle-wrap:has(input[onchange^="toggleActive"]){opacity:.5;pointer-events:none}
     /* ── Portal access overlay ──────────────────────────────── */
     #portalOverlay{position:fixed;inset:0;background:#0d0d1a;z-index:9999;
       display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;
@@ -279,6 +285,7 @@
       </button>
     </div>
     <div class="topbar-right" id="topbarRight">
+      <div id="locSwitch" style="display:none"></div>
       <a href="/" class="btn btn-ghost btn-sm" style="text-decoration:none;gap:5px">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
         Portal
@@ -316,6 +323,7 @@
       </div>
     </div>
   </header>
+  <div id="locBanner" class="hidden"></div>
   <div id="mainContent"></div>
 </div>
 
@@ -405,13 +413,15 @@
 // ════════════════════════════════════════════════════════════════════════
 // FIREBASE IMPORTS
 // ════════════════════════════════════════════════════════════════════════
-import { portalAuth, portalDb, loadConfig, initSystemApp, describeServiceError }
+import { portalAuth, portalDb, loadConfig, initSystemApp, describeServiceError,
+         loadLocations, resolveLocation, rememberLocation, renderLocationSwitcher,
+         LEGACY_LOCATION }
   from '/crypto.js';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
          setPersistence, inMemoryPersistence }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
-         getDoc, getDocs, onSnapshot, query, orderBy }
+import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc,
+         getDoc, getDocs, onSnapshot, query, orderBy, writeBatch }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // ════════════════════════════════════════════════════════════════════════
@@ -424,7 +434,13 @@ import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
 let auth = null;
 let db   = null;
 let currentServiceRole = null; // 'admin' | 'viewer' | null
+let currentLoc = null;         // 'STX' | 'STT' | … — data lives under sites/{currentLoc}/
 let profileUnsub = null;
+let lastProfile = null, locationsCache = null, applySeq = 0, wantedLoc = null;
+
+// Every read/write goes through these, so the location can never be mixed up.
+const col  = (name)     => collection(db, 'sites', currentLoc, name);
+const dref = (name, id) => doc(db, 'sites', currentLoc, name, id);
 
 function bootAuth() {
   onAuthStateChanged(portalAuth, (portalUser) => {
@@ -435,20 +451,14 @@ function bootAuth() {
       return;
     }
     // Live listener on this person's own portal profile — fires instantly
-    // on any change (access level, active flag), not just on next login.
+    // on any change (access per location, active flag), not just on next login.
     profileUnsub = onSnapshot(doc(portalDb, 'users', portalUser.uid), (snap) => {
       if (!snap.exists() || snap.data().active === false) {
         teardownServiceSession();
         showPortalBlocked("Your account is not active. Contact your administrator.");
         return;
       }
-      const level = snap.data().access?.equipment || 'none';
-      if (level === 'none') {
-        teardownServiceSession();
-        showPortalBlocked("You don't have access to Equipment. Contact your administrator.");
-        return;
-      }
-      ensureServiceSession(level === 'editor' ? 'admin' : 'viewer');
+      applyProfile(snap.data());
     }, () => {
       teardownServiceSession();
       showPortalBlocked("Could not verify your access. Please sign in again through the Portal.");
@@ -456,70 +466,106 @@ function bootAuth() {
   });
 }
 
+// Access is per location: { STX:'editor', STT:'viewer' }. editor → that
+// location's admin account, viewer → its viewer account.
+async function applyProfile(profile) {
+  lastProfile = profile;
+  const seq = ++applySeq;
+  if (!locationsCache) locationsCache = await loadLocations();
+  if (seq !== applySeq) return;
+  const r = resolveLocation('equipment', profile, locationsCache, wantedLoc || currentLoc);
+  if (!r.current) {
+    teardownServiceSession();
+    showPortalBlocked("You don't have access to Equipment at any location. Contact your administrator.");
+    return;
+  }
+  const level = r.allowed.find(a => a.code === r.current).level;
+  const previous = currentLoc;
+  renderLocationSwitcher(document.getElementById('locSwitch'), r.allowed, r.current, (code) => {
+    wantedLoc = code; rememberLocation('equipment', code);
+    if (lastProfile) applyProfile(lastProfile);
+  });
+  const ok = await ensureServiceSession(r.current, level === 'editor' ? 'admin' : 'viewer');
+  if (ok === 'failed' && previous && previous !== r.current && r.allowed.some(a => a.code === previous)) {
+    wantedLoc = previous;              // that location isn't set up — go back
+    applyProfile(lastProfile);
+  }
+}
+
 // The live profile listener can fire twice in quick succession (cached copy,
 // then server copy). svcInFlight makes the second call share the first
-// sign-in instead of racing it; svcGen lets a teardown (access revoked)
-// cancel a sign-in that is still in progress.
-let svcInFlight = null, svcInFlightRole = null, svcGen = 0;
-function ensureServiceSession(targetRole) {
-  if (svcInFlight && svcInFlightRole === targetRole) return svcInFlight;
+// sign-in instead of racing it; svcGen lets a teardown (access revoked) or a
+// location switch cancel a sign-in that is still in progress.
+let svcInFlight = null, svcInFlightKey = null, svcGen = 0;
+function ensureServiceSession(loc, targetRole) {
+  const key = loc + ':' + targetRole;
+  if (svcInFlight && svcInFlightKey === key) return svcInFlight;
   const prior = svcInFlight || Promise.resolve();
-  svcInFlightRole = targetRole;
-  const p = prior.catch(()=>{}).then(() => doEnsureServiceSession(targetRole))
-    .finally(() => { if (svcInFlight === p) { svcInFlight = null; svcInFlightRole = null; } });
+  svcInFlightKey = key;
+  const p = prior.catch(()=>{}).then(() => doEnsureServiceSession(loc, targetRole))
+    .finally(() => { if (svcInFlight === p) { svcInFlight = null; svcInFlightKey = null; } });
   svcInFlight = p;
   return p;
 }
 
-async function doEnsureServiceSession(targetRole) {
-  // Already signed into the correct service account — nothing to do.
-  // Avoids re-authenticating on every unrelated profile field change.
-  if (currentServiceRole === targetRole && auth?.currentUser) return;
-  const myGen = svcGen;
+async function doEnsureServiceSession(loc, targetRole) {
+  // Already on the right location + account — nothing to do.
+  if (currentLoc === loc && currentServiceRole === targetRole && auth?.currentUser) return 'ok';
+  const myGen = ++svcGen;
 
   try {
-    // Decrypt fresh each time a role switch is actually needed — never
-    // cached beyond this call, consistent with the ephemeral-key pattern
-    // used everywhere else in this system.
+    // Decrypt fresh each time a switch is actually needed — never cached.
     let cfg = null;
     const configs = await loadConfig();
     cfg = configs?.equipment || null;
     if (!cfg) throw new Error("Equipment config not initialised — run /config-tool first.");
-
-    const email = targetRole === 'admin' ? cfg.adminEmail     : cfg.secondaryEmail;
-    const pass  = targetRole === 'admin' ? cfg.adminPassword  : cfg.secondaryPassword;
+    let lc = cfg.locations?.[loc];
+    const email = lc && (targetRole === 'admin' ? lc.adminEmail    : lc.secondaryEmail);
+    const pass  = lc && (targetRole === 'admin' ? lc.adminPassword : lc.secondaryPassword);
     const eqApp = initSystemApp(cfg, "plessen-repair");
-    cfg = null; // null immediately — credentials no longer needed
+    cfg = null; lc = null; // null immediately — credentials no longer needed
 
-    if (!email || !pass) throw new Error("Service account credentials missing — run /config-tool.");
+    if (!email || !pass) {
+      const e = new Error(`Equipment at ${loc} has no service accounts yet — a superuser must add the ${loc} passwords in /config-tool and Generate.`);
+      e.code = 'LOCATION_NOT_CONFIGURED'; throw e;
+    }
 
     const newAuth = getAuth(eqApp);
     await setPersistence(newAuth, inMemoryPersistence); // never persist a service session
     const newDb = getFirestore(eqApp);
 
-    // Switching roles mid-session — drop the old service session first
-    // Detach live feeds BEFORE dropping the old session — otherwise they
-    // lose their credentials mid-stream and Firestore rejects them.
+    // Switching location or role: detach live feeds and clear the screen
+    // BEFORE the old session ends, so nothing from one location lingers.
     stopListeners();
+    equipment = []; reports = []; selectedEqId = null; editMode = false;
+    setBanner(null);
     if (auth?.currentUser) { try { await signOut(auth); } catch(e){} }
 
     await signInWithEmailAndPassword(newAuth, email, pass);
 
-    // Access was revoked while signing in — don't open the app
-    if (myGen !== svcGen) { signOut(newAuth).catch(()=>{}); return; }
+    // Superseded (access revoked or another switch) while signing in
+    if (myGen !== svcGen) { signOut(newAuth).catch(()=>{}); return 'superseded'; }
 
-    auth = newAuth; db = newDb; currentServiceRole = targetRole;
+    auth = newAuth; db = newDb; currentServiceRole = targetRole; currentLoc = loc;
     userRole = targetRole;
+    wantedLoc = null; rememberLocation('equipment', loc);
     removePortalOverlay();
+    if (currentView !== 'dashboard' && currentView !== 'reports') currentView = 'dashboard';
     showApp();
     applyRoleGating();
-    startListeners();
+    await openLocationData(myGen);
+    return 'ok';
   } catch(e) {
     console.error('[Equipment] service session failed:', e.code || e.name, e.message);
-    if (myGen !== svcGen) return; // superseded by a teardown — nothing to show
-    teardownServiceSession();
+    if (myGen !== svcGen) return 'superseded';
     const info = describeServiceError(e);
+    if (e.code === 'LOCATION_NOT_CONFIGURED' && currentLoc && currentLoc !== loc && auth?.currentUser) {
+      alert(info.message);           // stay where we are
+      return 'failed';
+    }
+    teardownServiceSession();
     showPortalBlocked(info.message, info);
+    return 'failed';
   }
 }
 
@@ -527,19 +573,145 @@ function teardownServiceSession() {
   svcGen++; // cancels any sign-in still in progress
   stopListeners();
   if (auth?.currentUser) { signOut(auth).catch(()=>{}); }
-  auth = null; db = null; currentServiceRole = null;
+  auth = null; db = null; currentServiceRole = null; currentLoc = null;
+  equipment = []; reports = [];
   hideEl('appScreen');
 }
 
-// Hide admin-only actions for viewer-level access
+// Hide admin-only actions for viewer-level access. Viewers can view and log
+// new repair reports; everything else is admin-only (and enforced by the rules).
 function applyRoleGating() {
   const isViewer = userRole === 'viewer';
+  document.body.classList.toggle('role-viewer', isViewer);
   const addBtn = document.getElementById('addEqBtn');
   if (addBtn) addBtn.style.display = isViewer ? 'none' : '';
   const migBtn = document.getElementById('migrationToolBtn');
   if (migBtn) migBtn.style.display = isViewer ? 'none' : '';
   updateDetailActions();
 }
+const adminOnly = () => {
+  if (userRole === 'admin') return true;
+  alert('Viewers can view equipment and log new repair reports. Ask an admin to make this change.');
+  return false;
+};
+
+// ════════════════════════════════════════════════════════════════════════
+// LOCATION DATA — sites/{LOC}/equipment, sites/{LOC}/reports, sites/{LOC}/meta/layout
+// ════════════════════════════════════════════════════════════════════════
+function setBanner(kind, html) {
+  const el = document.getElementById('locBanner'); if (!el) return;
+  if (!kind) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const c = { info:['#1e1b4b','#c7d2fe','#4f46e5'], warn:['#422006','#fde68a','#d97706'], ok:['#052e16','#bbf7d0','#16a34a'], err:['#450a0a','#fecaca','#dc2626'] }[kind];
+  el.style.cssText = `margin:12px 20px 0;padding:12px 16px;border-radius:10px;font-size:13px;line-height:1.55;background:${c[0]};color:${c[1]};border:1.5px solid ${c[2]}`;
+  el.classList.remove('hidden');
+  el.innerHTML = html;
+}
+const bannerBtn = (label, fn, primary) =>
+  `<button onclick="${fn}" class="btn btn-sm ${primary?'btn-primary':'btn-ghost'}" style="margin:8px 8px 0 0">${label}</button>`;
+
+async function openLocationData(gen) {
+  const loc = currentLoc;
+  try {
+    const layout = await getDoc(dref('meta','layout'));
+    if (gen !== svcGen) return;
+    if (!layout.exists()) {
+      // Original site: the pre-location data (top-level equipment/reports)
+      // may still be waiting to be moved. Anywhere else: a new location.
+      if (loc === LEGACY_LOCATION && userRole === 'admin') {
+        const legacy = await getDocs(collection(db,'equipment'));
+        if (gen !== svcGen) return;
+        if (!legacy.empty) { showMoveBanner(legacy.size); render(); return; }
+      }
+      if (loc === LEGACY_LOCATION && userRole !== 'admin') {
+        setBanner('warn', `<strong>${loc} equipment is being upgraded.</strong> An admin needs to open Equipment once to finish moving the data. Nothing is lost.`);
+        render(); return;
+      }
+      if (userRole === 'admin') await setDoc(dref('meta','layout'), { version:2, createdAt:new Date().toISOString(), createdBy:'new-location' });
+    } else if (loc === LEGACY_LOCATION && userRole === 'admin' && layout.data().movedFrom && !layout.data().legacyRemoved) {
+      showCleanupBanner(layout.data().counts || {});
+    }
+    startListeners();
+  } catch (e) {
+    console.error('[Equipment] could not open location data:', e.code, e.message);
+    setBanner('err', `⚠ Could not load equipment for ${loc} (${e.code || e.message}). ` +
+      (e.code === 'permission-denied' ? 'The Firestore rules for plessen-repair may not be published yet.' : 'Check your connection and reload.'));
+  }
+}
+
+function showMoveBanner(n) {
+  setBanner('warn', `<strong>One-time upgrade needed for ${LEGACY_LOCATION}.</strong> Equipment now keeps data per location. ` +
+    `This copies the current ${n} equipment records and all service reports into ${LEGACY_LOCATION}'s section. ` +
+    `A full backup file downloads first, and the old copy is kept until you confirm everything matches.<br>` +
+    bannerBtn(`Back up and move ${LEGACY_LOCATION} data`, 'runEquipmentMove()', true));
+}
+function showCleanupBanner(c) {
+  setBanner('ok', `✓ <strong>${LEGACY_LOCATION} moved and verified:</strong> ${c.equipment||0} equipment records and ${c.reports||0} reports — all match. ` +
+    `The old copy is still kept. Once you have checked a few records, remove it.<br>` +
+    bannerBtn('Remove the old copy', 'removeEquipmentLegacy()', true) + bannerBtn('Later', 'dismissLocBanner()', false));
+}
+window.dismissLocBanner = () => setBanner(null);
+
+function downloadJSON(name, obj) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type:'application/json' }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+async function commitInChunks(ops) {
+  for (let i = 0; i < ops.length; i += 400) {
+    const b = writeBatch(db);
+    ops.slice(i, i + 400).forEach(o => o[0] === 'set' ? b.set(o[1], o[2]) : b.delete(o[1]));
+    await b.commit();
+  }
+}
+
+window.runEquipmentMove = async function() {
+  if (userRole !== 'admin' || currentLoc !== LEGACY_LOCATION) return;
+  const gen = svcGen;
+  try {
+    setBanner('info', `⏳ Reading the current ${LEGACY_LOCATION} data…`);
+    const [eqSnap, rpSnap] = await Promise.all([getDocs(collection(db,'equipment')), getDocs(collection(db,'reports'))]);
+    const eq = eqSnap.docs.map(d => ({ id:d.id, data:d.data() }));
+    const rp = rpSnap.docs.map(d => ({ id:d.id, data:d.data() }));
+    downloadJSON(`equipment-${LEGACY_LOCATION}-backup-${today()}.json`,
+      { exportedAt:new Date().toISOString(), source:'plessen-repair / equipment + reports', equipment:eq, reports:rp });
+    setBanner('info', `⏳ Copying ${eq.length} equipment records and ${rp.length} reports…`);
+    // Same document IDs, so reports keep pointing at their equipment.
+    await commitInChunks([
+      ...eq.map(x => ['set', dref('equipment', x.id), x.data]),
+      ...rp.map(x => ['set', dref('reports', x.id), x.data]),
+    ]);
+    const [e2, r2] = await Promise.all([getDocs(col('equipment')), getDocs(col('reports'))]);
+    if (e2.size !== eq.length || r2.size !== rp.length) {
+      setBanner('err', `⚠ The copy does not match (equipment ${e2.size}/${eq.length}, reports ${r2.size}/${rp.length}). Nothing was removed. ` +
+        `Run the move again; it is safe to repeat.<br>` + bannerBtn('Run the move again', 'runEquipmentMove()', true));
+      return;
+    }
+    const counts = { equipment:eq.length, reports:rp.length };
+    await setDoc(dref('meta','layout'), { version:2, movedAt:new Date().toISOString(), movedFrom:'equipment+reports', counts, legacyRemoved:false });
+    if (gen !== svcGen) return;
+    showCleanupBanner(counts);
+    startListeners();
+  } catch (e) {
+    console.error('[Equipment] move failed:', e.code, e.message);
+    setBanner('err', `⚠ The move stopped (${e.code || e.message}). Nothing was removed — the old data is untouched. ` +
+      (e.code === 'permission-denied' ? 'Check that the new plessen-repair rules are published. ' : '') +
+      '<br>' + bannerBtn('Try again', 'runEquipmentMove()', true));
+  }
+};
+
+window.removeEquipmentLegacy = async function() {
+  if (userRole !== 'admin' || currentLoc !== LEGACY_LOCATION) return;
+  if (!confirm(`Remove the old copy of the ${LEGACY_LOCATION} equipment and reports?\n\nYour backup file and the new location data are not affected.`)) return;
+  try {
+    const [eqSnap, rpSnap] = await Promise.all([getDocs(collection(db,'equipment')), getDocs(collection(db,'reports'))]);
+    await commitInChunks([...eqSnap.docs, ...rpSnap.docs].map(d => ['del', d.ref]));
+    await setDoc(dref('meta','layout'), { legacyRemoved:true, legacyRemovedAt:new Date().toISOString() }, { merge:true });
+    setBanner('ok', `✓ Old copy removed. ${LEGACY_LOCATION} now runs fully on the location layout.`);
+    setTimeout(() => setBanner(null), 6000);
+  } catch (e) {
+    setBanner('err', `⚠ Could not remove the old copy (${e.code}). Your data in the new layout is fine.`);
+  }
+};
 
 
 // ════════════════════════════════════════════════════════════════════════
@@ -627,12 +799,12 @@ function stopListeners() {
 
 function startListeners() {
   stopListeners(); // never stack a second set of feeds on top of the first
-  unsubEq = onSnapshot(collection(db,'equipment'), snap => {
+  unsubEq = onSnapshot(col('equipment'), snap => {
     equipment = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     render();
   }, err => console.error('Equipment listener error:', err));
 
-  unsubRpts = onSnapshot(collection(db,'reports'), snap => {
+  unsubRpts = onSnapshot(col('reports'), snap => {
     reports = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     updateReportsBadge();
     if (currentView==='reports'||currentView==='detail') render();
@@ -974,6 +1146,7 @@ function updateDetailActions() {
 // EQUIPMENT CRUD
 // ════════════════════════════════════════════════════════════════════════
 async function saveNewEquipment() {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   const name = document.getElementById('nName')?.value.trim();
   if (!name) { const el=document.getElementById('addEqErr'); if(el){el.textContent='Name is required';el.classList.remove('hidden');} return; }
   const data = {
@@ -989,11 +1162,12 @@ async function saveNewEquipment() {
     repairAddress:document.getElementById('nRepairAddr')?.value||'',
     status:'active', active:true, statusLog:[], createdAt:today()
   };
-  try { await addDoc(collection(db,'equipment'), data); setView('dashboard'); }
+  try { await addDoc(col('equipment'), data); setView('dashboard'); }
   catch(e) { const el=document.getElementById('addEqErr'); if(el){el.textContent=e.message;el.classList.remove('hidden');} }
 }
 
 function startEdit() {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   const eq=equipment.find(e=>e.id===selectedEqId); if(!eq) return;
   editForm={name:eq.name,equipType:eq.equipType||'',brand:eq.brand||'',model:eq.model||'',
     sn:eq.sn||'',startDate:eq.startDate||'',price:eq.price||'',location:eq.location||'',
@@ -1004,17 +1178,19 @@ function cancelEdit() { editMode=false; editForm={}; render(); }
 function setEditField(field, val) { editForm[field]=val; }
 
 async function saveEdit() {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   const eq=equipment.find(e=>e.id===selectedEqId); if(!eq) return;
   const logs=[...eq.statusLog||[]];
   if (editForm.status&&editForm.status!==eq.status) logs.unshift({id:uid(),ts:ts(),text:`Status: "${STATUS_LABELS[eq.status]}" → "${STATUS_LABELS[editForm.status]}"`,actor:'Manual Edit'});
   try {
-    await updateDoc(doc(db,'equipment',selectedEqId), {...editForm, statusLog:logs});
+    await updateDoc(dref('equipment',selectedEqId), {...editForm, statusLog:logs});
     editMode=false; editForm={};
   } catch(e) { alert('Save failed: '+e.message); }
 }
 
 async function toggleActive(id, val) {
-  try { await updateDoc(doc(db,'equipment',id), { active:val }); } catch(e) { alert(e.message); }
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
+  try { await updateDoc(dref('equipment',id), { active:val }); } catch(e) { alert(e.message); }
 }
 
 // Status recalc from reports
@@ -1024,7 +1200,7 @@ async function recalcStatus(equipId) {
   const eq = equipment.find(e=>e.id===equipId); if(!eq) return;
   if (newStatus!==eq.status) {
     const logs=[{id:uid(),ts:ts(),text:`Status: "${STATUS_LABELS[eq.status]}" → "${STATUS_LABELS[newStatus]}"`,actor:'Auto (Service Reports)'},...(eq.statusLog||[])];
-    await updateDoc(doc(db,'equipment',equipId), {status:newStatus, statusLog:logs});
+    await updateDoc(dref('equipment',equipId), {status:newStatus, statusLog:logs});
   }
 }
 
@@ -1062,13 +1238,14 @@ async function submitReport() {
     repairStatus:'pending',sentDate:'',receivedDate:'',cost:'',invoice:'',
     closeReason:'',closeDate:'',closedBy:''};
   try {
-    await addDoc(collection(db,'reports'), data);
+    await addDoc(col('reports'), data);
     await recalcStatus(addReportEqId);
     closeAddReport();
   } catch(e){showEl('addReportErr');document.getElementById('addReportErr').textContent=e.message;}
 }
 
 function openCloseReport(rptId) {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   closeRptId=rptId;
   document.getElementById('cClosedBy').value='';
   document.getElementById('cReason').value='';
@@ -1076,30 +1253,34 @@ function openCloseReport(rptId) {
 }
 function closeCloseReport() { hideEl('closeReportModal'); }
 async function submitCloseReport() {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   const closedBy=document.getElementById('cClosedBy').value.trim();
   const reason=document.getElementById('cReason').value.trim();
   if(!closedBy||!reason){showEl('closeReportErr');document.getElementById('closeReportErr').textContent='Both fields required.';return;}
   const rpt=reports.find(r=>r.id===closeRptId); if(!rpt) return;
   try {
-    await updateDoc(doc(db,'reports',closeRptId),{status:'inactive',closeReason:reason,closeDate:today(),closedBy,lastUpdated:today()});
+    await updateDoc(dref('reports',closeRptId),{status:'inactive',closeReason:reason,closeDate:today(),closedBy,lastUpdated:today()});
     await recalcStatus(rpt.equipId);
     closeCloseReport();
   } catch(e){showEl('closeReportErr');document.getElementById('closeReportErr').textContent=e.message;}
 }
 
 async function reopenReport(rptId) {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   const rpt=reports.find(r=>r.id===rptId); if(!rpt) return;
   try {
-    await updateDoc(doc(db,'reports',rptId),{status:'active',closeReason:'',closeDate:'',closedBy:'',lastUpdated:today()});
+    await updateDoc(dref('reports',rptId),{status:'active',closeReason:'',closeDate:'',closedBy:'',lastUpdated:today()});
     await recalcStatus(rpt.equipId);
   } catch(e){alert(e.message);}
 }
 
 async function updateRepairField(rptId, field, val) {
-  try { await updateDoc(doc(db,'reports',rptId),{[field]:val,lastUpdated:today()}); } catch(e){alert(e.message);}
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
+  try { await updateDoc(dref('reports',rptId),{[field]:val,lastUpdated:today()}); } catch(e){alert(e.message);}
 }
 
 function handleRepairStatusChange(rptId, status) {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   if (status==='completed') { completeRptId=rptId; showEl('completeModal'); return; }
   updateRepairField(rptId,'repairStatus',status);
 }
@@ -1306,7 +1487,7 @@ const RPT_FIELDS = [
   { key:'invoice',     label:'Invoice #',      req:false, hints:['invoice','invoice number'] },
 ];
 
-function openMigrationTool() { closeGear(); resetMigration(); showEl('migrationModal'); }
+function openMigrationTool() { if (!adminOnly()) return; closeGear(); resetMigration(); showEl('migrationModal'); }
 function closeMigrationTool() { hideEl('migrationModal'); }
 
 function switchMigTab(tab) {
@@ -1407,6 +1588,7 @@ function getMigMapping(fields) {
 }
 
 async function runMigration() {
+  if (!adminOnly()) { if (typeof render==='function') render(); return; }
   const fields  = migTab==='equipment' ? EQ_FIELDS : RPT_FIELDS;
   const mapping = getMigMapping(fields);
   const missing = fields.filter(f => f.req && (!mapping[f.key]||mapping[f.key]==='(skip)'));
@@ -1426,7 +1608,7 @@ async function importEquipmentRows(mapping) {
     const name = getCol(row,mapping.name);
     if (!name) { skipped++; continue; }
     try {
-      await addDoc(collection(db,'equipment'), {
+      await addDoc(col('equipment'), {
         name,
         equipType:      getCol(row,mapping.equipType)||'Other',
         brand:          getCol(row,mapping.brand),
@@ -1449,7 +1631,7 @@ async function importEquipmentRows(mapping) {
 }
 
 async function importRepairRows(mapping) {
-  const eqSnap = await getDocs(collection(db,'equipment'));
+  const eqSnap = await getDocs(col('equipment'));
   const eqMap  = {};
   eqSnap.docs.forEach(d => { if(d.data().name) eqMap[d.data().name.toLowerCase().trim()]=d.id; });
   let done=0,skipped=0,unlinked=0,errors=[];
@@ -1465,7 +1647,7 @@ async function importRepairRows(mapping) {
     const rawClose  = getCol(row,mapping.closeDate);
     const isClosed  = !!(rawClose||getCol(row,mapping.closeReason));
     try {
-      await addDoc(collection(db,'reports'), {
+      await addDoc(col('reports'), {
         equipId:equipId||'', equipName, title,
         description:getCol(row,mapping.description),
         priority:(getCol(row,mapping.priority)||'medium').toLowerCase(),

@@ -16,7 +16,7 @@ import { initializeApp, getApps, getApp }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { getAuth, onAuthStateChanged }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-import { getFirestore, doc, getDoc }
+import { getFirestore, doc, getDoc, getDocs, collection }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // ── Minimal portal bootstrap ──────────────────────────────────────────────────
@@ -75,6 +75,10 @@ export function describeServiceError(e) {
   if (code === 'CONFIG_OUT_OF_DATE' || code === 'CONFIG_DECRYPT_FAILED') {
     return { code, retrySeconds: 30, title: 'Configuration Updating',
       message: 'A new system configuration is being deployed. This page will retry automatically. (' + code + ')' };
+  }
+  if (code === 'LOCATION_NOT_CONFIGURED') {
+    return { code, title: 'Location Not Set Up',
+      message: (e && e.message) || 'This location has no service accounts yet. A superuser must add them in /config-tool.' };
   }
   if (typeof code === 'string' && code.startsWith('auth/')) {
     return { code, title: 'Service Sign-In Failed',
@@ -164,4 +168,138 @@ export function initSystemApp(cfg, appName) {
     appId:             cfg.appId,
     ...(cfg.measurementId ? { measurementId: cfg.measurementId } : {})
   }, appName);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LOCATIONS — shared by the portal, config-tool and every location-aware system
+// ══════════════════════════════════════════════════════════════════════════════
+// A location is a site (STX, STT, …) whose data is kept separate inside each
+// location-aware system, under sites/{CODE}/… . Locations live in plessen-auth
+// `locations/{CODE}` and are managed in the portal (superusers). Nothing in the
+// code or the Firestore rules names a location, so adding one is setup only.
+
+// Profiles saved before locations existed hold a single access string per
+// system ("editor"); that access belongs to the original site.
+export const LEGACY_LOCATION = 'STX';
+
+// Systems whose data is split per location unless their systemConfigs entry
+// says otherwise (field `locationAware`).
+export const LOCATION_AWARE_DEFAULT = ['equipment', 'inventory'];
+
+export const DEFAULT_LOCATIONS = [
+  { code:'STX', name:'St. Croix',  color:'#0f766e', order:1, enabled:true },
+  { code:'STT', name:'St. Thomas', color:'#7e22ce', order:2, enabled:true },
+];
+
+// Normalise a location code: letters/digits only, upper case, 2–8 characters.
+export function normalizeLocationCode(code) {
+  return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+}
+
+// All locations (enabled and disabled), sorted. Falls back to the defaults if
+// the registry hasn't been created yet or can't be read.
+export async function loadLocations() {
+  try {
+    const snap = await getDocs(collection(portalDb, 'locations'));
+    if (snap.empty) return DEFAULT_LOCATIONS.map(l => ({ ...l }));
+    return snap.docs
+      .map(d => ({ code: d.id, ...d.data() }))
+      .sort((a, b) => (a.order || 99) - (b.order || 99) || a.code.localeCompare(b.code));
+  } catch (e) {
+    console.warn('[locations] could not read registry, using defaults:', e.code || e.message);
+    return DEFAULT_LOCATIONS.map(l => ({ ...l }));
+  }
+}
+
+export function isLocationAware(sys) {
+  if (!sys) return false;
+  if (typeof sys.locationAware === 'boolean') return sys.locationAware;
+  return LOCATION_AWARE_DEFAULT.includes(sys.key);
+}
+
+// A person's access to one location-aware system, as { CODE: 'viewer'|'editor' }.
+// Legacy single strings count as access at LEGACY_LOCATION. 'none' is dropped.
+export function locationAccessMap(profile, sysKey) {
+  const raw = profile && profile.access ? profile.access[sysKey] : undefined;
+  const out = {};
+  if (!raw) return out;
+  if (typeof raw === 'string') {
+    if (raw !== 'none') out[LEGACY_LOCATION] = raw;
+    return out;
+  }
+  for (const [code, level] of Object.entries(raw)) {
+    if (level === 'viewer' || level === 'editor') out[normalizeLocationCode(code)] = level;
+  }
+  return out;
+}
+
+// Service account emails follow one pattern, which the Firestore rules read
+// the location from:  {system}-{location}-admin@  /  {system}-{location}-{role}@
+export const SERVICE_DOMAIN = 'plesseneye.com';
+export function serviceEmail(sysKey, locCode, kind) {
+  return `${String(sysKey).toLowerCase()}-${String(locCode).toLowerCase()}-${kind}@${SERVICE_DOMAIN}`;
+}
+
+// Which locations of a location-aware system this person may open, and which
+// one to show now. Order of preference: ?loc= in the URL, the current one,
+// the last one used on this device, then the first allowed.
+//   returns { allowed: [{code,name,color,level}], current: 'STX' | null }
+export function resolveLocation(sysKey, profile, locations, current) {
+  const map = locationAccessMap(profile, sysKey);
+  const allowed = locations
+    .filter(l => l.enabled !== false && map[l.code])
+    .map(l => ({ code: l.code, name: l.name || l.code, color: l.color || '#64748b', level: map[l.code] }));
+  const ok = c => c && allowed.some(a => a.code === c);
+  let urlLoc = null, stored = null;
+  try { urlLoc = normalizeLocationCode(new URLSearchParams(location.search).get('loc')); } catch (_) {}
+  try { stored = localStorage.getItem('pms_loc_' + sysKey); } catch (_) {}
+  const pick = [urlLoc, current, stored].find(ok) || (allowed[0] && allowed[0].code) || null;
+  return { allowed, current: pick };
+}
+
+export function rememberLocation(sysKey, code) {
+  try { localStorage.setItem('pms_loc_' + sysKey, code); } catch (_) {}
+}
+
+// Header control: a coloured pill for the current location; with two or more
+// allowed locations it becomes a dropdown. Self-contained styles so it works
+// on any system's header.
+export function renderLocationSwitcher(container, allowed, current, onPick) {
+  if (!container) return;
+  container.innerHTML = '';
+  if (!allowed || !allowed.length || !current) { container.style.display = 'none'; return; }
+  container.style.display = 'inline-flex';
+  const cur = allowed.find(a => a.code === current) || allowed[0];
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.title = allowed.length > 1 ? 'Switch location' : 'Location';
+  btn.style.cssText = `display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:20px;
+    border:1.5px solid ${cur.color};background:${cur.color}26;color:#fff;font:700 12px/1 Inter,-apple-system,sans-serif;
+    letter-spacing:.3px;cursor:${allowed.length > 1 ? 'pointer' : 'default'}`;
+  btn.innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:${cur.color};box-shadow:0 0 0 2px #ffffff55"></span>` +
+    `<span>${cur.code}</span><span style="font-weight:500;opacity:.8">${cur.name}</span>` +
+    (allowed.length > 1 ? '<span style="opacity:.7;font-size:10px">▾</span>' : '');
+  wrap.appendChild(btn);
+  if (allowed.length > 1) {
+    const menu = document.createElement('div');
+    menu.style.cssText = 'position:absolute;top:calc(100% + 6px);left:0;min-width:200px;background:#fff;border-radius:10px;' +
+      'box-shadow:0 12px 32px #0004;padding:6px;display:none;z-index:1000';
+    for (const a of allowed) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.style.cssText = `display:flex;width:100%;align-items:center;gap:8px;padding:8px 10px;border:0;border-radius:7px;
+        background:${a.code === cur.code ? '#f1f5f9' : 'transparent'};color:#0f172a;font:600 13px Inter,-apple-system,sans-serif;cursor:pointer;text-align:left`;
+      item.innerHTML = `<span style="width:9px;height:9px;border-radius:50%;background:${a.color}"></span>` +
+        `<span>${a.code}</span><span style="font-weight:400;color:#64748b">${a.name}</span>` +
+        `<span style="margin-left:auto;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">${a.level}</span>`;
+      item.onclick = (ev) => { ev.stopPropagation(); menu.style.display = 'none'; if (a.code !== cur.code) onPick(a.code); };
+      menu.appendChild(item);
+    }
+    btn.onclick = (ev) => { ev.stopPropagation(); menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
+    document.addEventListener('click', () => { menu.style.display = 'none'; });
+    wrap.appendChild(menu);
+  }
+  container.appendChild(wrap);
 }
