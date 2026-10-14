@@ -415,8 +415,10 @@
 // ════════════════════════════════════════════════════════════════════════
 import { portalAuth, portalDb, loadConfig, initSystemApp, describeServiceError,
          loadLocations, resolveLocation, rememberLocation, renderLocationSwitcher,
-         LEGACY_LOCATION }
+         LEGACY_LOCATION, logActivity, setActivityActor, setActivityContext,
+         logAccessChange, logAccessBlocked }
   from '/crypto.js';
+setActivityContext({ system: 'equipment' });
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
          setPersistence, inMemoryPersistence }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
@@ -455,6 +457,7 @@ function bootAuth() {
     profileUnsub = onSnapshot(doc(portalDb, 'users', portalUser.uid), (snap) => {
       if (!snap.exists() || snap.data().active === false) {
         teardownServiceSession();
+        logAccessBlocked('equipment', 'account inactive');
         showPortalBlocked("Your account is not active. Contact your administrator.");
         return;
       }
@@ -470,11 +473,13 @@ function bootAuth() {
 // location's admin account, viewer → its viewer account.
 async function applyProfile(profile) {
   lastProfile = profile;
+  setActivityActor(profile);
   const seq = ++applySeq;
   if (!locationsCache) locationsCache = await loadLocations();
   if (seq !== applySeq) return;
   const r = resolveLocation('equipment', profile, locationsCache, wantedLoc || currentLoc);
   if (!r.current) {
+    logAccessBlocked('equipment', 'no access at any enabled location');
     teardownServiceSession();
     showPortalBlocked("You don't have access to Equipment at any location. Contact your administrator.");
     return;
@@ -486,6 +491,7 @@ async function applyProfile(profile) {
     if (lastProfile) applyProfile(lastProfile);
   });
   const ok = await ensureServiceSession(r.current, level === 'editor' ? 'admin' : 'viewer');
+  if (ok === 'ok') logAccessChange('equipment', currentLoc, userRole, profile.role === 'generic' ? { generic:true } : {});
   if (ok === 'failed' && previous && previous !== r.current && r.allowed.some(a => a.code === previous)) {
     wantedLoc = previous;              // that location isn't set up — go back
     applyProfile(lastProfile);
@@ -559,6 +565,7 @@ async function doEnsureServiceSession(loc, targetRole) {
     console.error('[Equipment] service session failed:', e.code || e.name, e.message);
     if (myGen !== svcGen) return 'superseded';
     const info = describeServiceError(e);
+    if (e.code === 'LOCATION_NOT_CONFIGURED') logActivity('access','location_not_configured',{ location: loc });
     if (e.code === 'LOCATION_NOT_CONFIGURED' && currentLoc && currentLoc !== loc && auth?.currentUser) {
       alert(info.message);           // stay where we are
       return 'failed';
@@ -670,6 +677,7 @@ window.runEquipmentMove = async function() {
   try {
     setBanner('info', `⏳ Reading the current ${LEGACY_LOCATION} data…`);
     const [eqSnap, rpSnap] = await Promise.all([getDocs(collection(db,'equipment')), getDocs(collection(db,'reports'))]);
+    logActivity('migration','move_started',{ location: LEGACY_LOCATION, target:'equipment' });
     const eq = eqSnap.docs.map(d => ({ id:d.id, data:d.data() }));
     const rp = rpSnap.docs.map(d => ({ id:d.id, data:d.data() }));
     downloadJSON(`equipment-${LEGACY_LOCATION}-backup-${today()}.json`,
@@ -682,6 +690,8 @@ window.runEquipmentMove = async function() {
     ]);
     const [e2, r2] = await Promise.all([getDocs(col('equipment')), getDocs(col('reports'))]);
     if (e2.size !== eq.length || r2.size !== rp.length) {
+      logActivity('migration','move_mismatch',{ location: LEGACY_LOCATION, target:'equipment',
+        details:{ equipment:`${e2.size}/${eq.length}`, reports:`${r2.size}/${rp.length}` } });
       setBanner('err', `⚠ The copy does not match (equipment ${e2.size}/${eq.length}, reports ${r2.size}/${rp.length}). Nothing was removed. ` +
         `Run the move again; it is safe to repeat.<br>` + bannerBtn('Run the move again', 'runEquipmentMove()', true));
       return;
@@ -689,10 +699,12 @@ window.runEquipmentMove = async function() {
     const counts = { equipment:eq.length, reports:rp.length };
     await setDoc(dref('meta','layout'), { version:2, movedAt:new Date().toISOString(), movedFrom:'equipment+reports', counts, legacyRemoved:false });
     if (gen !== svcGen) return;
+    logActivity('migration','move_verified',{ location: LEGACY_LOCATION, target:'equipment', details: counts });
     showCleanupBanner(counts);
     startListeners();
   } catch (e) {
     console.error('[Equipment] move failed:', e.code, e.message);
+    logActivity('migration','move_failed',{ location: LEGACY_LOCATION, target:'equipment', details:{ error: e.code || e.message } });
     setBanner('err', `⚠ The move stopped (${e.code || e.message}). Nothing was removed — the old data is untouched. ` +
       (e.code === 'permission-denied' ? 'Check that the new plessen-repair rules are published. ' : '') +
       '<br>' + bannerBtn('Try again', 'runEquipmentMove()', true));
@@ -706,6 +718,7 @@ window.removeEquipmentLegacy = async function() {
     const [eqSnap, rpSnap] = await Promise.all([getDocs(collection(db,'equipment')), getDocs(collection(db,'reports'))]);
     await commitInChunks([...eqSnap.docs, ...rpSnap.docs].map(d => ['del', d.ref]));
     await setDoc(dref('meta','layout'), { legacyRemoved:true, legacyRemovedAt:new Date().toISOString() }, { merge:true });
+    logActivity('migration','legacy_removed',{ location: LEGACY_LOCATION, target:'equipment' });
     setBanner('ok', `✓ Old copy removed. ${LEGACY_LOCATION} now runs fully on the location layout.`);
     setTimeout(() => setBanner(null), 6000);
   } catch (e) {
@@ -783,6 +796,7 @@ bootAuth();
 // Sign Out now means what it says — there is no equipment-specific session
 // anymore, only the portal's. Ending it here ends it everywhere.
 async function doSignOut() {
+  await logActivity('signin','signout',{ target: portalAuth.currentUser?.email || '' });
   teardownServiceSession();
   await signOut(portalAuth);
   window.location.href = '/';

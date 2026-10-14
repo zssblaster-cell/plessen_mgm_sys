@@ -284,6 +284,9 @@
             <button class="gear-item" id="systemMgrBtn" onclick="openSystemMgr()" style="display:none">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>System Manager
             </button>
+            <button class="gear-item" id="activityLogBtn" onclick="openActivityLog()" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>Activity Log
+            </button>
             <button class="gear-item" id="locationMgrBtn" onclick="openLocationMgr()" style="display:none">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>Locations
             </button>
@@ -501,6 +504,44 @@
   </div>
 </div>
 
+<!-- MODAL: ACTIVITY LOG (superusers) ──────────────────────────────────── -->
+<div class="mo hidden" id="activityLogModal" onclick="if(event.target===this)closeActivityLog()">
+  <div class="md md-lg" style="max-width:1080px;width:96vw">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <div><div class="md-title">Activity Log</div>
+        <div style="font-size:13px;color:#64748b">Every sign-in, access change and administrative change, newest first. Entries can't be edited or deleted.</div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="alLive" style="font-size:11px;font-weight:700;color:#15803d;display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#22c55e"></span>LIVE</span>
+        <button class="btn btn-ghost btn-sm" onclick="exportActivityCSV()">⬇ Export CSV</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px">
+      <select id="alCategory" class="field-select" onchange="renderActivityLog()"><option value="">All categories</option></select>
+      <select id="alSystem" class="field-select" onchange="renderActivityLog()"><option value="">All systems</option></select>
+      <select id="alLocation" class="field-select" onchange="renderActivityLog()"><option value="">All locations</option></select>
+      <input id="alPerson" class="field-input field-input-sm" placeholder="Person (name or email)" oninput="renderActivityLog()">
+      <input id="alSearch" class="field-input field-input-sm" placeholder="Search anything" oninput="renderActivityLog()">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;font-size:12px;color:#64748b">
+      From <input type="date" id="alFrom" class="field-input field-input-sm" style="width:auto" onchange="reloadActivityLog()">
+      to <input type="date" id="alTo" class="field-input field-input-sm" style="width:auto" onchange="reloadActivityLog()">
+      <button class="btn btn-ghost btn-xs" onclick="document.getElementById('alFrom').value='';document.getElementById('alTo').value='';reloadActivityLog()">Clear dates</button>
+      <span id="alCount" style="margin-left:auto"></span>
+    </div>
+    <div style="overflow:auto;max-height:58vh;border:1.5px solid #e2e8f0;border-radius:10px">
+      <table class="data-table" style="margin:0">
+        <thead style="position:sticky;top:0;background:#fff;z-index:1"><tr><th>When</th><th>Who</th><th>Category</th><th>Action</th><th>Target</th><th>System · Location</th><th>Device</th></tr></thead>
+        <tbody id="alBody"><tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <span style="font-size:11px;color:#94a3b8">Filters apply to the entries loaded so far. Dates load from the server.</span>
+      <button class="btn btn-ghost btn-sm" id="alMoreBtn" onclick="loadMoreActivity()">Load more</button>
+    </div>
+    <div class="md-actions"><button class="btn btn-ghost" onclick="closeActivityLog()">Close</button></div>
+  </div>
+</div>
+
 <!-- MODAL: LOCATIONS ───────────────────────────────────────────────────── -->
 <div class="mo hidden" id="locationMgrModal" onclick="if(event.target===this)closeLocationMgr()">
   <div class="md md-lg">
@@ -541,18 +582,25 @@
 // All sub-system credentials live in encrypted config.js
 import { portalAuth, portalDb, loadConfig,
          loadLocations, isLocationAware, locationAccessMap, normalizeLocationCode,
-         DEFAULT_LOCATIONS, LEGACY_LOCATION }
+         DEFAULT_LOCATIONS, LEGACY_LOCATION,
+         logActivity, logFailedSignIn, setActivityActor, setActivityContext, diffFields,
+         ACTIVITY_CATEGORIES }
   from '/crypto.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged,
          updatePassword, EmailAuthProvider, reauthenticateWithCredential,
          createUserWithEmailAndPassword }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { doc, getDoc, setDoc, getDocs, collection,
-         updateDoc, deleteDoc, query, orderBy, writeBatch }
+         updateDoc, deleteDoc, query, orderBy, writeBatch,
+         onSnapshot, limit, startAfter, where, Timestamp }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 const auth = portalAuth;
 const db   = portalDb;
+setActivityContext({ system: 'portal' });
+// Set by doLogin so onAuthStateChanged can tell a real sign-in from a page
+// reload with a remembered session (which is not logged as a new sign-in).
+let signingIn = false;
 
 const SEED_SYSTEMS = [
   { key:"equipment",     label:"Equipment Management", order:1, enabled:true,
@@ -607,6 +655,9 @@ G.toggleSystemEnabled=toggleSystemEnabled;
 G.openLocationMgr=openLocationMgr; G.closeLocationMgr=closeLocationMgr;
 G.openLocationForm=openLocationForm; G.closeLocationForm=closeLocationForm;
 G.saveLocation=saveLocation; G.editLocation=editLocation; G.toggleLocationEnabled=toggleLocationEnabled;
+G.openActivityLog=openActivityLog; G.closeActivityLog=closeActivityLog; G.renderActivityLog=renderActivityLog;
+G.reloadActivityLog=reloadActivityLog; G.loadMoreActivity=loadMoreActivity; G.exportActivityCSV=exportActivityCSV;
+G.toggleActivityRow=toggleActivityRow;
 
 // ════════════════════════════════════════════════════════════════════════════
 // REST API HELPERS
@@ -688,17 +739,32 @@ onAuthStateChanged(auth, async (fbUser) => {
         active:true, createdAt:new Date().toISOString() };
       await setDoc(doc(db,"users",fbUser.uid), profile);
       currentUser=fbUser; currentProfile=profile;
+      setActivityActor(profile);
+      logActivity('users','superuser_bootstrapped',{ target: fbUser.email });
+      if (signingIn) { signingIn=false; logActivity('signin','success',{ target: fbUser.email }); }
       const firstRun = await loadSystems();
       showPortal(firstRun);
     } else {
+      await logActivity('signin','blocked',{ target: fbUser.email, details:{ reason:'no portal profile' } });
+      signingIn=false;
       await signOut(auth);
       showLoginErr("Your account has not been configured. Contact your administrator.");
     }
     return;
   }
   const profile = snap.data();
-  if (!profile.active) { await signOut(auth); showLoginErr("Your account has been deactivated."); return; }
+  setActivityActor(profile);
+  if (!profile.active) {
+    await logActivity('signin','blocked',{ target: fbUser.email, details:{ reason:'account deactivated' } });
+    signingIn=false;
+    await signOut(auth); showLoginErr("Your account has been deactivated."); return;
+  }
   currentUser=fbUser; currentProfile=profile;
+  if (signingIn) {
+    signingIn=false;
+    logActivity('signin','success',{ target: fbUser.email,
+      details: profile.role==='generic' ? { generic:true, system:profile.genericFor, location:profile.genericLocation||'' } : {} });
+  }
   // Generic accounts bypass the portal dashboard entirely — every visit to
   // the portal sends them straight to their assigned system. Sub-systems
   // verify the live portal session themselves (no credentials to hand off),
@@ -728,8 +794,11 @@ async function doLogin() {
   btn.disabled=true; btn.textContent="Signing in...";
   hideEl("loginErr");
   try {
+    signingIn = true;
     await signInWithEmailAndPassword(auth, email, pass);
   } catch(e) {
+    signingIn = false;
+    logFailedSignIn(email, e.code || 'error', { system:'portal' });
     const msgs={"auth/wrong-password":"Incorrect password.","auth/user-not-found":"No account found.","auth/invalid-credential":"Invalid email or password.","auth/too-many-requests":"Too many attempts. Please wait."};
     showLoginErr(msgs[e.code]||e.message);
     btn.disabled=false; btn.textContent="Sign In";
@@ -738,7 +807,10 @@ async function doLogin() {
 document.getElementById("loginPass").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 document.getElementById("loginEmail").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("loginPass").focus();});
 
-async function doSignOut() { await signOut(auth); }
+async function doSignOut() {
+  await logActivity('signin','signout',{ target: currentUser?.email || '' });
+  await signOut(auth);
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // SHOW SCREENS
@@ -769,6 +841,7 @@ function showPortal(isFirstRun) {
   if (p.role==="superuser") {
     document.getElementById("systemMgrBtn").style.display="";
     document.getElementById("locationMgrBtn").style.display="";
+    document.getElementById("activityLogBtn").style.display="";
     seedLocationsIfMissing();
   }
   if (isFirstRun) showEl("setupBanner"); else hideEl("setupBanner");
@@ -865,6 +938,7 @@ async function doChangePw() {
   try {
     await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, cur));
     await updatePassword(currentUser, nw);
+    logActivity('account','password_changed',{ target: currentUser.email });
     showEl("pwOk"); setTimeout(closeChangePw,2000);
   } catch(e) {
     showEl("pwErr");
@@ -1023,6 +1097,7 @@ async function toggleUserActive(uid) {
   if (!next && !confirm(`Deactivate ${u.email}?\n\nThey will be signed out of every system within seconds. You can reactivate them at any time.`)) return;
   try {
     await updateDoc(doc(db,"users",uid), { active:next, updatedAt:new Date().toISOString() });
+    logActivity('users', next ? 'activated' : 'deactivated', { target: u.email });
     await loadUsers();
   } catch(e) { alert("Error: "+e.message); }
 }
@@ -1041,6 +1116,7 @@ async function deleteUser(uid) {
   if (typed.trim().toLowerCase()!==String(u.email).toLowerCase()) { alert("Email didn't match — nothing was deleted."); return; }
   try {
     await deleteDoc(doc(db,"users",uid));
+    logActivity('users','deleted',{ target: u.email, details:{ role: u.role, access: u.access } });
     await loadUsers();
     let copied = false;
     try { await navigator.clipboard.writeText(u.email); copied = true; } catch(_) {}
@@ -1085,7 +1161,7 @@ async function convertLegacyAccess() {
     n++;
   }
   if (n) {
-    try { await batch.commit(); console.info(`[locations] converted ${n} profile(s) to per-location access`); }
+    try { await batch.commit(); logActivity('users','access_converted',{ details:{ profiles:n, to:'per-location (existing access → '+LEGACY_LOCATION+')' } }); }
     catch(e) { console.warn("[locations] legacy access conversion failed:", e.code || e.message); }
   }
 }
@@ -1098,6 +1174,7 @@ async function seedLocationsIfMissing() {
     const batch = writeBatch(db);
     for (const l of DEFAULT_LOCATIONS) batch.set(doc(db, "locations", l.code), { ...l, createdAt: new Date().toISOString() });
     await batch.commit();
+    logActivity('locations','seeded',{ details:{ locations: DEFAULT_LOCATIONS.map(l=>l.code) } });
     loadedLocations = await loadLocations();
   } catch(e) { console.warn("[locations] could not seed registry:", e.code || e.message); }
 }
@@ -1158,7 +1235,10 @@ async function saveLocation() {
   const btn = document.getElementById("locSaveBtn");
   btn.disabled = true;
   try {
+    const before = locByCode(code);
     await setDoc(doc(db, "locations", code), data, { merge: true });
+    logActivity('locations', existing ? 'updated' : 'created', { target: code,
+      details: existing ? diffFields(before, data, ['name','color','order']) : { name: data.name, color: data.color } });
     loadedLocations = await loadLocations();
     renderLocationsList(); closeLocationForm(); renderCards();
     if (!existing) alert(`✓ ${code} added.\n\nNext: create its service accounts in each location-based system's Firebase project ` +
@@ -1172,6 +1252,7 @@ async function toggleLocationEnabled(code, enabled) {
   if (!enabled && !confirm(`Disable ${code}?\n\nIts data is kept, but nobody can open it until it's enabled again.`)) { renderLocationsList(); return; }
   try {
     await setDoc(doc(db, "locations", code), { enabled, updatedAt: new Date().toISOString() }, { merge: true });
+    logActivity('locations', enabled ? 'enabled' : 'disabled', { target: code });
     loadedLocations = await loadLocations();
     renderLocationsList(); renderCards();
   } catch(e) { alert("Could not update: " + e.message); renderLocationsList(); }
@@ -1251,6 +1332,7 @@ async function saveUser() {
   // Set when THIS save created a brand-new login account — used to roll it
   // back if the profile write fails, so no orphaned account is left behind.
   let rollbackIdToken = null;
+  let attachedOrphan = false;
   try {
     let fbUid=uid;
     if (!uid) {
@@ -1273,6 +1355,7 @@ async function saveUser() {
         // offer to attach a profile, verified with the password typed above.
         fbUid = await repairOrphanAccount(portalApiKey, email, pass);
         if (!fbUid) { btn.disabled=false; btn.textContent="Create User"; return; }
+        attachedOrphan = true;
       } else {
         throw new Error(createData.error?.message || "Could not create account.");
       }
@@ -1281,16 +1364,25 @@ async function saveUser() {
     // document LIVE and reads access.{systemKey} directly. There is nothing
     // left to sync out to sub-projects.
     try {
-      await setDoc(doc(db,"users",fbUid),{
-        uid:fbUid, email, displayName:name, role, locations:locs, access,
-        updatedAt:new Date().toISOString(),
-        // Status is changed only with the Activate/Deactivate button —
-        // editing a user never silently re-activates them.
-        ...(uid?{}:{active:true, createdAt:new Date().toISOString()})
-      },{merge:true});
+      if (uid) {
+        // Existing user: updateDoc REPLACES each field it names — so `access`
+        // is written whole and a location set to "No Access" is really gone.
+        // (A merge would keep the old entry.) Status is changed only with the
+        // Activate/Deactivate button — editing never silently re-activates.
+        await updateDoc(doc(db,"users",fbUid),{
+          email, displayName:name, role, locations:locs, access,
+          updatedAt:new Date().toISOString()
+        });
+      } else {
+        await setDoc(doc(db,"users",fbUid),{
+          uid:fbUid, email, displayName:name, role, locations:locs, access,
+          active:true, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()
+        });
+      }
     } catch(profileErr) {
       if (rollbackIdToken) {
         const rolledBack = await rollbackNewAccount(rollbackIdToken);
+        logActivity('users','create_failed',{ target: email, details:{ error: profileErr.message, loginRemoved: rolledBack } });
         throw new Error("Profile could not be saved (" + profileErr.message + "). " +
           (rolledBack ? "The new login account was removed — nothing was left behind."
                       : "The new login account could NOT be removed automatically — delete " + email + " in Firebase → plessen-auth → Authentication."));
@@ -1298,6 +1390,14 @@ async function saveUser() {
       throw profileErr;
     }
     rollbackIdToken = null;
+    if (uid) {
+      const changes = diffFields(
+        { name: existingUser?.displayName, email: existingUser?.email, role: existingUser?.role, access: existingUser?.access },
+        { name, email, role, access });
+      if (Object.keys(changes).length) logActivity('users','updated',{ target: email, details: changes });
+    } else {
+      logActivity('users', attachedOrphan ? 'orphan_attached' : 'created', { target: email, details:{ name, role, access } });
+    }
     btn.textContent="✓ Saved";
     await loadUsers();
     setTimeout(()=>{ btn.disabled=false; btn.textContent=uid?"Save Changes":"Create User"; },1200);
@@ -1416,6 +1516,7 @@ function editSystem(key) {
 async function toggleSystemEnabled(key, enabled) {
   try {
     await setDoc(doc(db,"systemConfigs",key), { enabled }, { merge:true });
+    logActivity('systems', enabled ? 'enabled' : 'disabled', { target: key });
     const idx=loadedSystems.findIndex(s=>s.key===key);
     if (idx>-1) loadedSystems[idx].enabled=enabled;
     renderCards();
@@ -1426,6 +1527,7 @@ async function deleteSystem(key) {
   if (!confirm(`Delete system "${key}"? This removes it from the portal. The Firebase project itself is not affected.`)) return;
   try {
     await deleteDoc(doc(db,"systemConfigs",key));
+    logActivity('systems','deleted',{ target: key });
     loadedSystems=loadedSystems.filter(s=>s.key!==key);
     renderSystemsList(); renderCards();
   } catch(e) { alert("Error: "+e.message); }
@@ -1475,7 +1577,11 @@ async function saveSystem() {
       updatedAt:new Date().toISOString(),
       ...(existingKey?{}:{createdAt:new Date().toISOString()})
     };
+    const sysBefore = loadedSystems.find(s=>s.key===key);
     await setDoc(doc(db,"systemConfigs",key), sysData, { merge:true });
+    logActivity('systems', existingKey ? 'updated' : 'created', { target: key,
+      details: existingKey ? diffFields(sysBefore, sysData, ['label','description','path','order','enabled','color','locationAware'])
+                           : { label, path: sysData.path, locationAware } });
     // Sync generic account if enabled and password provided
     if (genericEnabled && genericPass && genericEmail) {
       // Validate email format before any REST calls
@@ -1505,6 +1611,7 @@ async function saveSystem() {
           throw new Error(createData.error?.message || ('Request failed (' + createRes.status + ')'));
         }
         if (createRes.ok) {
+          logActivity('systems','generic_account_created',{ target: genericEmail, details:{ system:key, location: genericLoc||'' } });
           // Write user profile — admin's auth session is still active
           // access is always 'viewer' for generic accounts — never admin,
           // matches how every sub-system's live listener reads this field.
@@ -1554,6 +1661,155 @@ async function saveSystem() {
     showEl("sysFormErr"); document.getElementById("sysFormErr").textContent=e.message;
     btn.disabled=false; btn.textContent=existingKey?"Save Changes":"Add System";
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ACTIVITY LOG (superusers) — plessen-auth auditLog, newest first
+// ════════════════════════════════════════════════════════════════════════════
+const AL_PAGE = 200;
+const AL_COLORS = { signin:'#1d4ed8', account:'#0369a1', access:'#0f766e', users:'#7e22ce',
+                    systems:'#b45309', locations:'#be185d', config:'#dc2626', migration:'#15803d' };
+let alEntries = [], alLiveUnsub = null, alLastDoc = null, alExhausted = false, alOpen = new Set();
+
+function alBaseQuery() {
+  const parts = [collection(db,'auditLog')];
+  const from = document.getElementById('alFrom').value, to = document.getElementById('alTo').value;
+  if (from) parts.push(where('ts','>=', Timestamp.fromDate(new Date(from+'T00:00:00'))));
+  if (to)   parts.push(where('ts','<=', Timestamp.fromDate(new Date(to+'T23:59:59.999'))));
+  parts.push(orderBy('ts','desc'));
+  return parts;
+}
+const alRow = d => ({ id:d.id, ...d.data() });
+
+function openActivityLog() {
+  if (currentProfile?.role !== 'superuser') return;
+  closeGear();
+  const cat = document.getElementById('alCategory');
+  if (cat.options.length <= 1) cat.innerHTML = '<option value="">All categories</option>' +
+    ACTIVITY_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
+  showEl('activityLogModal');
+  reloadActivityLog();
+}
+function closeActivityLog() {
+  hideEl('activityLogModal');
+  if (alLiveUnsub) { alLiveUnsub(); alLiveUnsub = null; }
+}
+
+// First page is LIVE: new entries appear as they happen. Entries already shown
+// are kept even when newer ones push them off the live page, and "Load more"
+// always continues from the OLDEST entry held — so nothing is ever skipped.
+let alSnaps = new Map();   // id → DocumentSnapshot (for the paging cursor)
+function alAdd(docs, older) {
+  const byId = new Map(alEntries.map(e => [e.id, e]));
+  docs.forEach(d => { alSnaps.set(d.id, d); byId.set(d.id, { ...alRow(d), _older: older }); });
+  alEntries = [...byId.values()].sort((x, y) => (y.ts?.toMillis?.() ?? Infinity) - (x.ts?.toMillis?.() ?? Infinity));
+  const oldest = [...alEntries].reverse().find(e => e.ts && alSnaps.has(e.id));
+  alLastDoc = oldest ? alSnaps.get(oldest.id) : null;
+}
+function reloadActivityLog() {
+  if (alLiveUnsub) { alLiveUnsub(); alLiveUnsub = null; }
+  alEntries = []; alSnaps = new Map(); alLastDoc = null; alExhausted = false; alOpen = new Set();
+  document.getElementById('alBody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px">Loading…</td></tr>';
+  let first = true;
+  alLiveUnsub = onSnapshot(query(...alBaseQuery(), limit(AL_PAGE)), snap => {
+    alAdd(snap.docs, false);
+    if (first) { alExhausted = snap.docs.length < AL_PAGE; first = false; }
+    renderActivityLog();
+  }, err => {
+    document.getElementById('alBody').innerHTML = `<tr><td colspan="7" style="color:#dc2626;padding:16px">Could not load the activity log (${err.code||err.message}). ` +
+      (err.code === 'permission-denied' ? 'Check that the auditLog rules block is published in plessen-auth.' : '') + `</td></tr>`;
+  });
+}
+async function loadMoreActivity() {
+  if (alExhausted || !alLastDoc) return;
+  const btn = document.getElementById('alMoreBtn'); btn.disabled = true; btn.textContent = 'Loading…';
+  try {
+    const snap = await getDocs(query(...alBaseQuery(), startAfter(alLastDoc), limit(AL_PAGE)));
+    alAdd(snap.docs, true);
+    if (snap.docs.length < AL_PAGE) alExhausted = true;
+    renderActivityLog();
+  } catch(e) { alert('Could not load more: ' + (e.code || e.message)); }
+  btn.disabled = false; btn.textContent = 'Load more';
+}
+
+function alWhen(e) {
+  const d = e.ts && e.ts.toDate ? e.ts.toDate() : null;
+  return d ? d.toLocaleString([], { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '…';
+}
+function alWho(e) {
+  if (!e.actorUid) return `<span style="color:#dc2626">${esc(e.email||'?')}</span><div style="font-size:10px;color:#94a3b8">not signed in</div>`;
+  return `${esc(e.actorName || e.actorEmail)}<div style="font-size:10px;color:#94a3b8">${esc(e.actorEmail)}${e.actorRole?' · '+esc(e.actorRole):''}</div>`;
+}
+function esc(v) { return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const alShort = v => typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '—');
+
+// Details: before → after per field when the entry is a change, else key: value
+function alDetails(e) {
+  const d = e.details || {};
+  const extra = e.actorUid ? '' : `<div>reason: <code>${esc(e.reason||'')}</code></div>`;
+  const keys = Object.keys(d);
+  if (!keys.length) return extra || '<span style="color:#94a3b8">No further details.</span>';
+  return extra + keys.map(k => {
+    const v = d[k];
+    if (v && typeof v === 'object' && 'from' in v && 'to' in v)
+      return `<div style="margin:2px 0"><strong>${esc(k)}</strong>: <span style="color:#991b1b;text-decoration:line-through">${esc(alShort(v.from))}</span> → <span style="color:#166534">${esc(alShort(v.to))}</span></div>`;
+    return `<div style="margin:2px 0"><strong>${esc(k)}</strong>: ${esc(alShort(v))}</div>`;
+  }).join('');
+}
+
+function alFiltered() {
+  const cat = document.getElementById('alCategory').value;
+  const sys = document.getElementById('alSystem').value;
+  const loc = document.getElementById('alLocation').value;
+  const person = document.getElementById('alPerson').value.trim().toLowerCase();
+  const q = document.getElementById('alSearch').value.trim().toLowerCase();
+  return alEntries.filter(e =>
+    (!cat || e.category === cat) && (!sys || e.system === sys) && (!loc || e.location === loc) &&
+    (!person || [e.actorName, e.actorEmail, e.email].some(x => String(x||'').toLowerCase().includes(person))) &&
+    (!q || JSON.stringify([e.action, e.target, e.details, e.reason, e.device, e.actorEmail, e.email]).toLowerCase().includes(q)));
+}
+
+function renderActivityLog() {
+  // keep the system / location filters in step with what's loaded
+  const fill = (id, label, vals) => {
+    const el = document.getElementById(id), cur = el.value;
+    el.innerHTML = `<option value="">${label}</option>` + [...vals].filter(Boolean).sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    el.value = cur;
+  };
+  fill('alSystem', 'All systems', new Set(alEntries.map(e => e.system)));
+  fill('alLocation', 'All locations', new Set(alEntries.map(e => e.location)));
+  const rows = alFiltered();
+  document.getElementById('alCount').textContent = `${rows.length} shown · ${alEntries.length} loaded${alExhausted ? ' (all)' : ''}`;
+  document.getElementById('alMoreBtn').style.display = alExhausted ? 'none' : '';
+  document.getElementById('alBody').innerHTML = rows.map(e => {
+    const c = AL_COLORS[e.category] || '#64748b';
+    const open = alOpen.has(e.id);
+    return `<tr style="cursor:pointer" onclick="toggleActivityRow('${e.id}')">
+      <td style="white-space:nowrap;font-family:'DM Mono',monospace;font-size:11px">${alWhen(e)}</td>
+      <td style="font-size:12px">${alWho(e)}</td>
+      <td><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;color:${c};background:${c}18;text-transform:uppercase;letter-spacing:.4px">${esc(e.category)}</span></td>
+      <td style="font-size:12px;font-weight:600">${esc(String(e.action||'').replace(/_/g,' '))}</td>
+      <td style="font-size:12px">${esc(e.target||'')}</td>
+      <td style="font-size:12px">${esc(e.system||'')}${e.location?' · '+esc(e.location):''}</td>
+      <td style="font-size:11px;color:#64748b">${esc(e.device||'')}</td>
+    </tr>` + (open ? `<tr><td colspan="7" style="background:#f8fafc;font-size:12px;line-height:1.6;padding:10px 16px">${alDetails(e)}</td></tr>` : '');
+  }).join('') || `<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px">No matching activity.</td></tr>`;
+}
+function toggleActivityRow(id) { alOpen.has(id) ? alOpen.delete(id) : alOpen.add(id); renderActivityLog(); }
+
+function exportActivityCSV() {
+  const rows = alFiltered();
+  const head = ['When (ISO)','Who','Email','Role','Category','Action','Target','System','Location','Device','Details'];
+  const lines = rows.map(e => [
+    e.ts && e.ts.toDate ? e.ts.toDate().toISOString() : '',
+    e.actorName||'', e.actorEmail||e.email||'', e.actorRole||'', e.category, e.action, e.target||'',
+    e.system||'', e.location||'', e.device||'', JSON.stringify(e.actorUid ? (e.details||{}) : { reason:e.reason||'' })
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([[head.join(','), ...lines].join('\n')], { type:'text/csv' }));
+  a.download = `activity-log-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  logActivity('config','activity_log_exported',{ details:{ rows: rows.length } });
 }
 
 // ════════════════════════════════════════════════════════════════════════════

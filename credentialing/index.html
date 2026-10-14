@@ -17,7 +17,9 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot,
          getDoc, getDocs, query, where, writeBatch }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-import { portalAuth, portalDb, loadConfig, describeServiceError } from '/crypto.js';
+import { portalAuth, portalDb, loadConfig, describeServiceError,
+         logActivity, setActivityActor, setActivityContext, logAccessChange, logAccessBlocked } from '/crypto.js';
+setActivityContext({ system: 'credentialing' });
 
 // ─── Portal-only auth. No login screen, no per-person accounts — access is
 // decided LIVE by the portal for the whole session, not checked once. ───────
@@ -58,7 +60,10 @@ function removePortalOverlay() {
   if(!o)return; o.style.opacity='0'; setTimeout(()=>o.remove(),320);
 }
 
-window._portalSignOut=async()=>{ await signOut(portalAuth); window.location.href='/'; };
+window._portalSignOut=async()=>{
+  await logActivity('signin','signout',{ target: portalAuth.currentUser?.email || '' });
+  await signOut(portalAuth); window.location.href='/';
+};
 
 // The live profile listener can fire twice in quick succession (cached copy,
 // then server copy). svcInFlight makes the second call share the first
@@ -146,16 +151,21 @@ onAuthStateChanged(portalAuth,(portalUser)=>{
     return;
   }
   profileUnsub=onSnapshot(doc(portalDb,'users',portalUser.uid),(snap)=>{
+    if(snap.exists()) setActivityActor(snap.data());
     if(!snap.exists()||snap.data().active===false){
+      logAccessBlocked('credentialing','account inactive');
       showPortalBlocked("Your account is not active. Contact your administrator.");
       return;
     }
     const level=snap.data().access?.credentialing||'none';
     if(level==='none'){
+      logAccessBlocked('credentialing','no access');
       showPortalBlocked("You don't have access to Credentialing. Contact your administrator.");
       return;
     }
-    ensureServiceSession(level==='editor'?'admin':'staff');
+    setActivityActor(snap.data());
+    const role=level==='editor'?'admin':'staff';
+    ensureServiceSession(role).then(ok=>{ if(ok) logAccessChange('credentialing','',role); });
   },()=>{
     showPortalBlocked("Could not verify your access. Please sign in again through the Portal.");
   });

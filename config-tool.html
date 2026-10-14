@@ -196,7 +196,8 @@ import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 // Version helpers shared with every system (single source of truth)
 import { readConfigVersion, selectKeyForFile, LEGACY_VERSION,
-         loadLocations, isLocationAware, serviceEmail, LOCATION_SECONDARY_ROLE } from '/crypto.js';
+         loadLocations, isLocationAware, serviceEmail, LOCATION_SECONDARY_ROLE,
+         logActivity, logFailedSignIn, setActivityActor, setActivityContext } from '/crypto.js';
 
 // ── Portal bootstrap (same as crypto.js) ─────────────────────────────────────
 const PORTAL_MIN = {
@@ -207,6 +208,10 @@ const PORTAL_MIN = {
 const app  = initializeApp(PORTAL_MIN, "config-tool");
 const auth = getAuth(app);
 const db   = getFirestore(app);
+// Activity log entries from this page use the config tool's own session.
+setActivityContext({ system: 'config-tool' });
+const act = (category, action, info) => logActivity(category, action, info, { db, auth });
+let signingIn = false;
 
 // ── State ──────────────────────────────────────────────────────────────────
 let currentUser   = null;
@@ -264,11 +269,15 @@ onAuthStateChanged(auth, async (user) => {
   // Verify superuser
   const snap = await getDoc(doc(db, "users", user.uid));
   if (!snap.exists() || snap.data().role !== "superuser") {
+    await act('signin','blocked',{ target: user.email, details:{ reason:'not a superuser' } });
+    signingIn = false;
     await signOut(auth);
     showLoginErr("Superuser access required for config-tool.");
     return;
   }
   currentUser = user;
+  setActivityActor(snap.data());
+  if (signingIn) { signingIn = false; act('signin','success',{ target: user.email }); }
   hideEl("loginSection"); showEl("mainSection");
   document.getElementById("welcomeMsg").textContent = "Welcome, " + (snap.data().displayName || user.email);
   locations = await loadLocations();
@@ -280,10 +289,10 @@ async function doLogin() {
   const pass  = document.getElementById("loginPass").value;
   if (!email||!pass) { showLoginErr("Both fields required."); return; }
   hideEl("loginErr");
-  try { await signInWithEmailAndPassword(auth, email, pass); }
-  catch(e) { showLoginErr(e.message); }
+  try { signingIn = true; await signInWithEmailAndPassword(auth, email, pass); }
+  catch(e) { signingIn = false; logFailedSignIn(email, e.code || 'error', { db, system:'config-tool' }); showLoginErr(e.message); }
 }
-async function doSignOut() { await signOut(auth); }
+async function doSignOut() { await act('signin','signout',{ target: currentUser?.email || '' }); await signOut(auth); }
 
 // ── Load existing config (to pre-populate fields) ─────────────────────────────
 async function loadExistingConfig() {
@@ -665,6 +674,7 @@ async function saveDisplaySettings() {
     }
     const now = new Date();
     lastSaved = now.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+    act('config','display_settings_saved',{ details:{ systems: systems.map(x => x.key) } });
     isDirty   = false;
     updateSaveStatus();
     showGlobalOk("✓ Settings saved to Firestore at " + lastSaved + " — " + systems.length + " systems");
@@ -786,8 +796,10 @@ async function attemptPush() {
   try {
     await pushToGitHub(generatedBlob);
     setStep("Push", "✓", "#22c55e", "Pushed config.js to GitHub (v" + pending.ver + ")");
+    act('config','pushed',{ target:'config.js', details:{ version: pending.ver } });
   } catch(pushErr) {
     setStep("Push", "✗", "#ef4444", "GitHub push failed: " + pushErr.message);
+    act('config','push_failed',{ target:'config.js', details:{ version: pending.ver, error: pushErr.message } });
     setPushStatus("✗ GitHub push failed: " + pushErr.message + " — nothing changed, live system unaffected.", "#fca5a5", false);
     document.getElementById("resultTitle").textContent = "⚠ Push Failed — Nothing Changed";
     showEl("pushFailActions");
@@ -805,6 +817,7 @@ async function manualActivate() {
   downloadConfig();
   hideEl("pushFailActions");
   setStep("Push", "⬇", "#eab308", "Downloaded — upload config.js to the repo root yourself");
+  act('config','manual_upload',{ target:'config.js', details:{ version: pending.ver } });
   await activatePending("Upload the downloaded config.js to GitHub — waiting for Vercel to serve v" + pending.ver + "...");
 }
 
@@ -829,6 +842,9 @@ async function activatePending(waitMsg) {
       }, { merge: true });
     }
     setStep("Key", "✓", "#22c55e", "Key v" + p.ver + " active (previous key v" + (p.prevVer || "none") + " kept for the deploy window)");
+    act('config','key_activated',{ target:'config.js', details:{ version: p.ver, previous: p.prevVer || null,
+      systems: systems.map(x => x.key), locations: Object.fromEntries(systems.filter(isLocationAware).map(x => [x.key,
+        Object.entries(x.locations||{}).filter(([,c]) => c.adminPassword && c.secondaryPassword).map(([k]) => k)])) } });
   } catch(e) {
     setStep("Key", "✗", "#ef4444", "Could not activate key: " + e.message);
     setPushStatus("✗ Key activation failed: " + e.message + " — config.js was pushed but will not decrypt until you Generate again.", "#fca5a5", false);
@@ -851,6 +867,7 @@ function startLivePoll(ver) {
       if (liveVer === ver) {
         clearInterval(livePollIv); livePollIv = null;
         setStep("Live", "✓", "#22c55e", "Live ✓ — v" + ver);
+        act('config','live',{ target:'config.js', details:{ version: ver } });
         setPushStatus("✓ Live ✓ — every system is now using v" + ver + ".", "#86efac", false);
         document.getElementById("resultTitle").textContent = "✅ Config Generated & Live";
         showGlobalOk("✅ Done — config.js v" + ver + " is live.");
@@ -859,6 +876,7 @@ function startLivePoll(ver) {
       const mins = Math.floor((Date.now() - started) / 60000);
       setStep("Live", "…", "#6366f1", "Waiting for Vercel — live is still v" + liveVer + (mins ? " (" + mins + " min)" : ""));
       if (Date.now() - started > 10 * 60000) {
+        act('config','deploy_delayed',{ target:'config.js', details:{ version: ver, liveVersion: liveVer } });
         clearInterval(livePollIv); livePollIv = null;
         setStep("Live", "!", "#eab308", "Still serving v" + liveVer + " after 10 min — check the Vercel deployment. Systems keep working on the previous key.");
         setPushStatus("⚠ Vercel has not deployed v" + ver + " yet. The previous version keeps working in the meantime.", "#fde68a", false);
@@ -938,6 +956,7 @@ async function saveGithubConfig() {
     githubCfg = { owner, repo, branch, path, token };
     msgEl.style.color = "#86efac";
     msgEl.textContent = "✓ GitHub settings saved.";
+    act('config','github_settings_saved',{ details:{ owner, repo, branch, path } });   // never the token
     updateGithubStatusBadge(true);
   } catch(e) {
     msgEl.style.color = "#fca5a5";

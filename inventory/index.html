@@ -24,7 +24,11 @@
 <script type="module">
 import { portalAuth, portalDb, loadConfig, describeServiceError,
          loadLocations, resolveLocation, rememberLocation, renderLocationSwitcher,
-         LEGACY_LOCATION } from '/crypto.js';
+         LEGACY_LOCATION, logActivity, setActivityActor, setActivityContext,
+         logAccessChange, logAccessBlocked } from '/crypto.js';
+setActivityContext({ system: 'inventory' });
+// The main (non-module) script logs migration steps through this bridge.
+window._logActivity = function(category, action, info){ return logActivity(category, action, info||{}); };
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
@@ -57,7 +61,10 @@ function removePortalOverlay(){
 }
 
 // Sign Out inside the app ends the PORTAL session, not just this tab's.
-window._portalSignOut=async function(){ await signOut(portalAuth); window.location.href='/'; };
+window._portalSignOut=async function(){
+  await logActivity('signin','signout',{ target: portalAuth.currentUser ? portalAuth.currentUser.email : '' });
+  await signOut(portalAuth); window.location.href='/';
+};
 
 // ── Location + role, decided LIVE from the portal profile ──────────────────
 // Access is per location: { STX:'editor', STT:'viewer' }. editor → the
@@ -68,11 +75,13 @@ async function getLocations(){ if(!locationsCache) locationsCache=await loadLoca
 
 function applyProfile(profile){
   lastProfile=profile;
+  setActivityActor(profile);
   var seq=++applySeq;
   getLocations().then(function(locs){
     if(seq!==applySeq) return; // a newer profile update arrived
     var r=resolveLocation('inventory', profile, locs, currentLoc);
     if(!r.current){
+      logAccessBlocked('inventory','no access at any enabled location');
       showPortalBlocked("You don't have access to Inventory at any location. Contact your administrator.");
       return;
     }
@@ -91,9 +100,11 @@ function openLocation(r, role, isGeneric){
   window._ensureInventoryService(loc, role, isGeneric, loadConfig).then(function(ok){
     if(!ok) return;
     currentLoc=loc; rememberLocation('inventory', loc);
+    logAccessChange('inventory', loc, role==='admin'?'admin':'viewer', isGeneric?{generic:true}:{});
     removePortalOverlay();
   },function(e){
     var info=describeServiceError(e);
+    if(e && e.code==='LOCATION_NOT_CONFIGURED') logActivity('access','location_not_configured',{ location: loc });
     // Another location still works — go back to it instead of locking them out
     if(previous && previous!==loc && r.allowed.some(function(a){return a.code===previous;})){
       alert(info.message);
@@ -113,6 +124,7 @@ onAuthStateChanged(portalAuth,function(portalUser){
   }
   profileUnsub=onSnapshot(doc(portalDb,'users',portalUser.uid),function(snap){
     if(!snap.exists()||snap.data().active===false){
+      logAccessBlocked('inventory','account inactive');
       showPortalBlocked("Your account is not active. Contact your administrator.");
       return;
     }
@@ -161,6 +173,8 @@ var fbLoadRanOnce = false;
 var invUnsubs = [];            // live Firestore feeds — detached on teardown / switch
 var synced = { items:new Map(), transactions:new Map(), changelog:new Map() }; // key → canonical JSON last synced
 var LEGACY = window._legacyLocation || 'STX';
+// Activity log bridge (set by the module script, which loads after this one)
+function act(category, action, info){ try{ if(window._logActivity) window._logActivity(category, action, info); }catch(e){} }
 
 function detachInventoryListeners(){
   invUnsubs.forEach(function(u){ try{u();}catch(e){} });
@@ -399,6 +413,7 @@ window.fbClearChangelog=function(){
   var col=siteRef.collection('changelog');
   return col.get().then(function(snap){
     var ops=snap.docs.map(function(d){ synced.changelog.delete(d.id); return ['del',d.ref]; });
+    act('migration','changelog_cleared',{ location: currentLoc, target:'inventory', details:{ entries: ops.length } });
     return commitInChunks(ops);
   }).catch(function(e){ console.error('clear log:',e); if(window.showToast)window.showToast('Could not clear the log ('+e.code+')','error'); });
 };
@@ -592,6 +607,7 @@ window._invStarterList=function(){
   mutArr(window.inventory, items);
   if(window.logChange) window.logChange('add','Item list','Started '+currentLoc+' from the standard item list ('+items.length+' items)');
   window.fbSave(); setBanner('ok','✓ '+items.length+' items added to '+currentLoc+'. Receive stock to set quantities.');
+  act('migration','starter_list_used',{ location: currentLoc, target:'inventory', details:{ items: items.length } });
   rerenderAll();
 };
 
@@ -629,6 +645,7 @@ window._invRunMove=function(){
   if(currentServiceRole!=='admin'||currentLoc!==LEGACY||!siteRef) return;
   var site=siteRef, gen=svcGen, loc=currentLoc;
   setBanner('info','⏳ Reading the current '+loc+' data…');
+  act('migration','move_started',{ location: loc, target:'inventory' });
   var names=['inventory','changelog','transactions','config'];
   var src={};
   Promise.all(names.map(function(n){ return db.doc('plessen/'+n).get(); })).then(function(snaps){
@@ -659,11 +676,13 @@ window._invRunMove=function(){
                units:totalUnits(chk[0].docs.map(function(d){return d.data();}))};
       var okAll=got.items===expect.items&&got.transactions===expect.transactions&&got.changelog===expect.changelog&&Math.abs(got.units-expect.units)<1e-6;
       if(!okAll){
+        act('migration','move_mismatch',{ location: loc, target:'inventory', details:{ expected: expect, found: got } });
         setBanner('err','⚠ The copy does not match: items '+got.items+'/'+expect.items+', transactions '+got.transactions+'/'+expect.transactions+
           ', log '+got.changelog+'/'+expect.changelog+', units '+got.units+'/'+expect.units+'. Nothing was removed. Run the move again; it is safe to repeat.<br>'+
           bannerBtn('Run the move again','window._invRunMove()',true));
         return;
       }
+      act('migration','move_verified',{ location: loc, target:'inventory', details: expect });
       return site.collection('meta').doc('layout').set({version:2,movedAt:new Date().toISOString(),movedFrom:'plessen/*',
         counts:expect,legacyRemoved:false}).then(function(){
         if(gen!==svcGen) return;
@@ -675,6 +694,7 @@ window._invRunMove=function(){
     });
   }).catch(function(e){
     console.error('[Inventory] move failed:', e.code, e.message);
+    act('migration','move_failed',{ location: loc, target:'inventory', details:{ error: e.code || e.message } });
     setBanner('err','⚠ The move stopped ('+(e.code||e.message)+'). Nothing was removed — the old data is untouched. '+
       (e.code==='permission-denied'?'Check that the new plessen-inventory rules are published. ':'')+'<br>'+bannerBtn('Try again','window._invRunMove()',true));
   });
@@ -694,6 +714,7 @@ window._invRemoveLegacy=function(){
   b.commit().then(function(){
     return site.collection('meta').doc('layout').set({legacyRemoved:true,legacyRemovedAt:new Date().toISOString()},{merge:true});
   }).then(function(){
+    act('migration','legacy_removed',{ location: LEGACY, target:'inventory' });
     setBanner('ok','✓ Old copy removed. '+LEGACY+' now runs fully on the new layout.');
     setTimeout(function(){ setBanner(null); },6000);
   }).catch(function(e){

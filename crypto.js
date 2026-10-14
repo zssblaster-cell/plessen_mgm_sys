@@ -16,7 +16,7 @@ import { initializeApp, getApps, getApp }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { getAuth, onAuthStateChanged }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-import { getFirestore, doc, getDoc, getDocs, collection }
+import { getFirestore, doc, getDoc, getDocs, collection, addDoc, serverTimestamp }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // ── Minimal portal bootstrap ──────────────────────────────────────────────────
@@ -305,4 +305,128 @@ export function renderLocationSwitcher(container, allowed, current, onPick) {
     wrap.appendChild(menu);
   }
   container.appendChild(wrap);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ACTIVITY LOG — plessen-auth auditLog/{id}
+// ══════════════════════════════════════════════════════════════════════════════
+// One append-only record of sign-ins, access, user / system / location / config
+// changes and data migrations, from every page. The rules make it trustworthy:
+// entries can only be added (never edited or deleted), must name the person
+// actually signed in, and must carry the server's own timestamp. Only
+// superusers can read it (portal → gear → Activity Log).
+//
+// Logging never blocks or breaks the app: failures are swallowed.
+
+export const ACTIVITY_CATEGORIES = ['signin','account','access','users','systems','locations','config','migration'];
+
+let activityActor = { name: '', role: '' };
+let activityContext = { system: 'portal', location: '' };
+export function setActivityActor(profile) {
+  if (!profile) return;
+  activityActor = { name: profile.displayName || '', role: profile.role || '' };
+}
+export function setActivityContext(ctx) { activityContext = { ...activityContext, ...(ctx || {}) }; }
+
+// "Chrome · Windows" — enough to tell devices apart, nothing identifying.
+export function deviceLabel() {
+  try {
+    const ua = navigator.userAgent || '';
+    const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome'
+                  : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+    const os = /Windows/.test(ua) ? 'Windows' : /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android'
+             : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Other';
+    return browser + ' · ' + os;
+  } catch (_) { return 'Unknown'; }
+}
+
+// Keep details small and plain (no undefined, no functions, strings capped).
+function cleanDetails(d) {
+  try {
+    return JSON.parse(JSON.stringify(d || {}, (k, v) =>
+      typeof v === 'string' && v.length > 500 ? v.slice(0, 500) + '…' : v));
+  } catch (_) { return {}; }
+}
+
+// logActivity('users', 'updated', { target:'jane@…', details:{…} })
+// opts.db / opts.auth: use another app's session (the config tool has its own).
+export async function logActivity(category, action, info = {}, opts = {}) {
+  try {
+    const auth = opts.auth || portalAuth;
+    const db   = opts.db   || portalDb;
+    const user = auth && auth.currentUser;
+    if (!user) return;
+    await addDoc(collection(db, 'auditLog'), {
+      ts: serverTimestamp(),
+      actorUid: user.uid,
+      actorEmail: user.email || '',
+      actorName: info.actorName || activityActor.name || '',
+      actorRole: info.actorRole || activityActor.role || '',
+      category: String(category),
+      action: String(action),
+      target: String(info.target || ''),
+      system: String(info.system || activityContext.system || ''),
+      location: String(info.location !== undefined ? info.location : (activityContext.location || '')),
+      details: cleanDetails(info.details),
+      device: deviceLabel()
+    });
+  } catch (e) {
+    console.warn('[activity] not recorded:', category, action, e && (e.code || e.message));
+  }
+}
+
+// Failed sign-in attempts happen with nobody signed in, so the rules accept a
+// tiny fixed-shape entry from anyone. Throttled per page so a stuck form or a
+// held-down Enter key can't flood the log.
+let failedLogTimes = [];
+export async function logFailedSignIn(email, reason, opts = {}) {
+  try {
+    const now = Date.now();
+    failedLogTimes = failedLogTimes.filter(t => now - t < 60000);
+    if (failedLogTimes.length >= 5) return;          // max 5 per minute per page
+    failedLogTimes.push(now);
+    const db = opts.db || portalDb;
+    await addDoc(collection(db, 'auditLog'), {
+      ts: serverTimestamp(),
+      category: 'signin',
+      action: 'failed',
+      email: String(email || '').slice(0, 200),
+      reason: String(reason || '').slice(0, 100),
+      system: String(opts.system || activityContext.system || 'portal').slice(0, 40),
+      device: deviceLabel()
+    });
+  } catch (e) {
+    console.warn('[activity] failed sign-in not recorded:', e && (e.code || e.message));
+  }
+}
+
+// Field-by-field before → after for the log (only what changed).
+export function diffFields(before = {}, after = {}, keys) {
+  const out = {};
+  const ks = keys || [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])];
+  for (const k of ks) {
+    const a = JSON.stringify(before ? before[k] : undefined), b = JSON.stringify(after ? after[k] : undefined);
+    if (a !== b) out[k] = { from: before ? before[k] ?? null : null, to: after ? after[k] ?? null : null };
+  }
+  return out;
+}
+
+// Access events from a system page: logs "opened" once, then only real
+// changes — "location_switched" or "role_changed". Profile updates that
+// change nothing for this system are not logged.
+const lastAccess = {};
+export function logAccessChange(system, location, role, extra = {}) {
+  const prev = lastAccess[system];
+  if (prev && prev.location === location && prev.role === role) return;
+  lastAccess[system] = { location, role };
+  setActivityContext({ system, location: location || '' });
+  if (!prev) return logActivity('access', 'opened', { location, details: { role, ...extra } });
+  if (prev.location !== location)
+    return logActivity('access', 'location_switched', { location, details: { from: prev.location, to: location, role } });
+  return logActivity('access', 'role_changed', { location, details: { from: prev.role, to: role } });
+}
+export function logAccessBlocked(system, reason, location = '') {
+  lastAccess[system] = null;
+  setActivityContext({ system, location });
+  return logActivity('access', 'blocked', { location, details: { reason } });
 }
