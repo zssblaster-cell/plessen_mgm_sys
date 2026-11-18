@@ -551,7 +551,7 @@
 <div class="mo hidden" id="securityModal" onclick="if(event.target===this)closeSecurity()">
   <div class="md">
     <div class="md-title">Security</div>
-    <div style="font-size:13px;color:#64748b;margin-bottom:14px">Sign-in session rules for every system. Changes reach people who are already signed in within seconds.</div>
+    <div style="font-size:13px;color:#64748b;margin-bottom:14px">Security rules for every system. Changes reach people who are already signed in within seconds.</div>
     <div id="secErr" class="err-box hidden"></div>
     <div id="secOk" class="hidden" style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:12px"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#94a3b8;margin:4px 0 8px">Session timeout</div>
@@ -575,7 +575,18 @@
       <input type="checkbox" id="secBrowserClose" onchange="previewSecurity()" style="width:16px;height:16px;accent-color:#1d4ed8">
       Sign out when the browser is closed
     </label>
-    <div id="secPreview" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px;font-size:12.5px;color:#475569;line-height:1.6"></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#94a3b8;margin:18px 0 8px">Inventory</div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:#0f172a;margin:0 0 10px;cursor:pointer">
+      <input type="checkbox" id="secInvUndo" onchange="previewSecurity()" style="width:16px;height:16px;accent-color:#1d4ed8">
+      Staff can undo their removals
+    </label>
+    <div class="grid2">
+      <div class="field-group"><label class="field-label">Undo window for staff (minutes)</label>
+        <input type="number" id="secInvUndoMin" class="field-input field-input-sm" step="1" oninput="previewSecurity()">
+        <div class="field-hint" id="secInvUndoMinErr" style="color:#dc2626"></div></div>
+      <div class="field-hint" style="align-self:center">Admins don't get an Undo button — they correct quantities in the item's edit menu. Up to 1440 minutes (24 h).</div>
+    </div>
+    <div id="secPreview" style="margin-top:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px;font-size:12.5px;color:#475569;line-height:1.6"></div>
     <div id="secMeta" class="field-hint" style="margin-top:8px"></div>
     <div class="md-actions">
       <button class="btn btn-ghost btn-sm" onclick="resetSecurityDefaults()" style="margin-right:auto">Use starting values</button>
@@ -630,7 +641,9 @@ import { portalAuth, portalDb, loadConfig,
          ACTIVITY_CATEGORIES,
          startSessionGuard, markSessionStart, takeSignOutNotice, bindSessionNote,
          validateSessionPolicy, normalizeSessionPolicy, SESSION_POLICY_DEFAULTS, SESSION_POLICY_LIMITS,
-         SESSION_POLICY_DOC }
+         SESSION_POLICY_DOC,
+         INVENTORY_POLICY_DOC, INVENTORY_POLICY_DEFAULTS, INVENTORY_POLICY_LIMITS,
+         validateInventoryPolicy, normalizeInventoryPolicy }
   from '/crypto.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged,
          updatePassword, EmailAuthProvider, reauthenticateWithCredential,
@@ -1730,6 +1743,7 @@ async function saveSystem() {
 // SECURITY (superusers) — plessen-auth system/sessionPolicy
 // ════════════════════════════════════════════════════════════════════════════
 let secCurrent = null;   // policy as stored (normalized), for the change log
+let secInvCurrent = null; // inventory policy as stored
 const SEC_FIELDS = [['idleMinutes','secIdle'],['genericIdleMinutes','secGenericIdle'],
                     ['maxSessionHours','secMax'],['warnSeconds','secWarn']];
 function secFill(p) {
@@ -1744,14 +1758,29 @@ function secRead() {
   o.signOutOnBrowserClose = document.getElementById('secBrowserClose').checked;
   return o;
 }
+function secInvFill(p) {
+  const L = INVENTORY_POLICY_LIMITS.techUndoMinutes, el = document.getElementById('secInvUndoMin');
+  el.value = p.techUndoMinutes; el.min = L.min; el.max = L.max;
+  document.getElementById('secInvUndo').checked = !!p.techUndoEnabled;
+}
+function secInvRead() {
+  return { techUndoEnabled: document.getElementById('secInvUndo').checked,
+           techUndoMinutes: document.getElementById('secInvUndoMin').value.trim() };
+}
 function previewSecurity() {
   const { ok, policy:p, errors } = validateSessionPolicy(secRead());
   SEC_FIELDS.forEach(([k,id]) => { document.getElementById(id+'Err').textContent = errors[k] || ''; });
-  document.getElementById('secSaveBtn').disabled = !ok;
+  const inv = validateInventoryPolicy(secInvRead());
+  document.getElementById('secInvUndoMinErr').textContent = inv.errors.techUndoMinutes || '';
+  document.getElementById('secInvUndoMin').disabled = !inv.policy.techUndoEnabled;
+  document.getElementById('secSaveBtn').disabled = !ok || !inv.ok;
   document.getElementById('secPreview').innerHTML = ok
     ? `People are signed out after <strong>${p.idleMinutes} min</strong> without activity; shared-device accounts after <strong>${p.genericIdleMinutes} min</strong>. ` +
       `A <strong>${p.warnSeconds}-second</strong> countdown appears first. Nobody stays signed in longer than <strong>${p.maxSessionHours} h</strong>, even while active. ` +
-      (p.signOutOnBrowserClose ? 'Closing the browser signs them out.' : 'Closing the browser does <strong>not</strong> sign them out.')
+      (p.signOutOnBrowserClose ? 'Closing the browser signs them out.' : 'Closing the browser does <strong>not</strong> sign them out.') +
+      (inv.ok ? (inv.policy.techUndoEnabled
+        ? ` In Inventory, staff can undo a removal for <strong>${inv.policy.techUndoMinutes} min</strong>.`
+        : ' In Inventory, staff <strong>cannot</strong> undo removals.') : '')
     : 'Fix the highlighted values to see a summary.';
 }
 async function openSecurity() {
@@ -1761,34 +1790,43 @@ async function openSecurity() {
   document.getElementById('secMeta').textContent = 'Loading…';
   showEl('securityModal');
   try {
-    const snap = await getDoc(doc(db, ...SESSION_POLICY_DOC));
+    const [snap, invSnap] = await Promise.all([getDoc(doc(db, ...SESSION_POLICY_DOC)), getDoc(doc(db, ...INVENTORY_POLICY_DOC))]);
     const raw = snap.exists() ? snap.data() : null;
     secCurrent = normalizeSessionPolicy(raw);
+    secInvCurrent = normalizeInventoryPolicy(invSnap.exists() ? invSnap.data() : null);
+    secInvFill(secInvCurrent);
     secFill(secCurrent);
     document.getElementById('secMeta').textContent = raw && raw.updatedAt
       ? `Last changed ${new Date(raw.updatedAt).toLocaleString()}${raw.updatedBy ? ' by ' + raw.updatedBy : ''}.`
       : 'Using the starting values — nothing has been saved yet.';
   } catch (e) {
-    secCurrent = { ...SESSION_POLICY_DEFAULTS }; secFill(secCurrent);
+    secCurrent = { ...SESSION_POLICY_DEFAULTS }; secInvCurrent = { ...INVENTORY_POLICY_DEFAULTS };
+    secInvFill(secInvCurrent); secFill(secCurrent);
     document.getElementById('secMeta').textContent = '';
     showEl('secErr'); document.getElementById('secErr').textContent = 'Could not load the current settings: ' + (e.code || e.message);
   }
 }
 function closeSecurity() { hideEl('securityModal'); }
-function resetSecurityDefaults() { secFill({ ...SESSION_POLICY_DEFAULTS }); }
+function resetSecurityDefaults() { secInvFill({ ...INVENTORY_POLICY_DEFAULTS }); secFill({ ...SESSION_POLICY_DEFAULTS }); }
 async function saveSecurity() {
   if (currentProfile?.role !== 'superuser') return;
   const { ok, policy } = validateSessionPolicy(secRead());
-  if (!ok) { previewSecurity(); return; }
+  const inv = validateInventoryPolicy(secInvRead());
+  if (!ok || !inv.ok) { previewSecurity(); return; }
   const btn = document.getElementById('secSaveBtn');
   btn.disabled = true; btn.textContent = 'Saving…'; hideEl('secErr'); hideEl('secOk');
   try {
-    await setDoc(doc(db, ...SESSION_POLICY_DOC), {
-      ...policy, updatedAt: new Date().toISOString(), updatedBy: currentUser?.email || ''
-    });
-    const changes = diffFields(secCurrent || {}, policy, Object.keys(SESSION_POLICY_DEFAULTS));
-    if (Object.keys(changes).length) logActivity('security', 'session_policy_updated', { target: 'sessionPolicy', details: changes });
-    secCurrent = policy;
+    const stamp = { updatedAt: new Date().toISOString(), updatedBy: currentUser?.email || '' };
+    await Promise.all([
+      setDoc(doc(db, ...SESSION_POLICY_DOC), { ...policy, ...stamp }),
+      setDoc(doc(db, ...INVENTORY_POLICY_DOC), { ...inv.policy, ...stamp })
+    ]);
+    const sChanges = diffFields(secCurrent || {}, policy, Object.keys(SESSION_POLICY_DEFAULTS));
+    const iChanges = diffFields(secInvCurrent || {}, inv.policy, Object.keys(INVENTORY_POLICY_DEFAULTS));
+    if (Object.keys(sChanges).length) logActivity('security', 'session_policy_updated', { target: 'sessionPolicy', details: sChanges });
+    if (Object.keys(iChanges).length) logActivity('security', 'inventory_policy_updated', { system: 'inventory', target: 'inventoryPolicy', details: iChanges });
+    const changes = { ...sChanges, ...iChanges };
+    secCurrent = policy; secInvCurrent = inv.policy;
     document.getElementById('secMeta').textContent = `Last changed just now by ${currentUser?.email || 'you'}.`;
     showEl('secOk'); document.getElementById('secOk').textContent = Object.keys(changes).length
       ? 'Saved. Everyone who is signed in now follows the new rules.' : 'Saved — nothing was different.';

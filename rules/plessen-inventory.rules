@@ -1,0 +1,109 @@
+rules_version = '2';
+// plessen-inventory — data per location under sites/{LOC}/…
+//   items/{id} · transactions/{id} · changelog/{id} · meta/config · meta/layout
+// Access is decided by the service account's EMAIL, which carries the
+// location:  inventory-{loc}-admin@plesseneye.com / inventory-{loc}-viewer@…
+// (the viewer account is what the Inventory screen calls "tech/Staff")
+// A new location needs no rule change — only its two accounts.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function email()          { return request.auth != null ? request.auth.token.email : ''; }
+    function svc(loc, kind)   { return email() == 'inventory-' + loc.lower() + '-' + kind + '@plesseneye.com'; }
+    function isAdmin(loc)     { return svc(loc, 'admin'); }
+    function isTech(loc)      { return svc(loc, 'viewer'); }
+
+    // ── Staff UNDO of a removal ────────────────────────────────────────────
+    // Superusers set whether staff may undo and for how long (portal →
+    // Security → Inventory). These rules allow it up to a 24-hour ceiling;
+    // the app applies the exact minutes. One undo = one save containing:
+    //   1. a new undo record (type 'undo') pointing at the removal,
+    //   2. the removal marked reversed (only those fields, only once),
+    //   3. the item's quantity raised by no more than the removed amount.
+    function txPath(loc, id)  { return /databases/$(database)/documents/sites/$(loc)/transactions/$(id); }
+    function undoCeilingMs()  { return 24 * 60 * 60 * 1000; }
+    function withinUndo(t)    { return t.get('tsMs', 0) is number && t.get('tsMs', 0) > 0
+                                  && request.time.toMillis() - t.tsMs <= undoCeilingMs(); }
+    function validUndoRecord(loc, id, d) {
+      let o     = get(txPath(loc, d.reverses)).data;       // the removal before this save
+      let after = getAfter(txPath(loc, d.reverses)).data;  // …and after it
+      return o.mode == 'remove' && o.get('reversed', false) != true && withinUndo(o)
+          && after.get('reversed', false) == true && after.get('reversedByTx', '') == id
+          && d.qty is number && d.qty == o.qty;
+    }
+    function validItemUndo(loc, id, ref) {
+      let u = getAfter(txPath(loc, ref)).data;
+      return !exists(txPath(loc, ref))                     // the undo record is new in THIS save
+          && u.type == 'undo' && u.itemId == id
+          && request.resource.data.quantity is number && resource.data.quantity is number
+          && request.resource.data.quantity <= resource.data.quantity + u.qty
+          && request.resource.data.lotDetails.size() <= resource.data.lotDetails.size();
+    }
+
+    match /sites/{loc} {
+      // Everything in a location: both accounts read, only admin writes
+      // (adding items, receiving stock, editing, tech roster + PINs).
+      match /{document=**} {
+        allow read:  if isAdmin(loc) || isTech(loc);
+        allow write: if isAdmin(loc);
+      }
+      // Tech: REMOVE stock only — quantity and lots may only go down,
+      // and nothing else about the item may change.
+      match /items/{id} {
+        allow update: if isTech(loc)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['quantity', 'lotDetails', 'lotNums', 'reorder'])
+          && request.resource.data.quantity is number
+          && resource.data.quantity is number
+          && request.resource.data.quantity <= resource.data.quantity
+          && request.resource.data.lotDetails.size() <= resource.data.lotDetails.size();
+        // Tech: undo of a removal — quantity goes back up by the removed amount at most
+        allow update: if isTech(loc)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['quantity', 'lotDetails', 'lotNums', 'reorder', 'undoRef'])
+          && request.resource.data.undoRef is string
+          && request.resource.data.undoRef != resource.data.get('undoRef', '')
+          && validItemUndo(loc, id, request.resource.data.undoRef);
+      }
+      // Tech: new removal transactions; undo records; marking a removal reversed.
+      // History can't otherwise be edited or deleted.
+      match /transactions/{id} {
+        allow create: if isTech(loc) && request.resource.data.mode == 'remove'
+          && (!('tsMs' in request.resource.data)
+              || (request.resource.data.tsMs is number
+                  && math.abs(request.resource.data.tsMs - request.time.toMillis()) <= 600000));
+        allow create: if isTech(loc)
+          && request.resource.data.mode == 'add' && request.resource.data.type == 'undo'
+          && request.resource.data.reverses is string && request.resource.data.itemId is string
+          && validUndoRecord(loc, id, request.resource.data);
+        allow update: if isTech(loc)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['reversed', 'reversedBy', 'reversedAt', 'reversedByTx'])
+          && resource.data.mode == 'remove'
+          && resource.data.get('reversed', false) != true
+          && request.resource.data.reversed == true
+          && request.resource.data.reversedByTx is string
+          && withinUndo(resource.data)
+          && getAfter(txPath(loc, request.resource.data.reversedByTx)).data.reverses == id;
+      }
+      // Tech: new change-log entries only
+      match /changelog/{id} {
+        allow create: if isTech(loc);
+      }
+    }
+
+    // ── TEMPORARY — the original (pre-location) data ──────────────────────
+    // Lets the old accounts keep working during the rollout, and lets the
+    // STX admin read + remove it for the one-time move. Delete this block
+    // once the STX move shows "Old copy removed".
+    function isLegacyAccount() {
+      return email() in ['inventory-admin@plesseneye.com', 'inventory-tech@plesseneye.com'];
+    }
+    match /plessen/{docId} {
+      allow read:  if isLegacyAccount() || isAdmin('STX');
+      allow write: if (isLegacyAccount() && docId != 'config')
+                   || (email() == 'inventory-admin@plesseneye.com')
+                   || isAdmin('STX');
+    }
+  }
+}
