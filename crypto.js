@@ -14,9 +14,9 @@
 
 import { initializeApp, getApps, getApp }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getAuth, onAuthStateChanged }
+import { getAuth, onAuthStateChanged, signOut as fbSignOut }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-import { getFirestore, doc, getDoc, getDocs, collection, addDoc, serverTimestamp }
+import { getFirestore, doc, getDoc, getDocs, collection, addDoc, serverTimestamp, onSnapshot }
   from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // ── Minimal portal bootstrap ──────────────────────────────────────────────────
@@ -272,6 +272,11 @@ export function renderLocationSwitcher(container, allowed, current, onPick) {
   container.innerHTML = '';
   if (!allowed || !allowed.length || !current) { container.style.display = 'none'; return; }
   container.style.display = 'inline-flex';
+  if (!document.getElementById('pms-loc-style')) {
+    const st = document.createElement('style'); st.id = 'pms-loc-style';
+    st.textContent = '@media (max-width:600px){.pms-loc-name{display:none}}';
+    document.head.appendChild(st);
+  }
   const cur = allowed.find(a => a.code === current) || allowed[0];
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center';
@@ -282,7 +287,7 @@ export function renderLocationSwitcher(container, allowed, current, onPick) {
     border:1.5px solid ${cur.color};background:${cur.color}26;color:#fff;font:700 12px/1 Inter,-apple-system,sans-serif;
     letter-spacing:.3px;cursor:${allowed.length > 1 ? 'pointer' : 'default'}`;
   btn.innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:${cur.color};box-shadow:0 0 0 2px #ffffff55"></span>` +
-    `<span>${cur.code}</span><span style="font-weight:500;opacity:.8">${cur.name}</span>` +
+    `<span>${cur.code}</span><span class="pms-loc-name" style="font-weight:500;opacity:.8">${cur.name}</span>` +
     (allowed.length > 1 ? '<span style="opacity:.7;font-size:10px">▾</span>' : '');
   wrap.appendChild(btn);
   if (allowed.length > 1) {
@@ -318,7 +323,7 @@ export function renderLocationSwitcher(container, allowed, current, onPick) {
 //
 // Logging never blocks or breaks the app: failures are swallowed.
 
-export const ACTIVITY_CATEGORIES = ['signin','account','access','users','systems','locations','config','migration'];
+export const ACTIVITY_CATEGORIES = ['signin','account','access','users','systems','locations','config','security','migration'];
 
 let activityActor = { name: '', role: '' };
 let activityContext = { system: 'portal', location: '' };
@@ -429,4 +434,423 @@ export function logAccessBlocked(system, reason, location = '') {
   lastAccess[system] = null;
   setActivityContext({ system, location });
   return logActivity('access', 'blocked', { location, details: { reason } });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SESSION TIMEOUT — policy in plessen-auth system/sessionPolicy
+// ══════════════════════════════════════════════════════════════════════════════
+// Every number here is set by superusers in the portal (gear → Security).
+// The defaults below are only used until that document exists, or if it is
+// unreadable. Nothing in this section is meant to be edited to change policy.
+//
+//   idleMinutes            sign-out after this long with no activity (people)
+//   genericIdleMinutes     same, for shared-device (generic) accounts
+//   maxSessionHours        hard limit after sign-in, even while active
+//   warnSeconds            countdown shown before an automatic sign-out
+//   signOutOnBrowserClose  closing the browser ends the session
+//
+// Activity in any open PMS tab keeps every tab alive (shared via localStorage).
+
+export const SESSION_POLICY_DOC = ['system', 'sessionPolicy'];
+export const SESSION_POLICY_DEFAULTS = Object.freeze({
+  idleMinutes: 30, genericIdleMinutes: 10, maxSessionHours: 8, warnSeconds: 60, signOutOnBrowserClose: true
+});
+export const SESSION_POLICY_LIMITS = Object.freeze({
+  idleMinutes:        { min: 1,  max: 480, unit: 'minutes' },
+  genericIdleMinutes: { min: 1,  max: 480, unit: 'minutes' },
+  maxSessionHours:    { min: 1,  max: 24,  unit: 'hours'   },
+  warnSeconds:        { min: 10, max: 600, unit: 'seconds' }
+});
+
+// Strict check for the Security screen: returns { ok, policy, errors{field:msg} }.
+export function validateSessionPolicy(input = {}) {
+  const errors = {}, policy = {};
+  for (const [k, lim] of Object.entries(SESSION_POLICY_LIMITS)) {
+    const raw = input[k];
+    const n = (raw === '' || raw === null || raw === undefined) ? NaN : Number(raw);
+    if (!Number.isInteger(n)) errors[k] = 'Enter a whole number';
+    else if (n < lim.min || n > lim.max) errors[k] = `Must be ${lim.min}–${lim.max} ${lim.unit}`;
+    policy[k] = n;
+  }
+  policy.signOutOnBrowserClose = typeof input.signOutOnBrowserClose === 'boolean'
+    ? input.signOutOnBrowserClose : SESSION_POLICY_DEFAULTS.signOutOnBrowserClose;
+  const longestIdle = Math.max(policy.idleMinutes, policy.genericIdleMinutes);
+  if (!errors.maxSessionHours && !errors.idleMinutes && !errors.genericIdleMinutes
+      && policy.maxSessionHours * 60 < longestIdle)
+    errors.maxSessionHours = 'Must be at least as long as the idle limits';
+  const shortestIdle = Math.min(policy.idleMinutes, policy.genericIdleMinutes);
+  if (!errors.warnSeconds && !errors.idleMinutes && !errors.genericIdleMinutes
+      && policy.warnSeconds >= shortestIdle * 60)
+    errors.warnSeconds = 'Must be shorter than the idle limits';
+  return { ok: Object.keys(errors).length === 0, policy, errors };
+}
+
+// Forgiving version for whatever is stored: a bad or partial document never
+// breaks sign-out. Bad fields fall back to the default; conflicts are repaired.
+export function normalizeSessionPolicy(raw) {
+  const out = { ...SESSION_POLICY_DEFAULTS };
+  if (raw && typeof raw === 'object') {
+    for (const [k, lim] of Object.entries(SESSION_POLICY_LIMITS)) {
+      const n = Number(raw[k]);
+      if (Number.isInteger(n) && n >= lim.min && n <= lim.max) out[k] = n;
+    }
+    if (typeof raw.signOutOnBrowserClose === 'boolean') out.signOutOnBrowserClose = raw.signOutOnBrowserClose;
+  }
+  const longestIdle = Math.max(out.idleMinutes, out.genericIdleMinutes);
+  if (out.maxSessionHours * 60 < longestIdle) out.maxSessionHours = Math.min(24, Math.ceil(longestIdle / 60));
+  const shortestIdle = Math.min(out.idleMinutes, out.genericIdleMinutes);
+  if (out.warnSeconds >= shortestIdle * 60) out.warnSeconds = Math.max(5, Math.floor(shortestIdle * 60 / 2));
+  return out;
+}
+
+export function describeSessionPolicy(p, isGeneric = false) {
+  const m = isGeneric ? p.genericIdleMinutes : p.idleMinutes;
+  return `Auto sign-out after ${m} min idle`;
+}
+
+const SG_LAST    = uid => 'pms_last_'  + uid;   // last activity (any tab)
+const SG_START   = uid => 'pms_start_' + uid;   // sign-in time fallback
+const SG_LOGLOCK = uid => 'pms_tolog_' + uid;   // one timeout entry, not one per tab
+const SG_NOTICE  = 'pms_signout_notice';
+const SG_COOKIE  = 'pms_bs';                    // browser-session cookie (no expiry)
+const sgNum  = k => { try { const n = Number(localStorage.getItem(k)); return Number.isFinite(n) && n > 0 ? n : 0; } catch (_) { return 0; } };
+const sgSet  = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (_) {} };
+const sgWait = ms => new Promise(r => setTimeout(r, ms));
+
+function sgHasCookie(uid) {
+  try { return document.cookie.split(';').some(c => c.trim() === `${SG_COOKIE}=${encodeURIComponent(uid)}`); }
+  catch (_) { return true; }
+}
+function sgClearCookie() {
+  try { document.cookie = `${SG_COOKIE}=; path=/; max-age=0; SameSite=Strict`; } catch (_) {}
+}
+
+// Call right after a REAL sign-in (not a page reload). Starts the clocks and
+// drops the browser-session cookie the browser removes when it is closed.
+export function markSessionStart(uid) {
+  if (!uid) return;
+  const now = Date.now();
+  sgSet(SG_LAST(uid), now);
+  sgSet(SG_START(uid), now);
+  try { localStorage.removeItem(SG_NOTICE); } catch (_) {}
+  try {
+    document.cookie = `${SG_COOKIE}=${encodeURIComponent(uid)}; path=/; SameSite=Strict` +
+      (location.protocol === 'https:' ? '; Secure' : '');
+  } catch (_) {}
+}
+
+// The portal's sign-in screen shows why someone was signed out (once).
+export function takeSignOutNotice() {
+  try {
+    const raw = localStorage.getItem(SG_NOTICE);
+    localStorage.removeItem(SG_NOTICE);
+    if (!raw) return '';
+    const n = JSON.parse(raw);
+    if (!n || Date.now() - (n.at || 0) > 12 * 3600 * 1000) return '';
+    if (n.reason === 'idle')          return `You were signed out after ${n.minutes} minutes without activity.`;
+    if (n.reason === 'max')           return `Your ${n.hours}-hour session limit was reached. Please sign in again.`;
+    if (n.reason === 'browser-close') return 'You were signed out because the browser was closed. Please sign in again.';
+    if (n.reason === 'new-policy')    return 'New sign-in security settings are in effect. Please sign in again.';
+    return '';
+  } catch (_) { return ''; }
+}
+
+// ── Warning dialog (self-contained styles) ───────────────────────────────────
+function sgFmt(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+function sgBuildDialog() {
+  const wrap = document.createElement('div');
+  wrap.setAttribute('role', 'alertdialog');
+  wrap.setAttribute('aria-modal', 'true');
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.55);display:flex;' +
+    'align-items:center;justify-content:center;padding:16px;font-family:Inter,-apple-system,Segoe UI,sans-serif';
+  wrap.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:22px 22px 18px;box-shadow:0 24px 60px rgba(0,0,0,.35);color:#0f172a">' +
+      '<div data-sg="title" style="font-size:17px;font-weight:800;margin-bottom:6px"></div>' +
+      '<div data-sg="body" style="font-size:14px;line-height:1.5;color:#475569"></div>' +
+      '<div data-sg="count" style="font-size:34px;font-weight:800;letter-spacing:1px;margin:14px 0 16px;color:#b45309;font-variant-numeric:tabular-nums"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">' +
+        '<button type="button" data-sg="out" style="padding:9px 14px;border-radius:9px;border:1.5px solid #e2e8f0;background:#fff;color:#475569;font:600 13px Inter,-apple-system,Segoe UI,sans-serif;cursor:pointer">Sign out now</button>' +
+        '<button type="button" data-sg="stay" style="padding:9px 16px;border-radius:9px;border:0;background:#1d4ed8;color:#fff;font:700 13px Inter,-apple-system,Segoe UI,sans-serif;cursor:pointer"></button>' +
+      '</div>' +
+    '</div>';
+  return wrap;
+}
+
+// ── The guard ────────────────────────────────────────────────────────────────
+// startSessionGuard({ profile, system, signOut, beforeSignOut })
+//   profile        portal profile (role 'generic' → generic idle limit)
+//   signOut        the page's own Sign Out (used by "Sign out now")
+//   beforeSignOut  async hook run before an automatic sign-out (flush saves)
+//   auth / db      another app's session (config tool); default: portal
+//   redirectTo     where to go after an automatic sign-out (default: portal)
+// Returns { setProfile, stop, policy() }. Safe to call again (updates profile).
+let activeGuard = null;
+const gearNoteEls = new Set();
+let gearNoteText = '';
+function setGearNote(t) {
+  gearNoteText = t;
+  for (const el of gearNoteEls) { if (el.isConnected) el.textContent = t; else gearNoteEls.delete(el); }
+}
+
+// Show "Auto sign-out after N min idle" in a page's own menu (the portal's).
+export function bindSessionNote(el) { if (!el) return; gearNoteEls.add(el); el.textContent = gearNoteText; }
+
+export function startSessionGuard(opts = {}) {
+  if (activeGuard) { if (opts.profile) activeGuard.setProfile(opts.profile); return activeGuard; }
+  const auth = opts.auth || portalAuth;
+  const db   = opts.db   || portalDb;
+  const user = auth.currentUser;
+  if (!user) return null;
+  const uid = user.uid;
+  let profile = opts.profile || null;
+  let policy = { ...SESSION_POLICY_DEFAULTS };
+  let started = false, stopped = false, firing = false, timer = null, unsubPolicy = null;
+  let dialog = null, dialogMode = '', maxWarnDismissed = false, lastWrite = 0;
+
+  const isGeneric = () => !!profile && profile.role === 'generic';
+  const idleMs = () => (isGeneric() ? policy.genericIdleMinutes : policy.idleMinutes) * 60000;
+  const maxMs  = () => policy.maxSessionHours * 3600000;
+  const signInAt = () => {
+    const t = Date.parse((user.metadata && user.metadata.lastSignInTime) || '');
+    if (Number.isFinite(t) && t > 0) return t;
+    let s = sgNum(SG_START(uid)); if (!s) { s = Date.now(); sgSet(SG_START(uid), s); }
+    return s;
+  };
+  const lastActive = () => { let l = sgNum(SG_LAST(uid)); if (!l) { l = Date.now(); sgSet(SG_LAST(uid), l); } return l; };
+  const refreshNote = () => setGearNote(describeSessionPolicy(policy, isGeneric()));
+
+  function onActivity() {
+    if (stopped || dialog) return;               // during a warning only the button counts
+    const now = Date.now();
+    if (now - lastWrite < 5000) return;
+    lastWrite = now;
+    sgSet(SG_LAST(uid), now);
+  }
+  const EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'];
+  const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+
+  function hideDialog() { if (dialog) { dialog.remove(); dialog = null; dialogMode = ''; } }
+  function showDialog(mode, msLeft) {
+    if (mode === 'max' && maxWarnDismissed) { hideDialog(); return; }
+    if (!dialog || dialogMode !== mode) {
+      hideDialog();
+      dialog = sgBuildDialog(); dialogMode = mode;
+      const q = s => dialog.querySelector(`[data-sg="${s}"]`);
+      if (mode === 'idle') {
+        q('title').textContent = 'Are you still there?';
+        q('body').textContent  = 'For security you will be signed out because of inactivity.';
+        q('stay').textContent  = 'Stay signed in';
+        q('stay').onclick = () => { sgSet(SG_LAST(uid), Date.now()); lastWrite = Date.now(); hideDialog(); };
+      } else {
+        q('title').textContent = 'Session limit reached soon';
+        q('body').textContent  = `Sessions last at most ${policy.maxSessionHours} hours. Finish what you are doing — you will need to sign in again.`;
+        q('stay').textContent  = 'OK';
+        q('stay').onclick = () => { maxWarnDismissed = true; hideDialog(); };
+      }
+      q('out').onclick = () => { stop(); hideDialog(); (opts.signOut ? Promise.resolve(opts.signOut()) : fbSignOut(auth).then(() => { window.location.href = opts.redirectTo || '/'; })).catch(() => {}); };
+      document.body.appendChild(dialog);
+      setTimeout(() => { try { q('stay').focus(); } catch (_) {} }, 0);
+    }
+    dialog.querySelector('[data-sg="count"]').textContent = sgFmt(msLeft);
+  }
+
+  function check() {
+    if (!started || stopped || firing) return;
+    if (!auth.currentUser || auth.currentUser.uid !== uid) { stop(); hideDialog(); return; }   // signed out elsewhere
+    const now = Date.now();
+    const idleLeft = lastActive() + idleMs() - now;
+    const maxLeft  = signInAt() + maxMs() - now;
+    if (maxLeft <= 0)  return fire('max');
+    if (idleLeft <= 0) return fire('idle');
+    const warn = policy.warnSeconds * 1000;
+    if (maxLeft <= warn && maxLeft <= idleLeft) showDialog('max', maxLeft);
+    else if (idleLeft <= warn) showDialog('idle', idleLeft);
+    else hideDialog();
+  }
+
+  async function fire(reason) {
+    if (firing) return;
+    firing = true;
+    const minutes = idleMs() / 60000;
+    stop();
+    hideDialog();
+    try { localStorage.setItem(SG_NOTICE, JSON.stringify({ reason, minutes, hours: policy.maxSessionHours, at: Date.now() })); } catch (_) {}
+    try { if (opts.beforeSignOut) await Promise.race([Promise.resolve(opts.beforeSignOut(reason)), sgWait(5000)]); } catch (_) {}
+    let logIt = true;
+    try {
+      const prev = sgNum(SG_LOGLOCK(uid));
+      if (Date.now() - prev < 15000) logIt = false; else sgSet(SG_LOGLOCK(uid), Date.now());
+    } catch (_) {}
+    if (logIt) {
+      await Promise.race([
+        logActivity('signin', 'timeout', { target: user.email || '', system: opts.system,
+          details: { reason, idleMinutes: minutes, maxSessionHours: policy.maxSessionHours, generic: isGeneric() } }, { auth, db }),
+        sgWait(3000)
+      ]);
+    }
+    try { await fbSignOut(auth); } catch (_) {}
+    sgClearCookie();
+    window.location.href = opts.redirectTo || '/';
+  }
+
+  function stop() {
+    stopped = true;
+    if (timer) { clearInterval(timer); timer = null; }
+    if (unsubPolicy) { try { unsubPolicy(); } catch (_) {} unsubPolicy = null; }
+    EVENTS.forEach(ev => window.removeEventListener(ev, onActivity, true));
+    document.removeEventListener('visibilitychange', onVisible);
+    if (activeGuard === api) activeGuard = null;
+  }
+
+  function begin() {
+    if (started || stopped) return;
+    started = true;
+    refreshNote();
+    // Checks that only make sense when a page first opens.
+    if (policy.signOutOnBrowserClose && !sgHasCookie(uid)) {
+      // No cookie and no record of a sign-in on this browser: the session
+      // predates this feature. Otherwise the browser was closed and reopened.
+      return fire(sgNum(SG_START(uid)) ? 'browser-close' : 'new-policy');
+    }
+    check();
+    if (!stopped) timer = setInterval(check, 1000);
+  }
+
+  EVENTS.forEach(ev => window.addEventListener(ev, onActivity, { capture: true, passive: true }));
+  document.addEventListener('visibilitychange', onVisible);
+  try {
+    unsubPolicy = onSnapshot(doc(db, ...SESSION_POLICY_DOC),
+      snap => { policy = normalizeSessionPolicy(snap.exists() ? snap.data() : null); maxWarnDismissed = false; refreshNote(); begin(); check(); },
+      ()   => { begin(); });
+  } catch (_) { begin(); }
+  setTimeout(begin, 5000);   // policy unreachable → defaults, never "no timeout"
+
+  const api = {
+    setProfile(p) { profile = p || profile; refreshNote(); check(); },
+    stop,
+    policy: () => ({ ...policy })
+  };
+  activeGuard = api;
+  return api;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SHARED GEAR MENU — top-left of every system's header
+// ══════════════════════════════════════════════════════════════════════════════
+// mountGearMenu(container, {
+//   theme: 'dark' | 'onColor',            // dark app (Equipment) or coloured header
+//   identity: { name, detail },           // "who you are"
+//   sections: [{ label, items: [{ id, label, icon, onClick, hidden }] }],
+//   onSignOut                              // Sign Out is always last, in red
+// }) → { setIdentity({name, detail}), close(), el }
+const GEAR_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+const SIGNOUT_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+export const GEAR_ICONS = {
+  settings: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg>',
+  key:      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  download: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  mail:     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/></svg>'
+};
+
+function gearStyles() {
+  if (document.getElementById('pms-gear-style')) return;
+  const st = document.createElement('style');
+  st.id = 'pms-gear-style';
+  st.textContent = `
+.pms-gear{position:relative;display:inline-flex;flex-shrink:0;font-family:Inter,-apple-system,Segoe UI,sans-serif}
+.pms-gear-btn{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s,color .15s}
+.pms-gear.onColor .pms-gear-btn{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);color:#fff}
+.pms-gear.onColor .pms-gear-btn:hover,.pms-gear.onColor .pms-gear-btn[aria-expanded="true"]{background:rgba(255,255,255,.26)}
+.pms-gear.dark .pms-gear-btn{background:transparent;border:1px solid #1e2035;color:#94a3b8}
+.pms-gear.dark .pms-gear-btn:hover,.pms-gear.dark .pms-gear-btn[aria-expanded="true"]{background:#1e2035;color:#e2e8f0}
+.pms-gear-menu{position:absolute;top:calc(100% + 8px);left:0;min-width:240px;max-width:calc(100vw - 24px);border-radius:12px;padding:6px;z-index:1000;box-shadow:0 16px 40px rgba(0,0,0,.28)}
+.pms-gear-menu[hidden]{display:none}
+.pms-gear.onColor .pms-gear-menu{background:#fff;border:1px solid #e2e8f0;color:#0f172a}
+.pms-gear.dark .pms-gear-menu{background:#13132a;border:1px solid #1e2035;color:#e2e8f0}
+.pms-gear-who{padding:9px 11px 8px}
+.pms-gear-name{font-size:13px;font-weight:700}
+.pms-gear-detail{font-size:11.5px;margin-top:2px;opacity:.7}
+.pms-gear-note{font-size:11px;margin-top:5px;display:flex;align-items:center;gap:5px;opacity:.65}
+.pms-gear-note:empty{display:none}
+.pms-gear-sec{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:8px 11px 4px;opacity:.55}
+.pms-gear-item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 11px;border:0;border-radius:8px;background:transparent;color:inherit;font:500 13px Inter,-apple-system,Segoe UI,sans-serif;text-align:left;cursor:pointer}
+.pms-gear.onColor .pms-gear-item:hover{background:#eff6ff}
+.pms-gear.dark .pms-gear-item:hover{background:#1e2035}
+.pms-gear-div{height:1px;margin:5px 0}
+.pms-gear.onColor .pms-gear-div{background:#e2e8f0}
+.pms-gear.dark .pms-gear-div{background:#1e2035}
+.pms-gear-item.pms-signout{color:#dc2626;font-weight:600}
+.pms-gear.dark .pms-gear-item.pms-signout{color:#fca5a5}
+.pms-gear.onColor .pms-gear-item.pms-signout:hover{background:#fef2f2}
+.pms-gear.dark .pms-gear-item.pms-signout:hover{background:#7f1d1d44}`;
+  document.head.appendChild(st);
+}
+
+export function mountGearMenu(container, opts = {}) {
+  if (!container) return null;
+  gearStyles();
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  container.innerHTML = '';
+  const root = document.createElement('div');
+  root.className = 'pms-gear ' + (opts.theme === 'dark' ? 'dark' : 'onColor');
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'pms-gear-btn'; btn.title = 'Settings';
+  btn.setAttribute('aria-haspopup', 'menu'); btn.setAttribute('aria-expanded', 'false');
+  btn.innerHTML = GEAR_SVG;
+  const menu = document.createElement('div');
+  menu.className = 'pms-gear-menu'; menu.setAttribute('role', 'menu'); menu.hidden = true;
+
+  const who = document.createElement('div');
+  who.className = 'pms-gear-who';
+  who.innerHTML = '<div class="pms-gear-name"></div><div class="pms-gear-detail"></div><div class="pms-gear-note"></div>';
+  menu.appendChild(who);
+  const note = who.querySelector('.pms-gear-note');
+  note.textContent = gearNoteText;
+  gearNoteEls.add(note);
+
+  const groups = [];
+  const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+  const open  = () => {
+    // A section whose items are all hidden for this role disappears entirely.
+    for (const g of groups) g.style.display = [...g.querySelectorAll('.pms-gear-item')].some(b => b.style.display !== 'none') ? '' : 'none';
+    menu.hidden = false; btn.setAttribute('aria-expanded', 'true');
+  };
+  const addItem = (it, cls, parent = menu) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'pms-gear-item' + (cls ? ' ' + cls : ''); b.setAttribute('role', 'menuitem');
+    if (it.id) b.id = it.id;
+    if (it.hidden) b.style.display = 'none';
+    b.innerHTML = (it.icon || '') + '<span>' + esc(it.label) + '</span>';
+    b.onclick = (ev) => { ev.stopPropagation(); close(); try { it.onClick && it.onClick(); } catch (e) { console.error(e); } };
+    parent.appendChild(b);
+    return b;
+  };
+  for (const sec of (opts.sections || [])) {
+    if (!sec || !(sec.items || []).length) continue;
+    const g = document.createElement('div'); g.className = 'pms-gear-group';
+    const d = document.createElement('div'); d.className = 'pms-gear-div'; g.appendChild(d);
+    if (sec.label) { const l = document.createElement('div'); l.className = 'pms-gear-sec'; l.textContent = sec.label; g.appendChild(l); }
+    sec.items.forEach(it => addItem(it, '', g));
+    menu.appendChild(g); groups.push(g);
+  }
+  const d = document.createElement('div'); d.className = 'pms-gear-div'; menu.appendChild(d);
+  addItem({ label: 'Sign Out', icon: SIGNOUT_SVG, onClick: opts.onSignOut }, 'pms-signout');
+
+  btn.onclick = (ev) => { ev.stopPropagation(); menu.hidden ? open() : close(); };
+  menu.addEventListener('click', ev => ev.stopPropagation());
+  if (!container._pmsGearDoc) {
+    container._pmsGearDoc = true;
+    document.addEventListener('click', () => container._pmsGearClose && container._pmsGearClose());
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && container._pmsGearClose) container._pmsGearClose(); });
+  }
+  container._pmsGearClose = close;
+  root.appendChild(btn); root.appendChild(menu);
+  container.appendChild(root);
+
+  const setIdentity = (id = {}) => {
+    who.querySelector('.pms-gear-name').textContent   = id.name || '—';
+    who.querySelector('.pms-gear-detail').textContent = id.detail || '';
+  };
+  setIdentity(opts.identity);
+  return { setIdentity, close, el: root };
 }

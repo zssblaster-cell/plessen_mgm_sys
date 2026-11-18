@@ -96,6 +96,7 @@
       border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;
       font-weight:600;color:var(--slate);cursor:pointer;transition:all .12s;text-align:left}
     .gear-item:hover{background:var(--blue-pale);color:var(--navy)}
+    .gear-item.danger{color:#dc2626;font-weight:600}
     .gear-item.danger:hover{background:#fff1f2;color:#dc2626}
     .gear-div{height:1px;background:var(--border);margin:6px 0}
     /* ── Hero ────────────────────────────────────────────────────── */
@@ -270,6 +271,7 @@
           <div class="gear-user">
             <div class="gear-user-name" id="gearName">—</div>
             <div class="gear-user-role" id="gearRole">—</div>
+            <div class="gear-user-role" id="gearSession" style="margin-top:4px;opacity:.8"></div>
           </div>
           <div class="gear-section">Account</div>
           <button class="gear-item" onclick="openChangePw()">
@@ -286,6 +288,9 @@
             </button>
             <button class="gear-item" id="activityLogBtn" onclick="openActivityLog()" style="display:none">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>Activity Log
+            </button>
+            <button class="gear-item" id="securityBtn" onclick="openSecurity()" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Security
             </button>
             <button class="gear-item" id="locationMgrBtn" onclick="openLocationMgr()" style="display:none">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>Locations
@@ -542,6 +547,44 @@
   </div>
 </div>
 
+<!-- MODAL: SECURITY (superusers) ─────────────────────────────────────── -->
+<div class="mo hidden" id="securityModal" onclick="if(event.target===this)closeSecurity()">
+  <div class="md">
+    <div class="md-title">Security</div>
+    <div style="font-size:13px;color:#64748b;margin-bottom:14px">Sign-in session rules for every system. Changes reach people who are already signed in within seconds.</div>
+    <div id="secErr" class="err-box hidden"></div>
+    <div id="secOk" class="hidden" style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:12px"></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#94a3b8;margin:4px 0 8px">Session timeout</div>
+    <div class="grid2">
+      <div class="field-group"><label class="field-label">Idle sign-out — people (minutes)</label>
+        <input type="number" id="secIdle" class="field-input field-input-sm" step="1" oninput="previewSecurity()">
+        <div class="field-hint" id="secIdleErr" style="color:#dc2626"></div></div>
+      <div class="field-group"><label class="field-label">Idle sign-out — shared devices (minutes)</label>
+        <input type="number" id="secGenericIdle" class="field-input field-input-sm" step="1" oninput="previewSecurity()">
+        <div class="field-hint" id="secGenericIdleErr" style="color:#dc2626"></div></div>
+    </div>
+    <div class="grid2">
+      <div class="field-group"><label class="field-label">Maximum session (hours)</label>
+        <input type="number" id="secMax" class="field-input field-input-sm" step="1" oninput="previewSecurity()">
+        <div class="field-hint" id="secMaxErr" style="color:#dc2626"></div></div>
+      <div class="field-group"><label class="field-label">Warning before sign-out (seconds)</label>
+        <input type="number" id="secWarn" class="field-input field-input-sm" step="1" oninput="previewSecurity()">
+        <div class="field-hint" id="secWarnErr" style="color:#dc2626"></div></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:#0f172a;margin:4px 0 12px;cursor:pointer">
+      <input type="checkbox" id="secBrowserClose" onchange="previewSecurity()" style="width:16px;height:16px;accent-color:#1d4ed8">
+      Sign out when the browser is closed
+    </label>
+    <div id="secPreview" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px;font-size:12.5px;color:#475569;line-height:1.6"></div>
+    <div id="secMeta" class="field-hint" style="margin-top:8px"></div>
+    <div class="md-actions">
+      <button class="btn btn-ghost btn-sm" onclick="resetSecurityDefaults()" style="margin-right:auto">Use starting values</button>
+      <button class="btn btn-ghost" onclick="closeSecurity()">Cancel</button>
+      <button class="btn btn-primary" id="secSaveBtn" onclick="saveSecurity()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: LOCATIONS ───────────────────────────────────────────────────── -->
 <div class="mo hidden" id="locationMgrModal" onclick="if(event.target===this)closeLocationMgr()">
   <div class="md md-lg">
@@ -584,7 +627,10 @@ import { portalAuth, portalDb, loadConfig,
          loadLocations, isLocationAware, locationAccessMap, normalizeLocationCode,
          DEFAULT_LOCATIONS, LEGACY_LOCATION,
          logActivity, logFailedSignIn, setActivityActor, setActivityContext, diffFields,
-         ACTIVITY_CATEGORIES }
+         ACTIVITY_CATEGORIES,
+         startSessionGuard, markSessionStart, takeSignOutNotice, bindSessionNote,
+         validateSessionPolicy, normalizeSessionPolicy, SESSION_POLICY_DEFAULTS, SESSION_POLICY_LIMITS,
+         SESSION_POLICY_DOC }
   from '/crypto.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged,
          updatePassword, EmailAuthProvider, reauthenticateWithCredential,
@@ -658,6 +704,8 @@ G.saveLocation=saveLocation; G.editLocation=editLocation; G.toggleLocationEnable
 G.openActivityLog=openActivityLog; G.closeActivityLog=closeActivityLog; G.renderActivityLog=renderActivityLog;
 G.reloadActivityLog=reloadActivityLog; G.loadMoreActivity=loadMoreActivity; G.exportActivityCSV=exportActivityCSV;
 G.toggleActivityRow=toggleActivityRow;
+G.openSecurity=openSecurity; G.closeSecurity=closeSecurity; G.saveSecurity=saveSecurity;
+G.resetSecurityDefaults=resetSecurityDefaults; G.previewSecurity=previewSecurity;
 
 // ════════════════════════════════════════════════════════════════════════════
 // REST API HELPERS
@@ -740,8 +788,9 @@ onAuthStateChanged(auth, async (fbUser) => {
       await setDoc(doc(db,"users",fbUser.uid), profile);
       currentUser=fbUser; currentProfile=profile;
       setActivityActor(profile);
+      startSessionGuard({ profile, system:'portal', signOut: doSignOut });
       logActivity('users','superuser_bootstrapped',{ target: fbUser.email });
-      if (signingIn) { signingIn=false; logActivity('signin','success',{ target: fbUser.email }); }
+      if (signingIn) { signingIn=false; markSessionStart(fbUser.uid); logActivity('signin','success',{ target: fbUser.email }); }
       const firstRun = await loadSystems();
       showPortal(firstRun);
     } else {
@@ -762,6 +811,7 @@ onAuthStateChanged(auth, async (fbUser) => {
   currentUser=fbUser; currentProfile=profile;
   if (signingIn) {
     signingIn=false;
+    markSessionStart(fbUser.uid);
     logActivity('signin','success',{ target: fbUser.email,
       details: profile.role==='generic' ? { generic:true, system:profile.genericFor, location:profile.genericLocation||'' } : {} });
   }
@@ -779,6 +829,7 @@ onAuthStateChanged(auth, async (fbUser) => {
       window.location.href = base + loc; return;
     }
   }
+  startSessionGuard({ profile, system:'portal', signOut: doSignOut });
   const firstRun = await loadSystems();
   showPortal(firstRun);
 });
@@ -817,13 +868,23 @@ async function doSignOut() {
 // ════════════════════════════════════════════════════════════════════════════
 function showLogin() {
   showEl("loginScreen"); hideEl("portalScreen");
+  const notice = takeSignOutNotice();
+  if (notice) {
+    const el = document.getElementById("loginErr");
+    showEl("loginErr"); el.textContent = notice;
+    el.style.background = "#fffbeb"; el.style.borderColor = "#fde68a"; el.style.color = "#92400e";
+  }
   document.getElementById("loginBtn").disabled=false;
   document.getElementById("loginBtn").textContent="Sign In";
 }
 
 // ── Generic login helpers ─────────────────────────────────────────────────────
 function showSysFormErr(msg) { showEl('sysFormErr'); document.getElementById('sysFormErr').textContent=msg; }
-function showLoginErr(msg) { showEl("loginErr"); document.getElementById("loginErr").textContent=msg; }
+function showLoginErr(msg) {
+  const el = document.getElementById("loginErr");
+  el.style.background = ""; el.style.borderColor = ""; el.style.color = "";
+  showEl("loginErr"); el.textContent = msg;
+}
 
 function showPortal(isFirstRun) {
   hideEl("loginScreen"); showEl("portalScreen");
@@ -834,6 +895,7 @@ function showPortal(isFirstRun) {
   document.getElementById("gearName").textContent=p.displayName||p.email;
   const myLocs = profileLocations(p);
   document.getElementById("gearRole").textContent=`${p.role} · ${myLocs.join(", ")||"no locations"}`;
+  bindSessionNote(document.getElementById("gearSession"));
   const locLabel = document.getElementById("locLabel");
   if (locLabel) locLabel.textContent = myLocs.join(" · ") || "—";
   const isPriv=["superuser","admin"].includes(p.role);
@@ -842,6 +904,7 @@ function showPortal(isFirstRun) {
     document.getElementById("systemMgrBtn").style.display="";
     document.getElementById("locationMgrBtn").style.display="";
     document.getElementById("activityLogBtn").style.display="";
+    document.getElementById("securityBtn").style.display="";
     seedLocationsIfMissing();
   }
   if (isFirstRun) showEl("setupBanner"); else hideEl("setupBanner");
@@ -1664,11 +1727,84 @@ async function saveSystem() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// SECURITY (superusers) — plessen-auth system/sessionPolicy
+// ════════════════════════════════════════════════════════════════════════════
+let secCurrent = null;   // policy as stored (normalized), for the change log
+const SEC_FIELDS = [['idleMinutes','secIdle'],['genericIdleMinutes','secGenericIdle'],
+                    ['maxSessionHours','secMax'],['warnSeconds','secWarn']];
+function secFill(p) {
+  SEC_FIELDS.forEach(([k,id]) => { const el=document.getElementById(id); el.value=p[k];
+    const L=SESSION_POLICY_LIMITS[k]; el.min=L.min; el.max=L.max; });
+  document.getElementById('secBrowserClose').checked = !!p.signOutOnBrowserClose;
+  previewSecurity();
+}
+function secRead() {
+  const o = {};
+  SEC_FIELDS.forEach(([k,id]) => { o[k] = document.getElementById(id).value.trim(); });
+  o.signOutOnBrowserClose = document.getElementById('secBrowserClose').checked;
+  return o;
+}
+function previewSecurity() {
+  const { ok, policy:p, errors } = validateSessionPolicy(secRead());
+  SEC_FIELDS.forEach(([k,id]) => { document.getElementById(id+'Err').textContent = errors[k] || ''; });
+  document.getElementById('secSaveBtn').disabled = !ok;
+  document.getElementById('secPreview').innerHTML = ok
+    ? `People are signed out after <strong>${p.idleMinutes} min</strong> without activity; shared-device accounts after <strong>${p.genericIdleMinutes} min</strong>. ` +
+      `A <strong>${p.warnSeconds}-second</strong> countdown appears first. Nobody stays signed in longer than <strong>${p.maxSessionHours} h</strong>, even while active. ` +
+      (p.signOutOnBrowserClose ? 'Closing the browser signs them out.' : 'Closing the browser does <strong>not</strong> sign them out.')
+    : 'Fix the highlighted values to see a summary.';
+}
+async function openSecurity() {
+  if (currentProfile?.role !== 'superuser') return;
+  closeGear();
+  hideEl('secErr'); hideEl('secOk');
+  document.getElementById('secMeta').textContent = 'Loading…';
+  showEl('securityModal');
+  try {
+    const snap = await getDoc(doc(db, ...SESSION_POLICY_DOC));
+    const raw = snap.exists() ? snap.data() : null;
+    secCurrent = normalizeSessionPolicy(raw);
+    secFill(secCurrent);
+    document.getElementById('secMeta').textContent = raw && raw.updatedAt
+      ? `Last changed ${new Date(raw.updatedAt).toLocaleString()}${raw.updatedBy ? ' by ' + raw.updatedBy : ''}.`
+      : 'Using the starting values — nothing has been saved yet.';
+  } catch (e) {
+    secCurrent = { ...SESSION_POLICY_DEFAULTS }; secFill(secCurrent);
+    document.getElementById('secMeta').textContent = '';
+    showEl('secErr'); document.getElementById('secErr').textContent = 'Could not load the current settings: ' + (e.code || e.message);
+  }
+}
+function closeSecurity() { hideEl('securityModal'); }
+function resetSecurityDefaults() { secFill({ ...SESSION_POLICY_DEFAULTS }); }
+async function saveSecurity() {
+  if (currentProfile?.role !== 'superuser') return;
+  const { ok, policy } = validateSessionPolicy(secRead());
+  if (!ok) { previewSecurity(); return; }
+  const btn = document.getElementById('secSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving…'; hideEl('secErr'); hideEl('secOk');
+  try {
+    await setDoc(doc(db, ...SESSION_POLICY_DOC), {
+      ...policy, updatedAt: new Date().toISOString(), updatedBy: currentUser?.email || ''
+    });
+    const changes = diffFields(secCurrent || {}, policy, Object.keys(SESSION_POLICY_DEFAULTS));
+    if (Object.keys(changes).length) logActivity('security', 'session_policy_updated', { target: 'sessionPolicy', details: changes });
+    secCurrent = policy;
+    document.getElementById('secMeta').textContent = `Last changed just now by ${currentUser?.email || 'you'}.`;
+    showEl('secOk'); document.getElementById('secOk').textContent = Object.keys(changes).length
+      ? 'Saved. Everyone who is signed in now follows the new rules.' : 'Saved — nothing was different.';
+  } catch (e) {
+    showEl('secErr'); document.getElementById('secErr').textContent = 'Could not save: ' + (e.code || e.message) +
+      (e.code === 'permission-denied' ? ' — only superusers can change this.' : '');
+  }
+  btn.textContent = 'Save'; previewSecurity();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // ACTIVITY LOG (superusers) — plessen-auth auditLog, newest first
 // ════════════════════════════════════════════════════════════════════════════
 const AL_PAGE = 200;
 const AL_COLORS = { signin:'#1d4ed8', account:'#0369a1', access:'#0f766e', users:'#7e22ce',
-                    systems:'#b45309', locations:'#be185d', config:'#dc2626', migration:'#15803d' };
+                    systems:'#b45309', locations:'#be185d', config:'#dc2626', security:'#9333ea', migration:'#15803d' };
 let alEntries = [], alLiveUnsub = null, alLastDoc = null, alExhausted = false, alOpen = new Set();
 
 function alBaseQuery() {
