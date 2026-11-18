@@ -197,7 +197,8 @@ import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
 // Version helpers shared with every system (single source of truth)
 import { readConfigVersion, selectKeyForFile, LEGACY_VERSION,
          loadLocations, isLocationAware, serviceEmail, LOCATION_SECONDARY_ROLE,
-         logActivity, logFailedSignIn, setActivityActor, setActivityContext } from '/crypto.js';
+         logActivity, logFailedSignIn, setActivityActor, setActivityContext,
+         startSessionGuard, markSessionStart, takeSignOutNotice } from '/crypto.js';
 
 // ── Portal bootstrap (same as crypto.js) ─────────────────────────────────────
 const PORTAL_MIN = {
@@ -265,7 +266,11 @@ window.markDirty=markDirty;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
-  if (!user) { showEl("loginSection"); hideEl("mainSection"); return; }
+  if (!user) {
+    showEl("loginSection"); hideEl("mainSection");
+    const notice = takeSignOutNotice(); if (notice) showLoginErr(notice);
+    return;
+  }
   // Verify superuser
   const snap = await getDoc(doc(db, "users", user.uid));
   if (!snap.exists() || snap.data().role !== "superuser") {
@@ -277,7 +282,8 @@ onAuthStateChanged(auth, async (user) => {
   }
   currentUser = user;
   setActivityActor(snap.data());
-  if (signingIn) { signingIn = false; act('signin','success',{ target: user.email }); }
+  if (signingIn) { signingIn = false; markSessionStart(user.uid); act('signin','success',{ target: user.email }); }
+  startSessionGuard({ auth, db, profile: snap.data(), system: 'config-tool', signOut: doSignOut, redirectTo: '/config-tool' });
   hideEl("loginSection"); showEl("mainSection");
   document.getElementById("welcomeMsg").textContent = "Welcome, " + (snap.data().displayName || user.email);
   locations = await loadLocations();

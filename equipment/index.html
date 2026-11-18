@@ -61,7 +61,17 @@
     .nav-btn.on{background:#13132a;color:#e2e8f0;box-shadow:var(--shadow)}
     .nav-btn .badge{min-width:17px;height:17px;padding:0 4px;border-radius:9px;
       font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+    .topbar-left{display:flex;align-items:center;gap:12px}
     .topbar-right{display:flex;gap:8px;align-items:center}
+    @media (max-width:760px){
+      .topbar{padding:8px 12px;gap:8px;height:auto;flex-wrap:wrap}
+      .topbar-left{order:1}
+      .topbar-right{order:2;gap:6px}
+      .topbar-center{order:3;flex-basis:100%;justify-content:center}
+      .topbar-center .nav-btn{flex:1;justify-content:center}
+      .brand .brand-word{display:none}
+      #addEqBtn .add-word{display:none}
+    }
     /* ── Buttons ── */
     .btn{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;
       border-radius:8px;border:none;cursor:pointer;font-family:'Syne',sans-serif;
@@ -272,12 +282,15 @@
 <!-- ══ APP ════════════════════════════════════════════════════════════ -->
 <div id="appScreen" class="hidden">
   <header class="topbar">
-    <a href="/" class="brand" style="text-decoration:none">
-      <div class="brand-mark">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-      </div>
-      Plessen <span>Equipment</span>
-    </a>
+    <div class="topbar-left">
+      <div id="gearSlot"></div>
+      <a href="/" class="brand" style="text-decoration:none">
+        <div class="brand-mark">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <span class="brand-word">Plessen <span>Equipment</span></span>
+      </a>
+    </div>
     <div class="topbar-center" id="topbarNav">
       <button class="nav-btn on" id="navDash" onclick="setView('dashboard')">Dashboard</button>
       <button class="nav-btn" id="navReports" onclick="setView('reports')">
@@ -286,41 +299,12 @@
     </div>
     <div class="topbar-right" id="topbarRight">
       <div id="locSwitch" style="display:none"></div>
-      <a href="/" class="btn btn-ghost btn-sm" style="text-decoration:none;gap:5px">
+      <div id="detailActions" class="hidden" style="display:flex;gap:6px"></div>
+      <button id="addEqBtn" class="btn btn-primary btn-sm" onclick="setView('addEquipment')" title="Add Equipment">+<span class="add-word"> Add Equipment</span></button>
+      <a href="/" class="btn btn-ghost btn-sm portal-link" style="text-decoration:none;gap:5px" title="Back to the Portal">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
         Portal
       </a>
-      <div id="detailActions" class="hidden" style="display:flex;gap:6px"></div>
-      <button id="addEqBtn" class="btn btn-primary btn-sm" onclick="setView('addEquipment')">+ Add Equipment</button>
-      <div class="gear-wrap" id="gearWrap">
-        <button class="gear-btn" id="gearBtn" onclick="toggleGear()">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
-        <div class="gear-menu hidden" id="gearMenu">
-          <div class="gear-section-lbl">Networking</div>
-          <button class="gear-item" id="pingAllBtn" onclick="pingAll()">
-            <span id="pingDot" style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>
-            Ping All Devices
-          </button>
-          <div class="gear-div"></div>
-          <div class="gear-section-lbl">Data Management</div>
-          <button class="gear-item" onclick="openExportModal()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export Data
-          </button>
-          <div class="gear-div"></div>
-          <div class="gear-section-lbl">Advanced</div>
-          <button class="gear-item" id="migrationToolBtn" onclick="openMigrationTool()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Migration Tool
-          </button>
-          <div class="gear-div"></div>
-          <button class="gear-item" onclick="doSignOut()" style="color:#fca5a5">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            Sign Out
-          </button>
-        </div>
-      </div>
     </div>
   </header>
   <div id="locBanner" class="hidden"></div>
@@ -416,7 +400,8 @@
 import { portalAuth, portalDb, loadConfig, initSystemApp, describeServiceError,
          loadLocations, resolveLocation, rememberLocation, renderLocationSwitcher,
          LEGACY_LOCATION, logActivity, setActivityActor, setActivityContext,
-         logAccessChange, logAccessBlocked }
+         logAccessChange, logAccessBlocked,
+         startSessionGuard, mountGearMenu, GEAR_ICONS }
   from '/crypto.js';
 setActivityContext({ system: 'equipment' });
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
@@ -474,6 +459,7 @@ function bootAuth() {
 async function applyProfile(profile) {
   lastProfile = profile;
   setActivityActor(profile);
+  startSessionGuard({ profile, system: 'equipment', signOut: doSignOut });
   const seq = ++applySeq;
   if (!locationsCache) locationsCache = await loadLocations();
   if (seq !== applySeq) return;
@@ -492,6 +478,10 @@ async function applyProfile(profile) {
   });
   const ok = await ensureServiceSession(r.current, level === 'editor' ? 'admin' : 'viewer');
   if (ok === 'ok') logAccessChange('equipment', currentLoc, userRole, profile.role === 'generic' ? { generic:true } : {});
+  if (ok === 'ok' && gearApi) gearApi.setIdentity({
+    name: profile.displayName || portalAuth.currentUser?.email || 'Signed in',
+    detail: `${userRole === 'admin' ? 'Admin' : 'Viewer'} · ${currentLoc}` + (profile.role === 'generic' ? ' · shared device' : '')
+  });
   if (ok === 'failed' && previous && previous !== r.current && r.allowed.some(a => a.code === previous)) {
     wantedLoc = previous;              // that location isn't set up — go back
     applyProfile(lastProfile);
@@ -1393,17 +1383,23 @@ function runExport() {
 // ════════════════════════════════════════════════════════════════════════
 // GEAR + FILTERS + MISC
 // ════════════════════════════════════════════════════════════════════════
-function toggleGear() {
-  const m=document.getElementById('gearMenu');
-  const b=document.getElementById('gearBtn');
-  if(m.classList.contains('hidden')){showEl('gearMenu');b.classList.add('open');}
-  else{hideEl('gearMenu');b.classList.remove('open');}
-  gearOpen=!m.classList.contains('hidden');
-}
-document.addEventListener('click',e=>{
-  if(!document.getElementById('gearWrap')?.contains(e.target)){hideEl('gearMenu');document.getElementById('gearBtn')?.classList.remove('open');}
+// Gear menu (top-left) — shared PMS layout. Sign Out is always last.
+const gearApi = mountGearMenu(document.getElementById('gearSlot'), {
+  theme: 'dark',
+  identity: { name: 'Equipment', detail: 'Checking access…' },
+  sections: [
+    { label: 'Networking', items: [
+      { id: 'pingAllBtn', label: 'Ping All Devices', onClick: () => pingAll(),
+        icon: '<span id="pingDot" style="width:8px;height:8px;margin:0 3px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>' } ] },
+    { label: 'Data Management', items: [
+      { label: 'Export Data', icon: GEAR_ICONS.download, onClick: () => openExportModal() } ] },
+    { label: 'Advanced', items: [
+      { id: 'migrationToolBtn', label: 'Migration Tool', icon: GEAR_ICONS.download, hidden: true, onClick: () => openMigrationTool() } ] }
+  ],
+  onSignOut: () => doSignOut()
 });
-function closeGear(){hideEl('gearMenu');document.getElementById('gearBtn')?.classList.remove('open');}
+function toggleGear() { /* kept for old inline handlers; the menu toggles itself */ }
+function closeGear() { gearApi && gearApi.close(); }
 function setFilter(type,val){if(type==='status')filterStatus=val;else filterType=val;render();}
 function setSearch(val){searchQ=val;render();}
 function setReportsTab(tab){reportsTab=tab;render();}
