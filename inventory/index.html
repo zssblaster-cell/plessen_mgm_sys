@@ -26,8 +26,18 @@ import { portalAuth, portalDb, loadConfig, describeServiceError,
          loadLocations, resolveLocation, rememberLocation, renderLocationSwitcher,
          LEGACY_LOCATION, logActivity, setActivityActor, setActivityContext,
          logAccessChange, logAccessBlocked,
-         startSessionGuard, mountGearMenu, GEAR_ICONS } from '/crypto.js';
+         startSessionGuard, mountGearMenu, GEAR_ICONS, watchInventoryPolicy } from '/crypto.js';
 setActivityContext({ system: 'inventory' });
+
+// Staff undo setting (portal → Security → Inventory), kept live.
+var _invPolicyUnsub=null;
+function startInventoryPolicy(){
+  if(_invPolicyUnsub) return;
+  _invPolicyUnsub=watchInventoryPolicy(function(p){
+    window._invUndoPolicy=p;
+    try{ if(typeof window.renderHistPanel==='function' && document.getElementById('histBody')) window.renderHistPanel(); }catch(e){}
+  });
+}
 
 // Gear menu (top-left) — shared PMS layout. "Settings" keeps the id the main
 // script already shows/hides by role (admin only). Sign Out is always last.
@@ -88,6 +98,7 @@ async function getLocations(){ if(!locationsCache) locationsCache=await loadLoca
 function applyProfile(profile){
   lastProfile=profile;
   setActivityActor(profile);
+  startInventoryPolicy();
   startSessionGuard({ profile:profile, system:'inventory',
     signOut:function(){ if(window.doLogout) window.doLogout(); },
     beforeSignOut:function(){ return window._flushPendingSave ? window._flushPendingSave() : null; } });
@@ -362,14 +373,18 @@ window.fbSave=function(){
     if(!seen.has(key)){ remember('items',key); synced.items.delete(key); ops.push(['del',site.collection('items').doc(key)]); }
   });
   // History: new entries are added; existing ones are only rewritten by an
-  // admin; entries trimmed from the on-screen list are never deleted here.
+  // admin — or by staff marking a removal as undone (those fields only);
+  // entries trimmed from the on-screen list are never deleted here.
   [['transactions',window.transactions],['changelog',window.changeLog]].forEach(function(pair){
     var name=pair[0];
     pair[1].forEach(function(e){
       if(e.id===undefined||e.id===null||e.id==='') e.id=Date.now()+Math.random();
       if(!e.ts) e.ts=new Date().toISOString();
-      var key=entryKey(e), data=plain(e), j=canon(data), prev=synced[name].get(key);
-      if(prev===undefined || (prev!==j && isAdmin)){
+      var key=entryKey(e), prev=synced[name].get(key);
+      // The undo window counts from when the removal reaches the database.
+      if(name==='transactions' && prev===undefined) e.tsMs=Date.now();
+      var data=plain(e), j=canon(data);
+      if(prev===undefined || (prev!==j && (isAdmin || (name==='transactions' && onlyReversalChanged(prev,data))))){
         remember(name,key); synced[name].set(key,j); ops.push(['set',site.collection(name).doc(key),data]);
       }
     });
@@ -402,6 +417,14 @@ window.fbSave=function(){
   });
   return _saveChain;
 };
+var REVERSAL_FIELDS=['reversed','reversedBy','reversedAt','reversedByTx'];
+function onlyReversalChanged(prevJson, data){
+  try{
+    var a=JSON.parse(prevJson), b=plain(data);
+    REVERSAL_FIELDS.forEach(function(k){ delete a[k]; delete b[k]; });
+    return canon(a)===canon(b) && data.reversed===true;
+  }catch(e){ return false; }
+}
 function commitInChunks(ops){
   var chunks=[]; for(var i=0;i<ops.length;i+=400) chunks.push(ops.slice(i,i+400));
   return chunks.reduce(function(p,chunk){
@@ -1022,6 +1045,9 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
 .sc{cursor:pointer;transition:box-shadow .2s}.sc:hover{box-shadow:0 2px 12px rgba(13,45,94,.12)}
 .sc-sub{font-size:11px;color:var(--text3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sc-link{font-size:10px;color:var(--blue);margin-top:3px;font-weight:500}
+/* Clickable item names in Analytics */
+.a-link{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.a-link:hover{color:#1a5fb4}
 /* ANALYTICS FILTER BAR */
 .af-bar{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:9px 13px;margin-bottom:12px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 .af-label{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em}
@@ -1734,6 +1760,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
       <select id="ov-cat" onchange="renderOverview()"><option value="">All Categories</option><option>Medications</option><option>Supplies</option><option>Equipment</option><option>Instruments</option></select>
       <select id="ov-status" onchange="renderOverview()"><option value="">All Status</option><option value="OK">In Stock</option><option value="REORDER">Reorder</option></select>
       <select id="ov-vendor" onchange="renderOverview()"><option value="">All Vendors</option></select>
+      <button class="btn btn-s btn-sm" style="margin-left:auto" onclick="exportAnalytics('overview')" title="Download the Item Prices &amp; Value table as Excel">⬇ Excel</button>
     </div>
     <div id="ovContent"></div>
   </div>
@@ -1749,6 +1776,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
         <span class="pt" onclick="switchRS('par',this)">Below PAR</span>
       </div>
       <select id="rs-cat" onchange="renderRestock()" style="margin-left:auto"><option value="">All Categories</option><option>Medications</option><option>Supplies</option><option>Equipment</option><option>Instruments</option></select>
+      <button class="btn btn-s btn-sm" onclick="exportAnalytics('restock')" title="Download this list as Excel">⬇ Excel</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:13px" id="rsStats"></div>
     <div class="restock-grid" id="rsContent"></div>
@@ -1766,6 +1794,7 @@ tr.eu td{background:#fff1f1}tr.ee td{background:#fee2e2}tr.es td{background:#fff
         <span class="pt" onclick="switchEX(9999,this)">All</span>
       </div>
       <select id="ex-cat" onchange="renderExpiring()" style="margin-left:auto"><option value="">All Categories</option><option>Medications</option><option>Supplies</option></select>
+      <button class="btn btn-s btn-sm" onclick="exportAnalytics('expiring')" title="Download this list as Excel">⬇ Excel</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:13px" id="exStats"></div>
     <div id="exBanner"></div>
@@ -2413,6 +2442,7 @@ let currentPage=1, perPage=50, sortCol='item', sortDir=1;
 let editId=null, deleteId=null, editLotItemId=null, editLotIdx=null;
 let selectedIds=new Set();
 let trendDays=7, rsFilter='all', exDays=30;
+let _rsShown=[],_exShown=[],_ovRows=[];   // last lists shown in Analytics (used by Excel export)
 let aCharts={}, camStream=null, camOn=false, scanTO=null;
 // Transaction modal state
 let txMode='add', txSelectedItem=null, txSearchTerm='', txPathBSku='';
@@ -2750,7 +2780,7 @@ function renderTable(){
     if(lotVendors.length)nm+=`<br><small style="color:var(--text3);font-weight:400">📦 ${lotVendors.join(', ')}</small>`;
     const _fefo=r.lotDetails&&r.lotDetails.length?getFefo(r.lotDetails):null;
     let qtyCell=`<div style="min-width:70px"><strong style="font-size:14px">${tq}</strong>${_fefo?`<br><span class="fefo-badge">USE: ${_fefo.lot||'?'}</span>`:''}</div>`;
-    const ldLen=r.lotDetails?r.lotDetails.length:0;const toggleBtn=`<button class="lot-toggle" id="lt-${r.id}" onclick="toggleLots(${r.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px"><polyline points="9 18 15 12 9 6"/></svg>${ldLen>0?ldLen+' lot'+(ldLen!==1?'s':''):'Lots'}</button>`;
+    const ldLen=r.lotDetails?r.lotDetails.length:0;const toggleBtn=`<button class="lot-toggle" id="lt-${r.id}" onclick="event.stopPropagation();toggleLots(${r.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px"><polyline points="9 18 15 12 9 6"/></svg>${ldLen>0?ldLen+' lot'+(ldLen!==1?'s':''):'Lots'}</button>`;
     const tr=document.createElement('tr');
     tr.className=`${reorder?'rr':''}${expCls}${sel?' sel':''}`;tr.id=`row-${r.id}`;
     tr.innerHTML=`<td><input type="checkbox" class="cb" ${sel?'checked':''} onchange="toggleSel(${r.id},this.checked)"></td>
@@ -3538,7 +3568,7 @@ function txSaveRemove(){
   const type=(reasonCode==='expired'||reasonCode==='contaminated'||reasonCode==='damaged'||reasonCode==='recalled')?'waste':'use';
   const tx={id:Date.now()+Math.random(),mode:'remove',type,reasonCode,reasonLabel,
     item:r.item,qty,unit,lot:lot||'',by,
-    date:new Date().toISOString().slice(0,10),notes:noteParts.join(' | '),ts:new Date().toISOString()};
+    date:new Date().toISOString().slice(0,10),notes:noteParts.join(' | '),ts:new Date().toISOString(),tsMs:Date.now()};
   transactions.unshift(tx);
   saveAll();closeTxModal();applyFilters();
   showToast('Removed '+qty+' × '+r.item+' — '+reasonLabel,'warning');
@@ -3549,7 +3579,7 @@ function getMedSub(name){const n=name.toLowerCase();if(n.includes('lidocaine')||
 function renderOverview(){
   Object.values(aCharts).forEach(c=>{try{c.destroy();}catch(e){}});aCharts={};
   const cat=document.getElementById('ov-cat').value,st=document.getElementById('ov-status').value,vv=(document.getElementById('ov-vendor')||{}).value||'';
-  const all=inventory.filter(r=>r.item&&r.item.trim()&&(!cat||r.category===cat)&&(!st||r.reorder===st)&&(!vv||r.vendor===vv));
+  const all=inventory.filter(r=>r.item&&r.item.trim()&&!r.inactive&&(!cat||r.category===cat)&&(!st||r.reorder===st)&&(!vv||r.vendor===vv));
   const catC={},catV={};
   all.forEach(r=>{if(r.category)catC[r.category]=(catC[r.category]||0)+1;});
   all.forEach(r=>{const v=r.lotDetails&&r.lotDetails.length?r.lotDetails.reduce((s,l)=>(parseFloat(l.qty)||0)*(parseFloat(l.price||r.price)||0)+s,0):(parseFloat(r.quantity)||0)*(parseFloat(r.price)||0);if(r.category&&v>0)catV[r.category]=(catV[r.category]||0)+v;});
@@ -3558,6 +3588,7 @@ function renderOverview(){
   meds.forEach(r=>{const s=getMedSub(r.item||'');if(!medSub[s])medSub[s]={ok:0,re:0};if(r.reorder==='REORDER')medSub[s].re++;else medSub[s].ok++;});
   const clrs=['#1a5fb4','#0891b2','#059669','#b45309','#9333ea','#e11d48'];
   const cats=Object.keys(catC),vc=Object.keys(catV),sk=Object.keys(medSub);
+  _ovRows=all.filter(r=>r.price>0).map(r=>({...r,tv:calcTotal(r)*(r.price||0)})).sort((a,b)=>b.tv-a.tv);
   document.getElementById('ovContent').innerHTML=`
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px">
   <div class="ac"><div class="act">Items by Category</div><div class="acs">Total: ${all.length}</div><div class="ach"><canvas id="chCat"></canvas></div></div>
@@ -3565,7 +3596,7 @@ function renderOverview(){
   <div class="ac"><div class="act">Medication Stock by Type</div><div class="acs">In-stock vs reorder</div><div class="ach"><canvas id="chMed"></canvas></div></div>
   <div class="ac" style="grid-column:1/-1"><div class="act">Item Prices &amp; Value</div><div class="acs">Items with prices — sorted by total value</div>
   <div style="max-height:230px;overflow-y:auto"><table class="at"><thead><tr><th>Item</th><th>Category</th><th>Unit Price</th><th>Qty</th><th>Total Value</th></tr></thead><tbody>
-  ${all.filter(r=>r.price>0).map(r=>({...r,tv:calcTotal(r)*(r.price||0)})).sort((a,b)=>b.tv-a.tv).map(r=>`<tr><td>${r.item}</td><td><span class="badge cat-${r.category||'Other'}">${r.category||'—'}</span></td><td>$${Number(r.price).toFixed(2)}</td><td>${calcTotal(r)}</td><td><strong>$${r.tv.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></td></tr>`).join('')||'<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--text3)">Add prices to see values</td></tr>'}
+  ${all.filter(r=>r.price>0).map(r=>({...r,tv:calcTotal(r)*(r.price||0)})).sort((a,b)=>b.tv-a.tv).map(r=>`<tr><td><span class="a-link" onclick="openItemModal(${r.id})" title="Edit item">${r.item}</span></td><td><span class="badge cat-${r.category||'Other'}">${r.category||'—'}</span></td><td>$${Number(r.price).toFixed(2)}</td><td>${calcTotal(r)}</td><td><strong>$${r.tv.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></td></tr>`).join('')||'<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--text3)">Add prices to see values</td></tr>'}
   </tbody></table></div></div></div>`;
   if(cats.length)aCharts.cat=new Chart(document.getElementById('chCat'),{type:'doughnut',data:{labels:cats,datasets:[{data:cats.map(c=>catC[c]),backgroundColor:clrs,borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11},padding:7}}}}});
   if(vc.length)aCharts.val=new Chart(document.getElementById('chVal'),{type:'bar',data:{labels:vc,datasets:[{data:vc.map(c=>catV[c]),backgroundColor:clrs,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v2=>'$'+v2.toLocaleString(),font:{size:10}}},x:{ticks:{font:{size:10}}}}}});
@@ -3574,7 +3605,7 @@ function renderOverview(){
 
 function renderRestock(){
   const cat=document.getElementById('rs-cat').value;
-  const items=inventory.filter(r=>r.item&&r.item.trim()&&(!cat||r.category===cat));
+  const items=inventory.filter(r=>r.item&&r.item.trim()&&!r.inactive&&(!cat||r.category===cat));
   const out=items.filter(r=>calcTotal(r)===0);
   const low=items.filter(r=>calcTotal(r)>0&&calcTotal(r)<=2);
   const par=items.filter(r=>r.par&&calcTotal(r)>0&&calcTotal(r)<=parseFloat(r.par));
@@ -3584,27 +3615,83 @@ function renderRestock(){
     <div class="sc sw"><div class="sl">Low (≤2)</div><div class="sv cw">${low.length}</div></div>
     <div class="sc st"><div class="sl">Below PAR</div><div class="sv ct">${par.length}</div></div>
     <div class="sc"><div class="sl">Flagged</div><div class="sv">${manual.length}</div></div>`;
-  let shown=rsFilter==='out'?out:rsFilter==='low'?low:rsFilter==='par'?par:[...out,...low,...par,...manual];
+  // "All" lists each item once (an item can be both low and below PAR)
+  let shown=rsFilter==='out'?out:rsFilter==='low'?low:rsFilter==='par'?par:[...new Map([...out,...low,...par,...manual].map(r=>[r.id,r])).values()];
+  _rsShown=shown;
   const el=document.getElementById('rsContent');
   if(!shown.length){el.innerHTML='<div class="empty" style="grid-column:1/-1">No items need restocking.</div>';return;}
   el.innerHTML=shown.map(r=>{
     const tq=calcTotal(r);const cls=tq===0?'out':tq<=2?'low':'par';
     const status=tq===0?'OUT OF STOCK':tq<=2?`Low — ${tq} remaining`:r.par?`Below PAR level (${r.par})`:'Manually flagged';
     return`<div class="restock-card ${cls}">
-      <div style="flex:1"><div class="rc-name">${r.item}</div>
+      <div style="flex:1"><div class="rc-name a-link" onclick="openItemModal(${r.id})" title="Edit item">${r.item}</div>
       <div class="rc-meta">${r.category||'—'} · ${r.vendor||'—'}</div>
       <div class="rc-meta" style="margin-top:2px;font-weight:600;color:${cls==='out'?'var(--danger)':cls==='low'?'var(--warn)':'var(--teal)'}">${status}</div></div>
       <div style="text-align:right;flex-shrink:0"><div class="rc-qty ${cls}">${tq}</div>
-      <button class="btn btn-p btn-xs" style="margin-top:5px" onclick="openTxModal()"\'")}';showPage('inventory')">+ Add Stock</button></div>
+      <button class="btn btn-p btn-xs" style="margin-top:5px" onclick="addStockFor(${r.id})">+ Add Stock</button></div>
     </div>`;}).join('');
 }
+// "+ Add Stock" on a restock card: New Transaction with that item already picked
+function addStockFor(id){
+  const r=inventory.find(x=>x.id===id);if(!r)return;
+  showPage('inventory');
+  openTxModal((getSkus(r)||[])[0]||r.item);
+}
+// ═══ EXCEL EXPORT — Analytics lists (what is on screen, with its filters) ═══
+const XLSX_SRC='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+function loadXlsx(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(loadXlsx._p) return loadXlsx._p;
+  loadXlsx._p=new Promise((res,rej)=>{
+    const sc=document.createElement('script');sc.src=XLSX_SRC;
+    sc.onload=()=>window.XLSX?res(window.XLSX):rej(new Error('The Excel library did not load'));
+    sc.onerror=()=>{loadXlsx._p=null;rej(new Error('Could not load the Excel library — check the connection and try again'));};
+    document.head.appendChild(sc);
+  });
+  return loadXlsx._p;
+}
+function restockStatus(r){const tq=calcTotal(r);return tq===0?'Out of stock':tq<=2?'Low':(r.par&&tq<=parseFloat(r.par))?'Below PAR':'Flagged';}
+function numOrBlank(v){const n=parseFloat(v);return isNaN(n)?'':n;}
+function analyticsExportData(kind){
+  if(kind==='restock'){
+    renderRestock();
+    const tab={out:'Out of Stock',low:'Low Stock',par:'Below PAR'}[rsFilter]||'Needs Restock';
+    return {title:tab,money:[7],header:['Item','SKU','Category','Vendor','On Hand','PAR','Status','Unit Price'],
+      rows:_rsShown.map(r=>[r.item,(getSkus(r)||[]).join(', '),r.category||'',r.vendor||'',calcTotal(r),numOrBlank(r.par),restockStatus(r),numOrBlank(r.price)])};
+  }
+  if(kind==='expiring'){
+    renderExpiring();
+    return {title:exDays>=9999?'Expiring (all)':'Expiring within '+exDays+' days',money:[],
+      header:['Status','Item','Category','Lot','Expiry','Days Left','Qty'],
+      rows:_exShown.map(e=>{const d=daysLeft(e.expiry);return[d<0?'Expired':d<=14?'Urgent':d<=60?'Soon':'OK',e.item,e.category||'',e.lot,e.expiry,d,numOrBlank(e.qty)];})};
+  }
+  renderOverview();
+  return {title:'Item Prices and Value',money:[2,4],header:['Item','Category','Unit Price','Qty','Total Value'],
+    rows:_ovRows.map(r=>[r.item,r.category||'',Number(r.price)||0,calcTotal(r),Math.round(r.tv*100)/100])};
+}
+async function exportAnalytics(kind){
+  const d=analyticsExportData(kind);
+  if(!d.rows.length){showToast('Nothing to export in this list','warning');return;}
+  let X;try{X=await loadXlsx();}catch(e){showToast(e.message,'error');return;}
+  const ws=X.utils.aoa_to_sheet([d.header,...d.rows]);
+  ws['!cols']=d.header.map((h,i)=>({wch:Math.min(50,Math.max(h.length,...d.rows.map(r=>String(r[i]??'').length))+2)}));
+  ws['!autofilter']={ref:X.utils.encode_range({s:{c:0,r:0},e:{c:d.header.length-1,r:d.rows.length}})};
+  d.money.forEach(c=>{for(let r=1;r<=d.rows.length;r++){const cell=ws[X.utils.encode_cell({c,r})];if(cell&&typeof cell.v==='number')cell.z='$#,##0.00';}});
+  const wb=X.utils.book_new();
+  X.utils.book_append_sheet(wb,ws,d.title.replace(/[\\/?*\[\]:]/g,'').slice(0,31));
+  const fname=['Inventory',window._invLoc||'',d.title.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,''),new Date().toLocaleDateString('en-CA')].filter(Boolean).join('-')+'.xlsx';
+  X.writeFile(wb,fname);
+  showToast('Exported '+d.rows.length+' row'+(d.rows.length!==1?'s':''),'success');
+}
+window.exportAnalytics=exportAnalytics;
+
 function switchRS(f,el){rsFilter=f;document.querySelectorAll('#sub-restock .pt').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderRestock();}
 
 function renderExpiring(){
   const days=exDays,cat=document.getElementById('ex-cat').value;
   const entries=[];
   inventory.forEach(r=>{
-    if(!r.item||!r.item.trim())return;
+    if(!r.item||!r.item.trim()||r.inactive)return;
     if(cat&&r.category!==cat)return;
     if(r.lotDetails&&r.lotDetails.length)r.lotDetails.forEach((l,i)=>{if(l.expiry)entries.push({item:r.item,category:r.category,lot:l.lot||'—',expiry:l.expiry,qty:l.qty,id:r.id,lotIdx:i});});
     else if(r.expiry)entries.push({item:r.item,category:r.category,lot:r.lot||'—',expiry:r.expiry,qty:calcTotal(r),id:r.id,lotIdx:null});
@@ -3613,6 +3700,7 @@ function renderExpiring(){
   const expired=entries.filter(e=>daysLeft(e.expiry)<0);
   const expiring=entries.filter(e=>{const d=daysLeft(e.expiry);return d>=0&&d<=days;});
   const shown=[...expired,...expiring];
+  _exShown=shown;
   document.getElementById('exStats').innerHTML=`
     <div class="sc sd"><div class="sl">Expired</div><div class="sv cd">${expired.length}</div></div>
     <div class="sc sd"><div class="sl">≤14 days</div><div class="sv cd">${entries.filter(e=>{const d=daysLeft(e.expiry);return d>=0&&d<=14;}).length}</div></div>
@@ -3627,9 +3715,9 @@ function renderExpiring(){
     const bdg=d<0?'<span class="eexp">EXPIRED '+Math.abs(d)+'d ago</span>':d<=14?'<span class="eurg">'+d+'d</span>':d<=60?'<span class="esoon">'+d+'d</span>':'<span class="eok">'+d+'d</span>';
     const editFn=e.lotIdx!==null?'openLotModal('+e.id+','+e.lotIdx+')':'openItemModal('+e.id+')';
     const rowCls=d<0?'ee':d<=14?'eu':d<=60?'es':'';
-    return '<tr class="'+rowCls+'"><td>'+bdg+'</td><td><strong>'+e.item+'</strong></td><td><span class="badge cat-'+(e.category||'Other')+'">'+(e.category||'—')+'</span></td><td style="font-family:monospace;font-size:11px">'+e.lot+'</td><td style="font-weight:600">'+e.expiry+'</td><td>'+bdg+'</td><td>'+e.qty+'</td><td><button class="ib e" onclick="'+editFn+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></td></tr>';
+    return '<tr class="'+rowCls+'"><td>'+bdg+'</td><td><strong class="a-link" onclick="openItemModal('+e.id+')" title="Edit item">'+e.item+'</strong></td><td><span class="badge cat-'+(e.category||'Other')+'">'+(e.category||'—')+'</span></td><td style="font-family:monospace;font-size:11px">'+e.lot+'</td><td style="font-weight:600">'+e.expiry+'</td><td>'+bdg+'</td><td>'+e.qty+'</td><td><button class="ib e" onclick="'+editFn+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></td></tr>';
   }).join('');
-  const noExp=inventory.filter(r=>r.category==='Medications'&&r.item&&r.item.trim()&&!r.expiry&&!(r.lotDetails&&r.lotDetails.length));
+  const noExp=inventory.filter(r=>r.category==='Medications'&&r.item&&r.item.trim()&&!r.inactive&&!r.expiry&&!(r.lotDetails&&r.lotDetails.length));
   document.getElementById('noExpList').innerHTML=noExp.length===0
     ?'<p style="font-size:12px;color:var(--okm)">✓ All medications have expiry tracking.</p>'
     :'<div style="display:flex;flex-wrap:wrap;gap:6px">'+noExp.map(r=>'<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:3px 8px;font-size:12px;display:flex;align-items:center;gap:5px">'+r.item+'<button class="ib e" style="width:18px;height:18px" onclick="openItemModal('+r.id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></div>').join('')+'</div>';
@@ -4053,7 +4141,7 @@ function completeTechRemoval(data){
   const tx={id:Date.now()+Math.random(),mode:'remove',type:'use',reasonCode:'used_patient',
     reasonLabel:'Used for patient',item:r.item,qty,unit:data.unit||'units',
     lot:data.lot||'',by:getCurrentUserName(),
-    date:new Date().toISOString().slice(0,10),notes:'',ts:new Date().toISOString()};
+    date:new Date().toISOString().slice(0,10),notes:'',ts:new Date().toISOString(),tsMs:Date.now()};
   transactions.unshift(tx);
   saveAll();closeTxModal();applyFilters();
   showToast(qty+' × '+r.item+' removed — Used for patient','warning');
@@ -4399,15 +4487,23 @@ let _pendingImageForSave=null;
 
 
 // ═══ UNDO TRANSACTION ═══
-const UNDO_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
-
+// Staff only. Whether staff may undo, and for how long, is set by superusers in
+// the portal (gear → Security → Inventory); the module script keeps
+// window._invUndoPolicy live. Admins have no Undo — they correct quantities in
+// the item's edit menu. The database rules enforce the same thing (24 h ceiling).
+function undoPolicy() {
+  return window._invUndoPolicy || { techUndoEnabled: true, techUndoMinutes: 30 };
+}
 function canUndoTx(tx) {
   if (!tx || tx.mode !== 'remove') return false;
   if (tx.reversed) return false;
-  if (Date.now() - new Date(tx.ts).getTime() > UNDO_WINDOW_MS) return false;
-  // Both admin and tech can undo any removal within the 30-min window.
-  // (Only one shared tech login exists, so "own transaction" check is not needed.)
-  return true;
+  if (currentRole !== 'tech') return false;
+  const p = undoPolicy();
+  if (!p.techUndoEnabled) return false;
+  // Removals saved before this update have no tsMs — the rules can't time them.
+  const t = Number(tx.tsMs) || 0;
+  if (!t) return false;
+  return Date.now() - t <= p.techUndoMinutes * 60000;
 }
 
 function undoTransaction(txId) {
@@ -4456,23 +4552,30 @@ function completeUndoTransaction(data) {
   const r = inventory.find(x => x.item === tx.item);
   if (!r) { showToast('Item not found in inventory', 'error'); return; }
 
+  // The undo record is created first so the item, the original removal and
+  // the record can all point at each other — the database rules check that
+  // they match (same item, same amount, inside the window, only once).
+  const reversalId = Date.now() + Math.random();
+  const undoQty = parseFloat(tx.qty) || 1;
+  r.undoRef = String(reversalId);
+
   // Return qty to the correct lot
   if (tx.lot && r.lotDetails && r.lotDetails.length) {
     const li = r.lotDetails.findIndex(l => l.lot === tx.lot);
     if (li > -1) {
       const old = r.lotDetails[li].qty;
-      r.lotDetails[li].qty = (parseFloat(old) || 0) + (parseFloat(tx.qty) || 1);
+      r.lotDetails[li].qty = (parseFloat(old) || 0) + undoQty;
       syncTotal(r);
       logChange('qty', r.item,
         'Lot ' + tx.lot + ': ' + old + '→' + r.lotDetails[li].qty +
         ' [UNDO — returned to stock by ' + getCurrentUserName() + ']');
     } else {
       // Lot no longer exists — add back to total directly
-      r.quantity = (parseFloat(r.quantity) || 0) + (parseFloat(tx.qty) || 1);
+      r.quantity = (parseFloat(r.quantity) || 0) + undoQty;
       syncTotal(r);
     }
   } else {
-    r.quantity = (parseFloat(r.quantity) || 0) + (parseFloat(tx.qty) || 1);
+    r.quantity = (parseFloat(r.quantity) || 0) + undoQty;
     syncTotal(r);
     logChange('qty', r.item,
       'Qty returned: +' + tx.qty + ' [UNDO by ' + getCurrentUserName() + ']');
@@ -4484,17 +4587,20 @@ function completeUndoTransaction(data) {
     (window.transactions||transactions)[txIdx].reversed = true;
     (window.transactions||transactions)[txIdx].reversedBy = getCurrentUserName();
     (window.transactions||transactions)[txIdx].reversedAt = new Date().toISOString();
+    (window.transactions||transactions)[txIdx].reversedByTx = String(reversalId);
   }
 
   // Add a reversal transaction record
   const reversalTx = {
-    id:          Date.now() + Math.random(),
+    id:          reversalId,
     mode:        'add',
     type:        'undo',
     reasonCode:  'undo',
     reasonLabel: 'Returned to stock (not used)',
     item:        tx.item,
-    qty:         tx.qty || 1,
+    itemId:      String(r.id),
+    reverses:    String(tx.id),
+    qty:         undoQty,
     unit:        tx.unit || 'units',
     lot:         tx.lot || '',
     by:          getCurrentUserName(),

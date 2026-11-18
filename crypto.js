@@ -854,3 +854,46 @@ export function mountGearMenu(container, opts = {}) {
   setIdentity(opts.identity);
   return { setIdentity, close, el: root };
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INVENTORY POLICY — plessen-auth system/inventoryPolicy (portal → Security)
+// ══════════════════════════════════════════════════════════════════════════════
+//   techUndoEnabled   staff (viewer) may undo their removals
+//   techUndoMinutes   how long after a removal staff may undo it
+// Admins have no Undo button — they correct quantities in the edit menu.
+// The Inventory database rules allow staff undo up to INVENTORY_UNDO_CEILING_MIN
+// at most, so the largest value accepted here matches that ceiling.
+export const INVENTORY_POLICY_DOC = ['system', 'inventoryPolicy'];
+export const INVENTORY_UNDO_CEILING_MIN = 1440;   // 24 h — same number as in plessen-inventory.rules
+export const INVENTORY_POLICY_DEFAULTS = Object.freeze({ techUndoEnabled: true, techUndoMinutes: 30 });
+export const INVENTORY_POLICY_LIMITS = Object.freeze({ techUndoMinutes: { min: 1, max: INVENTORY_UNDO_CEILING_MIN, unit: 'minutes' } });
+
+export function validateInventoryPolicy(input = {}) {
+  const errors = {}, policy = {};
+  const raw = input.techUndoMinutes;
+  const n = (raw === '' || raw === null || raw === undefined) ? NaN : Number(raw);
+  const L = INVENTORY_POLICY_LIMITS.techUndoMinutes;
+  if (!Number.isInteger(n)) errors.techUndoMinutes = 'Enter a whole number';
+  else if (n < L.min || n > L.max) errors.techUndoMinutes = `Must be ${L.min}–${L.max} minutes`;
+  policy.techUndoMinutes = n;
+  policy.techUndoEnabled = typeof input.techUndoEnabled === 'boolean' ? input.techUndoEnabled : INVENTORY_POLICY_DEFAULTS.techUndoEnabled;
+  return { ok: !Object.keys(errors).length, policy, errors };
+}
+export function normalizeInventoryPolicy(raw) {
+  const out = { ...INVENTORY_POLICY_DEFAULTS };
+  if (raw && typeof raw === 'object') {
+    const n = Number(raw.techUndoMinutes), L = INVENTORY_POLICY_LIMITS.techUndoMinutes;
+    if (Number.isInteger(n) && n >= L.min && n <= L.max) out.techUndoMinutes = n;
+    if (typeof raw.techUndoEnabled === 'boolean') out.techUndoEnabled = raw.techUndoEnabled;
+  }
+  return out;
+}
+// Live copy for the Inventory page. Unreadable → defaults (never "unlimited").
+export function watchInventoryPolicy(cb, db = portalDb) {
+  cb({ ...INVENTORY_POLICY_DEFAULTS });
+  try {
+    return onSnapshot(doc(db, ...INVENTORY_POLICY_DOC),
+      snap => cb(normalizeInventoryPolicy(snap.exists() ? snap.data() : null)),
+      () => cb({ ...INVENTORY_POLICY_DEFAULTS }));
+  } catch (_) { return () => {}; }
+}
